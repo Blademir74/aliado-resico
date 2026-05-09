@@ -1,0 +1,408 @@
+<!DOCTYPE html>
+<html lang="es-MX">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Aliado RESICO — Recepcionista Contable Inteligente</title>
+  <meta name="description" content="Plataforma de recepción contable automatizada para el régimen RESICO de México. Clasificación inteligente con Gemini AI, OCR fiscal y dashboard de métricas en tiempo real." />
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; connect-src 'self' https://*.supabase.co wss://*.supabase.co https://generativelanguage.googleapis.com; img-src 'self' data: blob:; frame-ancestors 'none';" />
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <div class="app-layout">
+    <!-- ===== SIDEBAR ===== -->
+    <aside class="sidebar" id="sidebar">
+      <div class="sidebar-brand">
+        <div class="brand-icon">🧠</div>
+        <div class="brand-text">
+          <h1>Aliado RESICO</h1>
+          <span>Recepción Inteligente</span>
+        </div>
+      </div>
+
+      <nav class="sidebar-nav">
+        <div class="nav-section-label">Principal</div>
+        <button class="nav-item active" data-view="dashboard" id="nav-dashboard">
+          <span class="nav-icon">📊</span>
+          <span>Dashboard</span>
+        </button>
+        <button class="nav-item" data-view="chat" id="nav-chat">
+          <span class="nav-icon">💬</span>
+          <span>Clasificador</span>
+          <span class="nav-badge" id="chat-badge" style="display:none">0</span>
+        </button>
+        <button class="nav-item" data-view="documents" id="nav-documents">
+          <span class="nav-icon">📄</span>
+          <span>Documentos</span>
+        </button>
+
+        <div class="nav-section-label" style="margin-top:var(--sp-md)">Herramientas</div>
+        <button class="nav-item" data-view="settings" id="nav-settings">
+          <span class="nav-icon">⚙️</span>
+          <span>Configuración</span>
+        </button>
+      </nav>
+
+      <div class="sidebar-footer">
+        <div class="status-badge">
+          <span class="status-dot"></span>
+          <span>Motor IA activo</span>
+        </div>
+        <div id="mode-badge" style="margin-top:var(--sp-sm)"></div>
+      </div>
+    </aside>
+
+    <!-- ===== MAIN CONTENT ===== -->
+    <main class="main-content">
+      <header class="main-header" id="main-header">
+        <div style="display:flex;align-items:center;gap:var(--sp-md)">
+          <button class="btn-ghost btn" id="sidebar-toggle" style="display:none;padding:var(--sp-sm)">☰</button>
+          <h2 id="page-title">Dashboard</h2>
+        </div>
+        <div class="header-actions">
+          <span style="font-size:12px;color:var(--text-muted)" id="header-datetime"></span>
+          <button class="btn btn-primary btn-sm" id="btn-new-message" style="font-size:13px">
+            + Nuevo Mensaje
+          </button>
+        </div>
+      </header>
+
+      <div class="main-body" id="main-body">
+        <!-- ===== DASHBOARD VIEW ===== -->
+        <section class="view active" id="view-dashboard">
+          <!-- Income Alert -->
+          <div class="income-alert" id="income-alert">
+            <span class="alert-icon">⚠️</span>
+            <div class="alert-text">
+              <strong>Monitor de Ingresos RESICO</strong>
+              <p>Ingresos acumulados: <strong id="income-current">$0</strong> de $3,500,000 MXN</p>
+              <div class="income-progress">
+                <div class="progress-fill" id="income-progress-fill" style="width:0%"></div>
+              </div>
+            </div>
+          </div>
+
+          <!-- KPIs -->
+          <div class="kpi-grid" id="kpi-grid">
+            <div class="glass-card kpi-card accent-blue">
+              <div class="kpi-icon">📩</div>
+              <div class="kpi-value" id="kpi-total">0</div>
+              <div class="kpi-label">Mensajes procesados</div>
+              <div class="kpi-trend up" id="kpi-total-trend">↑ +12% vs semana anterior</div>
+            </div>
+            <div class="glass-card kpi-card accent-green">
+              <div class="kpi-icon">🤖</div>
+              <div class="kpi-value" id="kpi-auto-rate">0%</div>
+              <div class="kpi-label">Resolución automática</div>
+              <div class="kpi-trend up">↑ Ahorro est. 18 hrs/sem</div>
+            </div>
+            <div class="glass-card kpi-card accent-purple">
+              <div class="kpi-icon">🎯</div>
+              <div class="kpi-value" id="kpi-confidence">0%</div>
+              <div class="kpi-label">Confianza promedio</div>
+              <div class="kpi-trend up">↑ Precisión del motor IA</div>
+            </div>
+            <div class="glass-card kpi-card accent-amber">
+              <div class="kpi-icon">⏱️</div>
+              <div class="kpi-value" id="kpi-response-time">0s</div>
+              <div class="kpi-label">Tiempo de respuesta</div>
+              <div class="kpi-trend up">↑ Meta: &lt;5 min</div>
+            </div>
+          </div>
+
+          <!-- Charts -->
+          <div class="charts-grid">
+            <div class="glass-card chart-card">
+              <div class="chart-header">
+                <span class="chart-title">Distribución de Intenciones</span>
+              </div>
+              <canvas id="chart-donut"></canvas>
+            </div>
+            <div class="glass-card chart-card">
+              <div class="chart-header">
+                <span class="chart-title">Volumen por Día</span>
+              </div>
+              <canvas id="chart-bar"></canvas>
+            </div>
+          </div>
+
+          <!-- Activity Feed -->
+          <div class="glass-card feed-card">
+            <div class="feed-header">
+              <h3>Actividad Reciente</h3>
+              <button class="btn btn-ghost" style="font-size:12px" id="btn-refresh-feed">Actualizar</button>
+            </div>
+            <div class="feed-list" id="feed-list">
+              <!-- Populated by JS -->
+            </div>
+          </div>
+        </section>
+
+        <!-- ===== CHAT VIEW ===== -->
+        <section class="view" id="view-chat">
+          <div class="chat-container">
+            <div class="chat-main">
+              <div class="chat-messages" id="chat-messages">
+                <div class="chat-bubble bot">
+                  <p>¡Hola! 👋 Soy tu Aliado RESICO. Envíame cualquier mensaje y te mostraré cómo lo clasifico. Puedo identificar consultas fiscales, solicitudes de factura, gastos para deducción y más.</p>
+                  <span class="bubble-time">Ahora</span>
+                </div>
+              </div>
+              <div class="chat-input-area">
+                <input type="text" id="chat-input" placeholder="Escribe un mensaje como lo harías en WhatsApp..." autocomplete="off" />
+                <button class="btn-icon" id="btn-send">➤</button>
+              </div>
+            </div>
+
+            <!-- Side Panel -->
+            <div class="chat-panel">
+              <!-- Classification Result -->
+              <div class="glass-card classification-result" id="classification-panel">
+                <h4 style="font-size:13px;color:var(--text-muted);margin-bottom:var(--sp-md)">🧠 Resultado del Clasificador</h4>
+                <div id="classification-empty" style="text-align:center;padding:var(--sp-xl) 0;color:var(--text-muted);font-size:13px">
+                  Envía un mensaje para ver el análisis en tiempo real
+                </div>
+                <div id="classification-content" style="display:none">
+                  <div class="result-intent" id="result-intent">—</div>
+                  <div style="margin:var(--sp-sm) 0">
+                    <span style="font-size:12px;color:var(--text-muted)">Confianza</span>
+                    <div class="confidence-bar"><div class="confidence-fill" id="result-confidence-bar" style="width:0%"></div></div>
+                    <span style="font-size:12px;font-weight:600" id="result-confidence-val">0%</span>
+                  </div>
+                  <div style="margin-top:var(--sp-md)">
+                    <span style="font-size:12px;color:var(--text-muted)">Keywords detectados</span>
+                    <div class="keywords-list" id="result-keywords"></div>
+                  </div>
+                  <div style="margin-top:var(--sp-md);font-size:12px;color:var(--text-secondary)" id="result-explanation"></div>
+                  <div style="margin-top:var(--sp-sm)" id="result-source"></div>
+                  <div style="margin-top:var(--sp-sm);display:none" id="result-resico-context"></div>
+                  <div style="margin-top:var(--sp-sm);display:none" id="result-salud-alerta"></div>
+                </div>
+              </div>
+
+              <!-- Quick Examples -->
+              <div class="glass-card" style="padding:var(--sp-lg)">
+                <h4 style="font-size:13px;color:var(--text-muted);margin-bottom:var(--sp-md)">⚡ Ejemplos rápidos</h4>
+                <div class="quick-examples" id="quick-examples">
+                  <button class="quick-example-btn" data-msg="¿Cuánto es el límite de ingresos en RESICO?">📘 Consulta fiscal</button>
+                  <button class="quick-example-btn" data-msg="Necesito facturar una venta de $15,000 a nombre de Grupo Industrial SA de CV">📑 Solicitar factura</button>
+                  <button class="quick-example-btn" data-msg="Te mando el ticket de la gasolina de hoy, fueron $800 de Pemex">🧾 Registrar gasto</button>
+                  <button class="quick-example-btn" data-msg="Ya hice la transferencia de $3,500 por la mensualidad, te mando captura">💳 Reportar pago</button>
+                  <button class="quick-example-btn" data-msg="La chiva me está pidiendo mi declaración anual, ¿qué hago?">🇲🇽 Slang mexicano</button>
+                  <button class="quick-example-btn" data-msg="¿Tengo que tener activo el buzón tributario para RESICO?">🏥 Salud fiscal</button>
+                  <button class="quick-example-btn" data-msg="Buenos días, ¿a qué hora abren?">👋 Saludo general</button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- ===== DOCUMENTS VIEW ===== -->
+        <section class="view" id="view-documents">
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:var(--sp-lg)">
+            <div>
+              <div class="glass-card doc-upload-zone" id="doc-upload-zone">
+                <div class="upload-icon">📤</div>
+                <p><strong>Arrastra un documento aquí</strong></p>
+                <p class="upload-hint">Tickets, facturas PDF, comprobantes de pago (JPG, PNG, PDF)</p>
+                <p class="upload-hint" style="margin-top:var(--sp-sm);color:var(--accent)" id="ocr-engine-label"></p>
+                <input type="file" id="doc-file-input" accept=".jpg,.jpeg,.png,.pdf" style="display:none" />
+              </div>
+
+              <div class="glass-card" style="margin-top:var(--sp-lg);padding:var(--sp-lg)">
+                <h4 style="font-size:14px;margin-bottom:var(--sp-md)">🔍 Validador de RFC</h4>
+                <div style="display:flex;gap:var(--sp-sm)">
+                  <input type="text" id="rfc-input" placeholder="Ingresa un RFC..." style="flex:1;background:var(--bg-elevated);border:1px solid var(--glass-border);border-radius:var(--radius-md);padding:var(--sp-sm) var(--sp-md);color:var(--text-primary);font-size:14px;outline:none" />
+                  <button class="btn btn-primary" id="btn-validate-rfc">Validar</button>
+                </div>
+                <div id="rfc-result" style="margin-top:var(--sp-md);font-size:13px"></div>
+              </div>
+            </div>
+
+            <div>
+              <div class="glass-card" style="padding:var(--sp-lg)">
+                <h4 style="font-size:14px;margin-bottom:var(--sp-md)">📋 Resultado del OCR</h4>
+                <div id="ocr-result" style="font-size:13px;color:var(--text-secondary)">
+                  Sube un documento para ver los datos extraídos automáticamente.
+                </div>
+              </div>
+
+              <div class="glass-card" style="margin-top:var(--sp-lg);padding:var(--sp-lg)">
+                <h4 style="font-size:14px;margin-bottom:var(--sp-md)">📊 Resumen Fiscal RESICO</h4>
+                <div style="font-size:13px;color:var(--text-secondary)">
+                  <p style="margin-bottom:var(--sp-sm)"><strong style="color:var(--text-primary)">Régimen:</strong> Simplificado de Confianza</p>
+                  <p style="margin-bottom:var(--sp-sm)"><strong style="color:var(--text-primary)">ISR:</strong> Sobre ingresos brutos (1% - 2.5%) — <em>NO hay deducciones</em></p>
+                  <p style="margin-bottom:var(--sp-sm)"><strong style="color:var(--text-primary)">IVA:</strong> Requiere gestión de gastos para acreditamiento — <em>INDISPENSABLE</em></p>
+                  <p style="margin-bottom:var(--sp-sm)"><strong style="color:var(--text-primary)">Límite anual:</strong> $3,500,000 MXN</p>
+                  <p style="margin-bottom:var(--sp-sm)"><strong style="color:var(--warning)">⚠️ Buzón Tributario:</strong> Debe estar ACTIVO — multas de $3,420 a $10,260 si inactivo</p>
+                  <p><strong style="color:var(--warning)">⚠️ e.firma:</strong> Debe estar VIGENTE — sin ella no se pueden emitir facturas</p>
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- ===== SETTINGS VIEW ===== -->
+        <section class="view" id="view-settings">
+          <div style="max-width:700px">
+            <!-- API Keys Configuration -->
+            <div class="glass-card config-section" style="padding:var(--sp-lg);margin-bottom:var(--sp-lg)">
+              <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:var(--sp-lg)">
+                <h4 style="font-size:14px">🔑 APIs de Producción</h4>
+                <div id="mode-badge-settings"></div>
+              </div>
+
+              <div class="security-notice">
+                <span>🔒</span>
+                <span>Las claves se almacenan cifradas localmente. Para producción, migre a variables de entorno en n8n o Cloud Run.</span>
+              </div>
+
+              <!-- Gemini -->
+              <div class="config-row">
+                <div class="config-row-header">
+                  <div style="display:flex;align-items:center;gap:var(--sp-sm)">
+                    <span id="status-dot-gemini" class="config-status-dot inactive"></span>
+                    <span style="font-weight:600">🧠 Google Gemini 1.5 Flash</span>
+                  </div>
+                  <button class="btn btn-ghost" id="btn-test-gemini" style="font-size:11px;padding:2px 10px">Test</button>
+                </div>
+                <div style="display:flex;gap:var(--sp-sm);margin-top:var(--sp-sm)">
+                  <input type="password" id="config-gemini-key" placeholder="API Key de AI Studio..." class="config-input" />
+                  <button class="btn btn-primary" id="btn-save-gemini" style="font-size:12px;padding:var(--sp-xs) var(--sp-md)">Guardar</button>
+                </div>
+              </div>
+
+              <!-- Supabase -->
+              <div class="config-row">
+                <div class="config-row-header">
+                  <div style="display:flex;align-items:center;gap:var(--sp-sm)">
+                    <span id="status-dot-supabase" class="config-status-dot inactive"></span>
+                    <span style="font-weight:600">🗄️ Supabase</span>
+                  </div>
+                  <button class="btn btn-ghost" id="btn-test-supabase" style="font-size:11px;padding:2px 10px">Test</button>
+                </div>
+                <div style="display:flex;flex-direction:column;gap:var(--sp-sm);margin-top:var(--sp-sm)">
+                  <input type="text" id="config-supabase-url" placeholder="https://xxxxx.supabase.co" class="config-input" />
+                  <div style="display:flex;gap:var(--sp-sm)">
+                    <input type="password" id="config-supabase-key" placeholder="anon key..." class="config-input" style="flex:1" />
+                    <button class="btn btn-primary" id="btn-save-supabase" style="font-size:12px;padding:var(--sp-xs) var(--sp-md)">Guardar</button>
+                  </div>
+                </div>
+              </div>
+
+              <!-- Webhook n8n -->
+              <div class="config-row">
+                <div class="config-row-header">
+                  <div style="display:flex;align-items:center;gap:var(--sp-sm)">
+                    <span id="status-dot-webhook" class="config-status-dot inactive"></span>
+                    <span style="font-weight:600">🔗 n8n Webhook</span>
+                  </div>
+                  <button class="btn btn-ghost" id="btn-test-webhook" style="font-size:11px;padding:2px 10px">Test</button>
+                </div>
+                <div style="display:flex;gap:var(--sp-sm);margin-top:var(--sp-sm)">
+                  <input type="text" id="config-webhook-url" placeholder="https://n8n.example.com/webhook/..." class="config-input" />
+                  <button class="btn btn-primary" id="btn-save-webhook" style="font-size:12px;padding:var(--sp-xs) var(--sp-md)">Guardar</button>
+                </div>
+              </div>
+            </div>
+
+            <!-- General Settings -->
+            <div class="glass-card" style="padding:var(--sp-lg);margin-bottom:var(--sp-lg)">
+              <h4 style="font-size:14px;margin-bottom:var(--sp-lg)">⚙️ Configuración del Motor</h4>
+              <div style="display:flex;flex-direction:column;gap:var(--sp-md)">
+                <label style="display:flex;justify-content:space-between;align-items:center;font-size:14px">
+                  <span>Respuestas automáticas</span>
+                  <input type="checkbox" id="setting-auto-reply" checked />
+                </label>
+                <label style="display:flex;justify-content:space-between;align-items:center;font-size:14px">
+                  <span>Alertas de límite RESICO</span>
+                  <input type="checkbox" id="setting-income-alert" checked />
+                </label>
+                <label style="display:flex;justify-content:space-between;align-items:center;font-size:14px">
+                  <span>Sonido de notificación</span>
+                  <input type="checkbox" id="setting-sound" />
+                </label>
+              </div>
+            </div>
+
+            <!-- Data -->
+            <div class="glass-card" style="padding:var(--sp-lg)">
+              <h4 style="font-size:14px;margin-bottom:var(--sp-md)">💾 Datos</h4>
+              <div style="display:flex;gap:var(--sp-sm)">
+                <button class="btn btn-ghost" id="btn-export-data" style="font-size:13px">Exportar JSON</button>
+                <button class="btn btn-ghost" id="btn-reset-data" style="font-size:13px;color:var(--danger)">Reset Demo</button>
+              </div>
+            </div>
+
+            <!-- Supabase SQL Reference -->
+            <div class="glass-card" style="padding:var(--sp-lg);margin-top:var(--sp-lg)">
+              <h4 style="font-size:14px;margin-bottom:var(--sp-md)">🗄️ SQL para Supabase</h4>
+              <p style="font-size:12px;color:var(--text-muted);margin-bottom:var(--sp-md)">Ejecuta este SQL en el editor de Supabase para crear las tablas:</p>
+              <pre class="sql-block"><code>-- Historial de conversaciones
+CREATE TABLE IF NOT EXISTS conversations (
+  id TEXT PRIMARY KEY,
+  text TEXT NOT NULL,
+  sender TEXT DEFAULT 'Usuario',
+  time TEXT,
+  intent TEXT NOT NULL,
+  confidence FLOAT,
+  keywords TEXT[],
+  explanation TEXT,
+  response TEXT,
+  source TEXT DEFAULT 'local',
+  created_at TIMESTAMPTZ DEFAULT now()
+);
+
+-- Documentos procesados (OCR)
+CREATE TABLE IF NOT EXISTS documents (
+  id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+  file_name TEXT,
+  doc_type TEXT,
+  extracted_data JSONB,
+  confidence FLOAT,
+  validation_status TEXT,
+  needs_review BOOLEAN DEFAULT false,
+  source TEXT DEFAULT 'unknown',
+  created_at TIMESTAMPTZ DEFAULT now()
+);
+
+-- Métricas fiscales
+CREATE TABLE IF NOT EXISTS fiscal_metrics (
+  id TEXT PRIMARY KEY DEFAULT 'primary',
+  income_ytd NUMERIC DEFAULT 0,
+  total_processed INT DEFAULT 0,
+  by_category JSONB DEFAULT '{}',
+  avg_confidence FLOAT DEFAULT 0,
+  updated_at TIMESTAMPTZ DEFAULT now()
+);
+
+-- Enable Realtime
+ALTER PUBLICATION supabase_realtime
+  ADD TABLE conversations;
+ALTER PUBLICATION supabase_realtime
+  ADD TABLE documents;</code></pre>
+            </div>
+          </div>
+        </section>
+      </div>
+    </main>
+  </div>
+
+  <!-- Supabase JS SDK (CDN) -->
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+
+  <!-- App Modules (order matters) -->
+  <script src="js/mock-data.js"></script>
+  <script src="js/sanitizer.js"></script>
+  <script src="js/config.js"></script>
+  <script src="js/store.js"></script>
+  <script src="js/classifier.js"></script>
+  <script src="js/webhook.js"></script>
+  <script src="js/conversation.js"></script>
+  <script src="js/ocr.js"></script>
+  <script src="js/dashboard.js"></script>
+  <script src="js/chat.js"></script>
+  <script src="js/app.js"></script>
+
+</body>
+</html>

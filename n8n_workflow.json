@@ -1,0 +1,417 @@
+{
+  "name": "Aliado RESICO - Workflow v3.0",
+  "nodes": [
+    {
+      "parameters": {
+        "updates": [
+          "message",
+          "photo"
+        ]
+      },
+      "id": "telegram-trigger",
+      "name": "Telegram Trigger",
+      "type": "n8n-nodes-base.telegramTrigger",
+      "typeVersion": 1,
+      "position": [
+        100,
+        300
+      ],
+      "credentials": {
+        "telegramApi": {
+          "id": "telegram-cred-id",
+          "name": "AliadoResicobot"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const msg = $input.first().json;\nconst text = msg.message?.text || msg.message?.caption || '[IMAGEN ADJUNTA]';\nconst safeText = text.replace(/\"/g, \"'\").replace(/\\n/g, ' ').replace(/\\\\/g, '');\n\nconst prompt = `SISTEMA: Clasificador fiscal RESICO. Responde SOLO JSON puro. Cero texto extra. Cero markdown.\n\nREGLAS DE PRIORIDAD (aplica en orden):\n1. Si menciona montos, millones, MDP, limite, tasa, porcentaje, ISR, IVA, SAT, regimen, declaracion, e.firma, buzon tributario → CONSULTA_FISCAL\n2. Si menciona timbrar, sellar, CFDI, factura, RFC, cancelar factura, complemento → SOLICITUD_FACTURA\n3. Si menciona ticket, gasto, recibo, nota, compre, gaste, acreditamiento → REGISTRO_GASTO\n4. Si menciona pague, deposite, transferencia, SPEI, OXXO, comprobante, referencia → REPORTE_PAGO\n5. Si es saludo, despedida o pregunta no fiscal → OTROS\n\nJERGA MEXICANA:\n- la chiva / el chivo / hacienda = SAT\n- timbrar / sellar = emitir CFDI\n- lana / varo / baro / fierro = dinero\n- chambear / jalar = trabajar\n- 3 MDP / 3 millones / 3.5 = limite de ingresos RESICO\n\nCONTEXTO RESICO CRITICO:\n- Limite anual: 3,500,000 MXN. Superarlo = expulsion del regimen\n- ISR: sobre ingresos BRUTOS, tasas 1% al 2.5%. SIN deducciones\n- IVA: SI permite acreditamiento con factura\n- e.firma vencida o Buzon inactivo = multas $3,420 a $10,260 MXN\n\nCampo explanation: escribe la RESPUESTA DIRECTA al usuario, no una descripcion. Ejemplo: si pregunta por el limite, explanation = 'El limite RESICO es $3,500,000 MXN anuales. Si lo superas el SAT te mueve a Actividad Empresarial automaticamente.'\n\nFormato OBLIGATORIO (unicamente esto, sin nada mas):\n{\"intent\":\"CATEGORIA\",\"confidence\":0.95,\"explanation\":\"respuesta directa al usuario\"}\n\nMensaje a clasificar: \"${safeText}\"`;\n\nconst payload = {\n  contents: [{ parts: [{ text: prompt }] }],\n  generationConfig: { temperature: 0.1, maxOutputTokens: 300 }\n};\n\nreturn [{\n  json: {\n    payload,\n    telegram_chat_id: msg.message?.chat?.id?.toString() || 'unknown',\n    telegram_message_text: text\n  }\n}];"
+      },
+      "id": "build-payload",
+      "name": "Construir Payload Gemini",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        300,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=AIzaSyB2bODrpmyu49aeHQxko_0P8ZHV5sZ7iXA",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "json",
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json.payload) }}",
+        "options": {}
+      },
+      "id": "gemini-classifier",
+      "name": "Cerebro Gemini 2.5 Flash",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [
+        500,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const geminiResponse = $input.first().json;\nconst telegramData = $('Construir Payload Gemini').first().json;\n\nlet rawText = '';\ntry {\n  rawText = geminiResponse.candidates[0].content.parts[0].text || '';\n} catch (e) {\n  return [{ json: {\n    intent: 'OTROS', confidence: 0.5,\n    explanation: 'Hola, soy Aliado RESICO. ¿En qué te puedo ayudar con tu contabilidad RESICO hoy?',\n    telegram_chat_id: telegramData.telegram_chat_id,\n    telegram_message_text: telegramData.telegram_message_text\n  }}];\n}\n\nlet cleaned = rawText.replace(/```(?:json)?\\s*([\\s\\S]*?)```/gi, '$1').trim();\nconst start = cleaned.indexOf('{');\nconst end = cleaned.lastIndexOf('}');\n\nif (start === -1 || end === -1 || end <= start) {\n  return [{ json: {\n    intent: 'OTROS', confidence: 0.5,\n    explanation: 'No entendí tu consulta. ¿Puedes reformularla?',\n    telegram_chat_id: telegramData.telegram_chat_id,\n    telegram_message_text: telegramData.telegram_message_text\n  }}];\n}\n\nlet parsed;\ntry {\n  parsed = JSON.parse(cleaned.slice(start, end + 1));\n} catch (e) {\n  return [{ json: {\n    intent: 'OTROS', confidence: 0.5,\n    explanation: 'Hubo un error procesando tu mensaje. Intenta de nuevo.',\n    telegram_chat_id: telegramData.telegram_chat_id,\n    telegram_message_text: telegramData.telegram_message_text\n  }}];\n}\n\nconst validIntents = ['CONSULTA_FISCAL','SOLICITUD_FACTURA','REGISTRO_GASTO','REPORTE_PAGO','OTROS'];\nif (!validIntents.includes(parsed.intent)) parsed.intent = 'OTROS';\nparsed.confidence = Math.max(0, Math.min(1, parsed.confidence || 0.5));\nparsed.telegram_chat_id = telegramData.telegram_chat_id;\nparsed.telegram_message_text = telegramData.telegram_message_text;\n\nreturn [{ json: parsed }];"
+      },
+      "id": "parser-blindado",
+      "name": "Parser Blindado",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        700,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://muwhpvdillphgkuwsaec.supabase.co/rest/v1/conversations",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "apikey",
+              "value": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im11d2hwdmRpbGxwaGdrdXdzYWVjIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzc3ODc3NTgsImV4cCI6MjA5MzM2Mzc1OH0.TnFEHR2MGqnroXQ8tBOOpKNxNSt1tkNqcscXmt7Ij0A"
+            },
+            {
+              "name": "Authorization",
+              "value": "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im11d2hwdmRpbGxwaGdrdXdzYWVjIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzc3ODc3NTgsImV4cCI6MjA5MzM2Mzc1OH0.TnFEHR2MGqnroXQ8tBOOpKNxNSt1tkNqcscXmt7Ij0A"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "Prefer",
+              "value": "return=representation"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "json",
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({\n  id: 'tg-' + $json.telegram_chat_id + '-' + Date.now(),\n  text: $json.telegram_message_text,\n  sender: $json.telegram_chat_id,\n  intent: $json.intent,\n  confidence: $json.confidence,\n  explanation: $json.explanation || '',\n  source: 'telegram',\n  time: new Date().toLocaleTimeString('es-MX', {hour:'2-digit',minute:'2-digit'})\n}) }}",
+        "options": {}
+      },
+      "id": "supabase-insert",
+      "name": "Guardar Supabase",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [
+        900,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": false
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.intent }}",
+                    "rightValue": "CONSULTA_FISCAL",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ]
+              }
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": false
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.intent }}",
+                    "rightValue": "SOLICITUD_FACTURA",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ]
+              }
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": false
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.intent }}",
+                    "rightValue": "REGISTRO_GASTO",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ]
+              }
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": false
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.intent }}",
+                    "rightValue": "REPORTE_PAGO",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ]
+              }
+            }
+          ]
+        },
+        "fallbackOutput": "extra"
+      },
+      "id": "switch-intent",
+      "name": "Switch por Intent",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3,
+      "position": [
+        1100,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "chatId": "={{ $('Parser Blindado').first().json.telegram_chat_id }}",
+        "text": "={{ '📘 *Consulta Fiscal RESICO*\\n\\n' + $('Parser Blindado').first().json.explanation + '\\n\\n¿Tienes otra duda sobre tu régimen?' }}",
+        "additionalFields": {
+          "parse_mode": "Markdown"
+        }
+      },
+      "id": "resp-consulta",
+      "name": "Respuesta Consulta Fiscal",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1,
+      "position": [
+        1320,
+        60
+      ],
+      "credentials": {
+        "telegramApi": {
+          "id": "telegram-cred-id",
+          "name": "AliadoResicobot"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "chatId": "={{ $('Parser Blindado').first().json.telegram_chat_id }}",
+        "text": "={{ '📑 *Solicitud de Factura CFDI 4.0*\\n\\n' + $('Parser Blindado').first().json.explanation + '\\n\\nEnvíame los datos fiscales del receptor para continuar.' }}",
+        "additionalFields": {
+          "parse_mode": "Markdown"
+        }
+      },
+      "id": "resp-factura",
+      "name": "Respuesta Factura",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1,
+      "position": [
+        1320,
+        180
+      ],
+      "credentials": {
+        "telegramApi": {
+          "id": "telegram-cred-id",
+          "name": "AliadoResicobot"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "chatId": "={{ $('Parser Blindado').first().json.telegram_chat_id }}",
+        "text": "={{ '🧾 *Registro de Gasto*\\n\\n' + $('Parser Blindado').first().json.explanation + '\\n\\nRecuerda: los gastos NO reducen ISR en RESICO, pero SÍ acreditan IVA.' }}",
+        "additionalFields": {
+          "parse_mode": "Markdown"
+        }
+      },
+      "id": "resp-gasto",
+      "name": "Respuesta Gasto",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1,
+      "position": [
+        1320,
+        300
+      ],
+      "credentials": {
+        "telegramApi": {
+          "id": "telegram-cred-id",
+          "name": "AliadoResicobot"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "chatId": "={{ $('Parser Blindado').first().json.telegram_chat_id }}",
+        "text": "={{ '💳 *Reporte de Pago*\\n\\n' + $('Parser Blindado').first().json.explanation + '\\n\\n¿Necesitas que te envíe el acuse de recibo?' }}",
+        "additionalFields": {
+          "parse_mode": "Markdown"
+        }
+      },
+      "id": "resp-pago",
+      "name": "Respuesta Pago",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1,
+      "position": [
+        1320,
+        420
+      ],
+      "credentials": {
+        "telegramApi": {
+          "id": "telegram-cred-id",
+          "name": "AliadoResicobot"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "chatId": "={{ $('Parser Blindado').first().json.telegram_chat_id }}",
+        "text": "⚠️ *Auditoría de Salud Fiscal RESICO*\n\nAntes de continuar, verifica estos 3 puntos críticos:\n\n1️⃣ ¿Tu *Buzón Tributario* está activo?\n2️⃣ ¿Tu *e.firma* está vigente?\n3️⃣ ¿Tu constancia refleja *RESICO*?\n\nSin estos requisitos el SAT puede multarte con $3,420 a $10,260 MXN o expulsarte del régimen.\n\nResponde *sí* o *no* a cada punto y te guío.",
+        "additionalFields": {
+          "parse_mode": "Markdown"
+        }
+      },
+      "id": "resp-otros",
+      "name": "Respuesta Otros / Auditoría",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1,
+      "position": [
+        1320,
+        540
+      ],
+      "credentials": {
+        "telegramApi": {
+          "id": "telegram-cred-id",
+          "name": "AliadoResicobot"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Telegram Trigger": {
+      "main": [
+        [
+          {
+            "node": "Construir Payload Gemini",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Construir Payload Gemini": {
+      "main": [
+        [
+          {
+            "node": "Cerebro Gemini 2.5 Flash",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Cerebro Gemini 2.5 Flash": {
+      "main": [
+        [
+          {
+            "node": "Parser Blindado",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parser Blindado": {
+      "main": [
+        [
+          {
+            "node": "Guardar Supabase",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Guardar Supabase": {
+      "main": [
+        [
+          {
+            "node": "Switch por Intent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Switch por Intent": {
+      "main": [
+        [
+          {
+            "node": "Respuesta Consulta Fiscal",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Respuesta Factura",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Respuesta Gasto",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Respuesta Pago",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Respuesta Otros / Auditoría",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  }
+}
