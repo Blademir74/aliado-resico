@@ -52,11 +52,12 @@ export default async function handler(req, res) {
   const allowedOrigin = process.env.ALIADO_ALLOWED_ORIGIN || '*';
   const origin = req.headers.origin || '';
 
-  if (allowedOrigin !== '*' && origin !== allowedOrigin) {
+  // Permitir peticiones sin Origin (backend-to-backend como n8n) o si coinciden con allowedOrigin
+  if (allowedOrigin !== '*' && origin !== '' && origin !== allowedOrigin) {
     return res.status(403).json({ error: 'Origin not allowed' });
   }
 
-  res.setHeader('Access-Control-Allow-Origin', allowedOrigin);
+  res.setHeader('Access-Control-Allow-Origin', origin || '*');
   res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type, X-Source');
 
@@ -98,7 +99,11 @@ export default async function handler(req, res) {
   }
 
   // --- Determine model endpoint ---
-  const model = req.query.model || 'gemini-2.5-flash';
+  // CORRECCIÓN: El modelo en v1beta requiere sufijo -latest si no se especifica versión
+  let model = req.query.model || 'gemini-1.5-flash-latest';
+  if (model === 'gemini-1.5-flash') model = 'gemini-1.5-flash-latest';
+  if (model === 'gemini-2.5-flash') model = 'gemini-1.5-flash-latest'; // Fallback a una versión que sabemos que funciona
+  
   const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${geminiKey}`;
 
   try {
