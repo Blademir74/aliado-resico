@@ -86,9 +86,9 @@ export default async function handler(req, res) {
   }
 
   // --- Validate Gemini Key ---
-  const geminiKey = process.env.ALIADO_GEMINI_KEY;
+  const geminiKey = process.env.ALIADO_GEMINI_KEY || process.env.GEMINI_API_KEY;
   if (!geminiKey) {
-    return res.status(500).json({ error: 'Gemini API key not configured on server' });
+    return res.status(500).json({ error: 'Gemini API key not configured on server (Missing ALIADO_GEMINI_KEY or GEMINI_API_KEY)' });
   }
 
   // --- Sanitize Request Body ---
