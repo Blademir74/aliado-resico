@@ -69,6 +69,10 @@
     {
       "source": "/api/gemini-proxy",
       "destination": "/api/gemini-proxy.js"
+    },
+    {
+      "source": "/api/telegram-diagnostics",
+      "destination": "/api/telegram-diagnostics.js"
     }
   ]
 }
