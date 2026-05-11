@@ -166,57 +166,62 @@ FORMATO DE RESPUESTA (solo esto, nada más)
     // Sanitizar input antes de enviar a IA
     const sanitizedMessage = InputSanitizer.sanitizeForAI(message);
     if (!sanitizedMessage) throw new Error('Mensaje vacío después de sanitización');
-    if (!AppConfig.isGeminiConfigured()) throw new Error('No Gemini API Key configurada');
 
-    // Endpoint: proxy en producción, directo en desarrollo
-    const endpoint = AppConfig.getGeminiEndpoint('gemini-2.5-flash');
+    // 🔒 CORRECCIÓN OBLIGATORIA: Uso estricto del proxy local en Vercel
+    // No se expone la API Key ni se llama directamente a Google
+    const endpoint = '/api/gemini-proxy?model=gemini-1.5-flash';
 
-    const response = await fetch(endpoint, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        systemInstruction: { parts: [{ text: SYSTEM_PROMPT }] },
-        contents: [{ parts: [{ text: `Clasifica este mensaje:\n\n"${sanitizedMessage}"` }] }],
-        generationConfig: { temperature: 0.1, maxOutputTokens: 400, responseMimeType: 'application/json' },
-      }),
-    });
+    try {
+      const response = await fetch(endpoint, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          systemInstruction: { parts: [{ text: SYSTEM_PROMPT }] },
+          contents: [{ parts: [{ text: `Clasifica este mensaje:\n\n"${sanitizedMessage}"` }] }],
+          generationConfig: { temperature: 0.1, maxOutputTokens: 400, responseMimeType: 'application/json' },
+        }),
+      });
 
-    if (!response.ok) {
-      const err = await response.json().catch(() => ({}));
-      throw new Error(err.error?.message || err.error || `Gemini HTTP ${response.status}`);
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}`);
+      }
+
+      const data = await response.json();
+      const candidate = data.candidates?.[0];
+      if (!candidate || candidate.finishReason === 'SAFETY') {
+        throw new Error(`Gemini bloqueó la respuesta (motivo: ${candidate?.finishReason || 'UNKNOWN'})`);
+      }
+
+      const rawText = candidate.content?.parts?.[0]?.text;
+      if (!rawText || typeof rawText !== 'string') throw new Error('Respuesta de Gemini vacía');
+
+      const jsonString = extractJSON(rawText);
+      if (!jsonString) {
+        console.error('[Classifier] Raw Gemini response (no JSON found):', rawText);
+        throw new Error('No se encontró JSON válido en la respuesta de Gemini');
+      }
+
+      let parsed;
+      try { parsed = JSON.parse(jsonString); }
+      catch (e) { throw new Error(`JSON inválido de Gemini: ${e.message}`); }
+
+      const validIntents = ['CONSULTA_FISCAL', 'SOLICITUD_FACTURA', 'REGISTRO_GASTO', 'REPORTE_PAGO', 'SALUD_FISCAL', 'OTROS'];
+      if (!validIntents.includes(parsed.intent)) parsed.intent = 'OTROS';
+
+      return {
+        intent: parsed.intent,
+        confidence: Math.max(0, Math.min(1, parsed.confidence || 0.5)),
+        keywords_matched: parsed.keywords_detected || [],
+        explanation: parsed.explanation || '',
+        resico_context: parsed.resico_context || null,
+        salud_fiscal_alerta: parsed.salud_fiscal_alerta || null,
+        source: 'gemini',
+      };
+    } catch (error) {
+      console.error('[Classifier] Error clasificando mensaje:', error);
+      // Fallback de seguridad solicitado
+      throw new Error('⚠️ Auditoría de Seguridad en Proceso. Activando Modo Demo. Por favor, intenta de nuevo más tarde.');
     }
-
-    const data = await response.json();
-    const candidate = data.candidates?.[0];
-    if (!candidate || candidate.finishReason === 'SAFETY') {
-      throw new Error(`Gemini bloqueó la respuesta (motivo: ${candidate?.finishReason || 'UNKNOWN'})`);
-    }
-
-    const rawText = candidate.content?.parts?.[0]?.text;
-    if (!rawText || typeof rawText !== 'string') throw new Error('Respuesta de Gemini vacía');
-
-    const jsonString = extractJSON(rawText);
-    if (!jsonString) {
-      console.error('[Classifier] Raw Gemini response (no JSON found):', rawText);
-      throw new Error('No se encontró JSON válido en la respuesta de Gemini');
-    }
-
-    let parsed;
-    try { parsed = JSON.parse(jsonString); }
-    catch (e) { throw new Error(`JSON inválido de Gemini: ${e.message}`); }
-
-    const validIntents = ['CONSULTA_FISCAL', 'SOLICITUD_FACTURA', 'REGISTRO_GASTO', 'REPORTE_PAGO', 'SALUD_FISCAL', 'OTROS'];
-    if (!validIntents.includes(parsed.intent)) parsed.intent = 'OTROS';
-
-    return {
-      intent: parsed.intent,
-      confidence: Math.max(0, Math.min(1, parsed.confidence || 0.5)),
-      keywords_matched: parsed.keywords_detected || [],
-      explanation: parsed.explanation || '',
-      resico_context: parsed.resico_context || null,
-      salud_fiscal_alerta: parsed.salud_fiscal_alerta || null,
-      source: 'gemini',
-    };
   }
 
   // =============================================

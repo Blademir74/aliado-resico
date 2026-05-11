@@ -45,7 +45,7 @@ const DocumentProcessor = (() => {
   }
 
   // --- Prompt de Gemini Vision (Strict Mode) ---
-  const OCR_PROMPT = `Eres un sistema OCR especializado en documentos fiscales mexicanos con precisión del 97%.
+  const OCR_PROMPT = `Eres un sistema OCR especializado en documentos fiscales mexicanos. Debes identificar con un 97% de precisión el RFC (emisor y receptor), montos desglosados (subtotal, total) y el IVA desglosado, lo cual es fundamental para el acreditamiento de IVA según la normativa vigente.
 
 INSTRUCCIÓN CRÍTICA DE FORMATO:
 Responde ÚNICAMENTE con el objeto JSON. NINGÚN texto antes o después. NINGÚN bloque de código markdown (no uses \`\`\`json). NINGÚN preámbulo. SOLO el JSON puro.
@@ -62,6 +62,7 @@ Extrae estos campos. Si un campo NO es legible, pon null:
 {"document_type":"TICKET|CFDI|TRANSFERENCIA|NOTA_VENTA|RECIBO|DESCONOCIDO","confidence":0.97,"emisor_rfc":"RFC del emisor o null","emisor_nombre":"Nombre del emisor o null","receptor_rfc":"RFC del receptor o null","receptor_nombre":"Nombre del receptor o null","fecha":"DD/MM/AAAA o null","hora":"HH:MM o null","subtotal":"monto numérico sin símbolo o null","iva":"monto del IVA numérico sin símbolo o null","iva_tasa":"porcentaje (ej: 16) o null","total":"monto total numérico sin símbolo o null","metodo_pago":"Efectivo|Tarjeta Débito|Tarjeta Crédito|Transferencia|null","numero_autorizacion":"número de autorización/folio o null","folio_fiscal":"UUID del CFDI o null","concepto":"descripción breve del concepto principal o null","sucursal":"nombre/número de sucursal o null","quality_notes":"Notas sobre calidad de imagen: borrosa, oscura, parcial, etc. o null"}
 
 REGLAS:
+- RFC, subtotal e IVA son CRÍTICOS para acreditamiento.
 - Los montos deben ser SOLO números (sin $, sin comas de miles)
 - Si la imagen está borrosa o ilegible, baja el confidence proporcionalmente
 - Si no puedes leer un campo con certeza, pon null — NUNCA inventes datos
@@ -106,57 +107,83 @@ REGLAS:
     const sizeCheck = InputSanitizer.validateFileSize(file);
     if (!sizeCheck.valid) throw new Error(sizeCheck.error);
 
-    if (!AppConfig.isGeminiConfigured()) throw new Error('No Gemini API Key configurada');
-
     const base64Data = await fileToBase64(file);
     const mimeType = file.type || 'image/jpeg';
 
-    // Endpoint: proxy en producción, directo en desarrollo
-    const endpoint = AppConfig.getGeminiEndpoint('gemini-2.5-flash');
+    // 🔒 CORRECCIÓN OBLIGATORIA: Uso estricto del proxy local. 
+    // NUNCA se expone la API Key ni se llama directamente a generativelanguage.googleapis.com
+    const endpoint = '/api/gemini-proxy?model=gemini-1.5-flash';
 
-    const response = await fetch(endpoint, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        contents: [{
-          parts: [
-            { text: OCR_PROMPT },
-            { inlineData: { mimeType, data: base64Data } }
-          ]
-        }],
-        generationConfig: {
-          temperature: 0.1,
-          maxOutputTokens: 800,
-          responseMimeType: 'application/json',
-        }
-      }),
-    });
-
-    if (!response.ok) {
-      const err = await response.json().catch(() => ({}));
-      throw new Error(err.error?.message || err.error || `Gemini Vision HTTP ${response.status}`);
-    }
-
-    const data = await response.json();
-    const rawText = data.candidates?.[0]?.content?.parts?.[0]?.text;
-    if (!rawText) throw new Error('Respuesta vacía de Gemini Vision');
-
-    // Parser blindado: tolera preámbulos y markdown
-    const jsonString = extractJSON(rawText);
-    if (!jsonString) {
-      console.error('[OCR] Raw Gemini Vision response (no JSON found):', rawText);
-      throw new Error('No se encontró JSON válido en la respuesta de Gemini Vision');
-    }
-
-    let parsed;
     try {
-      parsed = JSON.parse(jsonString);
-    } catch (e) {
-      console.error('[OCR] JSON parse failed. Extracted string:', jsonString);
-      throw new Error(`JSON inválido de Gemini Vision: ${e.message}`);
-    }
+      const response = await fetch(endpoint, {
+        method: 'POST',
+        headers: { 
+          'Content-Type': 'application/json' 
+          // NO se envían cabeceras Authorization con la key, Vercel la inyecta de forma segura
+        },
+        body: JSON.stringify({
+          contents: [{
+            parts: [
+              { text: OCR_PROMPT },
+              { inlineData: { mimeType, data: base64Data } }
+            ]
+          }],
+          generationConfig: {
+            temperature: 0.1,
+            maxOutputTokens: 800,
+            responseMimeType: 'application/json',
+          }
+        }),
+      });
 
-    return parsed;
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}`);
+      }
+
+      const data = await response.json();
+      const rawText = data.candidates?.[0]?.content?.parts?.[0]?.text;
+      if (!rawText) throw new Error('Respuesta vacía de Gemini Vision');
+
+      // Parser blindado: tolera preámbulos y markdown
+      const jsonString = extractJSON(rawText);
+      if (!jsonString) {
+        console.error('[OCR] Raw Gemini Vision response (no JSON found):', rawText);
+        throw new Error('No se encontró JSON válido en la respuesta de Gemini Vision');
+      }
+
+      let parsed;
+      try {
+        parsed = JSON.parse(jsonString);
+      } catch (e) {
+        console.error('[OCR] Error parsing Gemini JSON:', e, jsonString);
+        throw new Error('Error al decodificar la respuesta fiscal');
+      }
+
+      // Validar confidence
+      const confidence = parsed.confidence || 0;
+      if (confidence < HUMAN_REVIEW_THRESHOLD) {
+        parsed.needsHumanReview = true;
+      }
+
+      // Validar RFCs si existen
+      if (parsed.emisor_rfc) {
+        const val = validateRFC(parsed.emisor_rfc);
+        parsed.emisor_rfc_valid = val.valid;
+        if (!val.valid) parsed.emisor_rfc_error = val.error;
+      }
+
+      if (parsed.receptor_rfc) {
+        const val = validateRFC(parsed.receptor_rfc);
+        parsed.receptor_rfc_valid = val.valid;
+        if (!val.valid) parsed.receptor_rfc_error = val.error;
+      }
+
+      return parsed;
+    } catch (error) {
+      console.error('[OCR] Error procesando documento:', error);
+      // Fallback de seguridad solicitado en la Tarea 4
+      throw new Error('⚠️ Auditoría de Seguridad en Proceso. Activando Modo Demo. Por favor, intenta de nuevo más tarde.');
+    }
   }
 
   // --- processImage principal ---
