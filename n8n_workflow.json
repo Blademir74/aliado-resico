@@ -25,7 +25,7 @@
     },
     {
       "parameters": {
-        "jsCode": "const msg = $input.first().json;\nconst text = msg.message?.text || msg.message?.caption || '[IMAGEN ADJUNTA]';\nconst safeText = text.replace(/\"/g, \"'\").replace(/\\n/g, ' ').replace(/\\\\/g, '');\n\n// === SLANG PREPROCESSOR v2.5 ===\nlet processed = safeText.toLowerCase();\nconst slangMap = {\n  'la chiva': 'el SAT', 'el chivo': 'el SAT', 'hacienda': 'el SAT', 'el fisco': 'el SAT',\n  'timbrar': 'emitir CFDI', 'sellar': 'emitir CFDI',\n  'lana': 'dinero', 'varo': 'dinero', 'baro': 'dinero', 'fierro': 'dinero', 'feria': 'dinero', 'billete': 'dinero',\n  'chambear': 'trabajar', 'jalar': 'trabajar', 'chamba': 'trabajo',\n  'melones': 'millones de pesos', 'melon': 'un millon de pesos', 'mdp': 'millones de pesos',\n  'recibito': 'ticket', 'tirilla': 'ticket', 'papelito': 'comprobante',\n  'ya le puse': 'ya pague', 'le avente': 'transferi'\n};\nlet slangDetected = [];\nfor (const [slang, formal] of Object.entries(slangMap)) {\n  if (processed.includes(slang)) {\n    slangDetected.push(slang + ' = ' + formal);\n    processed = processed.replace(new RegExp(slang, 'gi'), formal);\n  }\n}\n\nconst prompt = `IDENTIDAD: Eres 'Lic. Fiscal IA', Experto Fiscal Mexicano con 15 anios en RESICO. Dominas LISR (Art. 113-E), CFF (Art. 17-D, 17-K) y jerga popular mexicana.\n\nFORMATO: Responde SOLO con JSON puro. Cero texto extra. Cero markdown.\n\nCATEGORIAS (elige UNA):\n1. CONSULTA_FISCAL - Impuestos, regimen, tasas, SAT, declaraciones, e.firma, buzon tributario, constancia\n2. SOLICITUD_FACTURA - Emitir/cancelar CFDI 4.0, timbrado, complementos, RFC, folio\n3. REGISTRO_GASTO - Gastos, tickets, recibos, acreditamiento IVA, facturas de proveedores\n4. REPORTE_PAGO - Pagos, transferencias SPEI, depositos, comprobantes bancarios, OXXO\n5. SALUD_FISCAL - Buzon tributario, e.firma, constancia, opinion de cumplimiento\n6. OTROS - Saludos, despedidas, preguntas no fiscales\n\nREGLAS DE PRIORIDAD:\n1. Montos + contexto fiscal -> CONSULTA_FISCAL\n2. Timbrar/sellar/CFDI/factura/RFC -> SOLICITUD_FACTURA\n3. Ticket/gasto/recibo/compre/gaste -> REGISTRO_GASTO\n4. Pague/deposite/transferencia/SPEI/OXXO -> REPORTE_PAGO\n5. Buzon/e.firma/constancia -> SALUD_FISCAL\n6. Saludo/despedida/no fiscal -> OTROS\n\nJERGA MEXICANA:\n- la chiva/el chivo/hacienda/el fisco = SAT\n- timbrar/sellar = emitir CFDI\n- lana/varo/baro/fierro/feria/billete = dinero\n- chambear/jalar/chamba = trabajar\n- melon/melones/MDP = millon/millones de pesos\n- recibito/tirilla/papelito = ticket/comprobante\n- ya le puse/le avente = ya pague/transferi\n- meter gasto/aventar gasto = registrar gasto\n\nCuando detectes jerga, clasifica segun el termino formal. La confianza NO baja de 0.85 si la intencion es clara.\n\nCONTEXTO RESICO (Art. 113-E LISR):\n- ISR: sobre INGRESOS BRUTOS (1%-2.5%). SIN deducciones para ISR\n- IVA: SI permite acreditamiento con facturas de gastos\n- Limite anual: $3,500,000 MXN. Superarlo = expulsion automatica\n- e.firma OBLIGATORIA y VIGENTE (Art. 17-D CFF)\n- Buzon Tributario ACTIVO. Multas $3,420 a $10,260 MXN si inactivo\n- Declaraciones mensuales: dia 17 del mes siguiente\n\nCALIBRACION DE CONFIANZA:\n>= 0.95: Terminos fiscales explicitos\n0.88-0.94: Jerga/slang con intencion clara\n0.80-0.87: Informal con contexto fiscal implicito\n0.65-0.79: Ambiguo\n< 0.65: Sin contexto fiscal\n\nAUDITORIA AUTOMATICA: Si detectas e.firma vencida, buzon inactivo, ingresos > $3.5M o declaracion omitida, incluye alerta en salud_fiscal_alerta.\n\nCampo explanation: Responde DIRECTO al usuario como su contador de confianza. Incluye datos concretos.\n\n${slangDetected.length > 0 ? 'JERGA DETECTADA: ' + slangDetected.join(', ') + '\\n\\n' : ''}Formato OBLIGATORIO:\n{\"intent\":\"CATEGORIA\",\"confidence\":0.95,\"explanation\":\"respuesta directa\",\"resico_context\":\"contexto o null\",\"salud_fiscal_alerta\":\"alerta o null\"}\n\nMensaje a clasificar: \"${safeText}\"`;\n\nconst payload = {\n  contents: [{ parts: [{ text: prompt }] }],\n  generationConfig: { temperature: 0.1, maxOutputTokens: 400, responseMimeType: 'application/json' }\n};\n\nreturn [{\n  json: {\n    payload,\n    telegram_chat_id: msg.message?.chat?.id?.toString() || 'unknown',\n    telegram_message_text: text,\n    slang_detected: slangDetected\n  }\n}];"
+        "jsCode": "const msg = $input.first().json;\nconst text = msg.message?.text || msg.message?.caption || '[IMAGEN ADJUNTA]';\nconst safeText = text.replace(/\"/g, \"'\").replace(/\\n/g, ' ').replace(/\\\\/g, '');\n\n// === SLANG PREPROCESSOR v2.5 ===\nlet processed = safeText.toLowerCase();\nconst slangMap = {\n  'la chiva': 'el SAT', 'el chivo': 'el SAT', 'hacienda': 'el SAT', 'el fisco': 'el SAT',\n  'timbrar': 'emitir CFDI', 'sellar': 'emitir CFDI',\n  'lana': 'dinero', 'varo': 'dinero', 'baro': 'dinero', 'fierro': 'dinero', 'feria': 'dinero', 'billete': 'dinero',\n  'chambear': 'trabajar', 'jalar': 'trabajar', 'chamba': 'trabajo',\n  'melones': 'millones de pesos', 'melon': 'un millon de pesos', 'mdp': 'millones de pesos',\n  'recibito': 'ticket', 'tirilla': 'ticket', 'papelito': 'comprobante',\n  'ya le puse': 'ya pague', 'le avente': 'transferi'\n};\nlet slangDetected = [];\nfor (const [slang, formal] of Object.entries(slangMap)) {\n  if (processed.includes(slang)) {\n    slangDetected.push(slang + ' = ' + formal);\n    processed = processed.replace(new RegExp(slang, 'gi'), formal);\n  }\n}\n\nconst prompt = `IDENTIDAD: Eres 'Lic. Fiscal IA', Experto Fiscal Mexicano con 15 anios en RESICO. Dominas LISR (Art. 113-E), CFF (Art. 17-D, 17-K) y jerga popular mexicana.\n\nFORMATO: Responde SOLO con JSON puro. Cero texto extra. Cero markdown.\n\nCATEGORIAS (elige UNA):\n1. CONSULTA_FISCAL - Impuestos, regimen, tasas, SAT, declaraciones, e.firma, buzon tributario, constancia\n2. SOLICITUD_FACTURA - Emitir/cancelar CFDI 4.0, timbrado, complementos, RFC, folio\n3. REGISTRO_GASTO - Gastos, tickets, recibos, acreditamiento IVA, facturas de proveedores\n4. REPORTE_PAGO - Pagos, transferencias SPEI, depositos, comprobantes bancarios, OXXO\n5. SALUD_FISCAL - Buzon tributario, e.firma, constancia, opinion de cumplimiento\n6. OTROS - Saludos, despedidas, preguntas no fiscales\n\nREGLAS DE PRIORIDAD:\n1. Montos + contexto fiscal -> CONSULTA_FISCAL\n2. Timbrar/sellar/CFDI/factura/RFC -> SOLICITUD_FACTURA\n3. Ticket/gasto/recibo/compre/gaste -> REGISTRO_GASTO\n4. Pague/deposite/transferencia/SPEI/OXXO -> REPORTE_PAGO\n5. Buzon/e.firma/constancia -> SALUD_FISCAL\n6. Saludo/despedida/no fiscal -> OTROS\n\nJERGA MEXICANA:\n- la chiva/el chivo/hacienda/el fisco = SAT\n- timbrar/sellar = emitir CFDI\n- lana/varo/baro/fierro/feria/billete = dinero\n- chambear/jalar/chamba = trabajar\n- melon/melones/MDP = millon/millones de pesos\n- recibito/tirilla/papelito = ticket/comprobante\n- ya le puse/le avente = ya pague/transferi\n- meter gasto/aventar gasto = registrar gasto\n\nCuando detectes jerga, clasifica segun el termino formal. La confianza NO baja de 0.85 si la intencion es clara.\n\nCONTEXTO RESICO (Art. 113-E LISR):\n- ISR: sobre INGRESOS BRUTOS (1%-2.5%). SIN deducciones para ISR\n- IVA: SI permite acreditamiento con facturas de gastos\n- Limite anual: $3,500,000 MXN. Superarlo = expulsion automatica\n- e.firma OBLIGATORIA y VIGENTE (Art. 17-D CFF)\n- Buzon Tributario ACTIVO. Multas $3,420 a $10,260 MXN si inactivo\n- Declaraciones mensuales: dia 17 del mes siguiente\n\nCALIBRACION DE CONFIANZA:\n>= 0.95: Terminos fiscales explicitos\n0.88-0.94: Jerga/slang con intencion clara\n0.80-0.87: Informal con contexto fiscal implicito\n0.65-0.79: Ambiguo\n< 0.65: Sin contexto fiscal\n\nAUDITORIA AUTOMATICA: Si detectas e.firma vencida, buzon inactivo, ingresos > $3.5M o declaracion omitida, incluye alerta en salud_fiscal_alerta.\n\nCampo explanation: Responde DIRECTO al usuario como su contador de confianza. Incluye datos concretos.\n\n${slangDetected.length > 0 ? 'JERGA DETECTADA: ' + slangDetected.join(', ') + '\\n\\n' : ''}Formato OBLIGATORIO:\n{\"intent\":\"CATEGORIA\",\"confidence\":0.95,\"explanation\":\"respuesta directa\",\"resico_context\":\"contexto o null\",\"salud_fiscal_alerta\":\"alerta o null\"}\n\nMensaje a clasificar: \"${safeText}\"`;\n\nconst payload = {\n  contents: [{ parts: [{ text: prompt }] }],\n  generationConfig: { temperature: 0.1, maxOutputTokens: 400 }\n};\n\nreturn [{\n  json: {\n    payload,\n    telegram_chat_id: msg.message?.chat?.id?.toString() || 'unknown',\n    telegram_message_text: text,\n    slang_detected: slangDetected\n  }\n}];"
       },
       "id": "build-payload",
       "name": "Construir Payload Gemini v2.5",
@@ -39,7 +39,7 @@
     {
       "parameters": {
         "method": "POST",
-        "url": "https://aliado-resico.vercel.app/api/gemini-proxy?model=gemini-1.5-flash",
+        "url": "https://aliado-resico.vercel.app/api/gemini-proxy",
         "sendHeaders": true,
         "headerParameters": {
           "parameters": [
@@ -56,7 +56,7 @@
         "options": {}
       },
       "id": "gemini-classifier",
-      "name": "Cerebro Gemini 1.5 Flash",
+      "name": "Cerebro Gemini 2.5 Flash (Proxy)",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4,
       "position": [
@@ -104,9 +104,44 @@
         },
         "sendBody": true,
         "contentType": "json",
-        "specifyBody": "json",
-        "jsonBody": "={{ JSON.stringify({\n  id: 'tg-' + $json.telegram_chat_id + '-' + Date.now(),\n  text: $json.telegram_message_text,\n  sender: $json.telegram_chat_id,\n  intent: $json.intent,\n  confidence: $json.confidence,\n  explanation: $json.explanation || '',\n  source: 'telegram',\n  time: new Date().toLocaleTimeString('es-MX', {hour:'2-digit',minute:'2-digit'})\n}) }}",
-        "options": {}
+        "specifyBody": "keypair",
+        "options": {},
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "id",
+              "value": "={{ 'tg-' + $json.telegram_chat_id + '-' + Date.now() }}"
+            },
+            {
+              "name": "text",
+              "value": "={{ $json.telegram_message_text }}"
+            },
+            {
+              "name": "sender",
+              "value": "={{ $json.telegram_chat_id }}"
+            },
+            {
+              "name": "intent",
+              "value": "={{ $json.intent }}"
+            },
+            {
+              "name": "confidence",
+              "value": "={{ $json.confidence }}"
+            },
+            {
+              "name": "explanation",
+              "value": "={{ $json.explanation || '' }}"
+            },
+            {
+              "name": "source",
+              "value": "telegram"
+            },
+            {
+              "name": "time",
+              "value": "={{ new Date().toLocaleTimeString('es-MX', {hour:'2-digit',minute:'2-digit'}) }}"
+            }
+          ]
+        }
       },
       "id": "supabase-insert",
       "name": "Guardar Supabase",
@@ -381,17 +416,6 @@
         ]
       ]
     },
-    "Cerebro Gemini 1.5 Flash": {
-      "main": [
-        [
-          {
-            "node": "Parser Blindado v2.5",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
     "Parser Blindado v2.5": {
       "main": [
         [
@@ -454,6 +478,17 @@
         [
           {
             "node": "Respuesta Otros / Bienvenida",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Cerebro Gemini 2.5 Flash (Proxy)": {
+      "main": [
+        [
+          {
+            "node": "Parser Blindado v2.5",
             "type": "main",
             "index": 0
           }
