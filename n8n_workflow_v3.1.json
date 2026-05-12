@@ -56,7 +56,7 @@
         "options": {}
       },
       "id": "gemini-classifier",
-      "name": "Cerebro Gemini 2.5 Flash (Proxy)",
+      "name": "Cerebro Gemini 2.5 Flash",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4,
       "position": [
@@ -484,7 +484,7 @@
         ]
       ]
     },
-    "Cerebro Gemini 2.5 Flash (Proxy)": {
+    "Cerebro Gemini 2.5 Flash": {
       "main": [
         [
           {
