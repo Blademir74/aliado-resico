@@ -182,9 +182,9 @@ CREATE POLICY "anon_insert_fiscal_metrics"
     ON public.fiscal_metrics FOR INSERT TO anon
     WITH CHECK (true);
 
-CREATE POLICY "anon_update_fiscal_metrics"
+CREATE POLICY "anon_no_update_fiscal_metrics"
     ON public.fiscal_metrics FOR UPDATE TO anon
-    USING (true) WITH CHECK (true);
+    USING (false) WITH CHECK (false);
 
 -- ============================================================
 -- 11. RLS — audit_log (solo service_role)

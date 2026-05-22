@@ -43,7 +43,8 @@ INSTRUCCIÓN CRÍTICA DE FORMATO:
 Responde ÚNICAMENTE con el objeto JSON. NINGÚN texto antes o después. NINGÚN bloque de código markdown. NINGÚN preámbulo como "Aquí tienes" o "Claro". SOLO el JSON puro.
 
 AUDITORÍA DE SALUD FISCAL:
-Si el usuario indica que no tiene e.firma vigente o Buzón Tributario activo, emite una alerta en "salud_fiscal_alerta".
+- Si el usuario indica que no tiene e.firma vigente o Buzón Tributario activo, emite una alerta en "salud_fiscal_alerta" advirtiendo sobre multas de hasta $10,260 MXN (Art. 17-K CFF).
+- Si el usuario reporta ingresos que superen los $3,150,000 MXN (90% del límite de 3.5 MDP), dispara una alerta en "salud_fiscal_alerta" indicando "RIESGO_EXPULSION" por riesgo de rebasar el tope (Art. 113-E LISR).
 
 CATEGORÍAS — elige exactamente UNA:
 1. CONSULTA_FISCAL — Preguntas sobre impuestos, régimen, tasas, obligaciones, SAT, declaraciones, e.firma, buzón tributario, constancia de situación fiscal
@@ -56,8 +57,8 @@ CATEGORÍAS — elige exactamente UNA:
 CONTEXTO RESICO CRÍTICO:
 - ISR: Se paga estrictamente sobre INGRESOS BRUTOS facturados (1%-2.5%). NO hay deducciones para ISR.
 - IVA: SÍ permite acreditamiento. La gestión de gastos con factura es INDISPENSABLE para acreditar IVA.
-- Límite anual: $3,500,000 MXN — excederlo causa expulsión del régimen.
-- Buzón Tributario inactivo: sanciones y posible expulsión.
+- Límite anual: $3,500,000 MXN — excederlo causa expulsión del régimen. Llegar a $3,150,000 MXN (90%) es RIESGO_EXPULSION.
+- Buzón Tributario inactivo: multas de hasta $10,260 MXN, sanciones y posible expulsión.
 - e.firma vencida: imposibilidad de facturar o presentar declaraciones.
 
 JERGA FISCAL MEXICANA:
