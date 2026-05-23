@@ -1,12 +1,14 @@
 /* ============================================
-ALIADO RESICO — Intent Classifier Engine v2.3
-Proxy-Only, JSON Strict, Fiscal Alerts
+ALIADO RESICO — Intent Classifier Engine v3.0
+✅ Proxy-Only | Fiscal Compliance | JSON Strict
+Cumplimiento: CFF Art. 17-K, 86-C | LISR Art. 113-E
 ============================================ */
 const IntentClassifier = (() => {
   const classificationCache = new Map();
   const CACHE_MAX = 100;
-  const CACHE_TTL = 5 * 60 * 1000;
+  const CACHE_TTL = 5 * 60 * 1000; // 5 minutos
 
+  // 🗣️ Slang Map (referencia en prompt + fallback local)
   const SLANG_MAP = {
     'la chiva': 'el sat', 'el chivo': 'el sat', 'hacienda': 'el sat',
     'timbrar': 'emitir cfdi', 'sellar': 'emitir cfdi', 'facturar': 'emitir cfdi',
@@ -14,23 +16,48 @@ const IntentClassifier = (() => {
     'lana': 'dinero', 'varo': 'dinero', 'chambear': 'trabajar'
   };
 
-  // 🔑 JSON KEYS SIN ESPACIOS (crítico para parseo)
+  // 🧠 SYSTEM PROMPT — Cumplimiento Fiscal Integrado
   const SYSTEM_PROMPT = `Eres un clasificador fiscal mexicano EXPERTO en RESICO.
 INSTRUCCIÓN CRÍTICA: Responde ÚNICAMENTE con JSON válido. NINGÚN texto extra. NINGÚN markdown.
-CATEGORÍAS: CONSULTA_FISCAL, SOLICITUD_FACTURA, REGISTRO_GASTO, REPORTE_PAGO, SALUD_FISCAL, OTROS
-CONTEXTO RESICO: ISR sobre ingresos brutos (1%-2.5%). IVA acreditable con factura. Límite $3.5M/año.
-ALERTAS FISCALES: Si menciona buzón inactivo o e.firma vencida, pon salud_fiscal_alerta con referencia Art. 17-K CFF ($10,260 MXN). Si ingresos >$3.15M, pon RIESGO_EXPULSION (Art. 113-E LISR).
-ESQUEMA EXACTO: {"intent":"CATEGORIA","confidence":0.95,"keywords_detected":["k1"],"explanation":"breve","resico_context":"nota","salud_fiscal_alerta":"alerta o null"}`;
 
-  function extractJSON(raw) {
-    if (!raw || typeof raw !== 'string') return null;
-    const cleaned = raw.replace(/`(?:json)?\s*([\s\S]*?)`/gi, '$1').trim();
+CATEGORÍAS (elige exactamente UNA):
+CONSULTA_FISCAL | SOLICITUD_FACTURA | REGISTRO_GASTO | REPORTE_PAGO | SALUD_FISCAL | OTROS
+
+CONTEXTO RESICO (Art. 113-E LISR):
+• ISR: Se paga sobre INGRESOS BRUTOS facturados (tasas 1%-2.5%). NO hay deducciones para ISR.
+• IVA: SÍ permite acreditamiento. Requiere gastos con factura CFDI 4.0 válida.
+• Límite anual: $3,500,000 MXN. Excederlo causa expulsión automática al Régimen de Actividad Empresarial (tasas hasta 35%).
+• Alerta temprana: $3,150,000 MXN (90%) = RIESGO_EXPULSION.
+
+AUDITORÍA DE SALUD FISCAL (CFF Art. 17-K, 86-C):
+• Buzón Tributario inactivo: Multa inmediata $3,420-$10,260 MXN (Art. 17-K CFF).
+• Reincidencia: La multa puede DUPLICARSE hasta $20,520 MXN (Art. 86-C, fracción II, CFF).
+• e.firma vencida: Vigencia máxima 4 años (Art. 17-D CFF). Sin e.firma vigente NO se puede facturar ni declarar.
+
+REGLAS DE ALERTA:
+1. Si usuario menciona "buzón inactivo", "no tengo buzón", "no me llega": 
+   → salud_fiscal_alerta: "⚠️ Multa $10,260 MXN (Art. 17-K CFF). Reincidencia duplica multa (Art. 86-C CFF). Active su buzón en sat.gob.mx"
+2. Si usuario reporta ingresos ≥ $3,150,000 MXN:
+   → salud_fiscal_alerta: "🚨 RIESGO_EXPULSION (Art. 113-E LISR). Al rebasar $3.5M, el SAT lo pasará automáticamente al Régimen General con tasas hasta 35%."
+3. Si usuario menciona "e.firma vencida" o fecha >4 años:
+   → salud_fiscal_alerta: "🔒 e.firma vencida (Art. 17-D CFF). Bloqueo total de facturación y declaraciones. Renueve en sat.gob.mx con CURP y datos biométricos."
+
+JERGA MEXICANA: "la chiva"=SAT, "timbrar"=emitir CFDI, "lana"=dinero, "recibito"=ticket
+
+ESQUEMA DE RESPUESTA OBLIGATORIO (SOLO JSON, sin texto adicional):
+{"intent":"CATEGORIA","confidence":0.95,"keywords_detected":["k1"],"explanation":"breve razón","resico_context":"nota ISR/IVA o null","salud_fiscal_alerta":"alerta o null"}`;
+
+  // 🔐 Parser blindado para extraer JSON de respuestas de Gemini
+  function extractJSON(rawText) {
+    if (!rawText || typeof rawText !== 'string') return null;
+    const cleaned = rawText.replace(/`(?:json)?\s*([\s\S]*?)`/gi, '$1').trim();
     const start = cleaned.indexOf('{'), end = cleaned.lastIndexOf('}');
     return (start !== -1 && end > start) ? cleaned.slice(start, end + 1) : null;
   }
 
-  async function classifyWithGemini(message) {
-    // ✅ Sanitización segura
+  // 🌐 Llamada al proxy server-side (NUNCA directo a Gemini)
+  async function classifyWithProxy(message) {
+    // ✅ Sanitización de entrada
     const sanitizedMessage = message.replace(/["\\]/g, '').slice(0, 1500);
     
     const response = await fetch('/api/gemini-proxy', {
@@ -42,10 +69,14 @@ ESQUEMA EXACTO: {"intent":"CATEGORIA","confidence":0.95,"keywords_detected":["k1
       }),
     });
 
-    if (!response.ok) throw new Error(`Gemini HTTP ${response.status}`);
+    if (!response.ok) {
+      const err = await response.json().catch(() => ({}));
+      throw new Error(err.error?.message || `Proxy HTTP ${response.status}`);
+    }
+
     const data = await response.json();
     const rawText = data.candidates?.[0]?.content?.parts?.[0]?.text;
-    if (!rawText) throw new Error('Respuesta vacía');
+    if (!rawText) throw new Error('Respuesta vacía del proxy');
 
     const jsonString = extractJSON(rawText);
     if (!jsonString) throw new Error('No JSON válido en respuesta');
@@ -60,11 +91,12 @@ ESQUEMA EXACTO: {"intent":"CATEGORIA","confidence":0.95,"keywords_detected":["k1
       explanation: parsed.explanation || '',
       resico_context: parsed.resico_context || null,
       salud_fiscal_alerta: parsed.salud_fiscal_alerta || null,
-      source: 'gemini'
+      source: 'gemini_proxy',
+      _meta: data._meta // Para debugging en desarrollo
     };
   }
 
-  // Fallback local corregido (typos eliminados)
+  // 🔄 Fallback local corregido (typos eliminados)
   const INTENT_KEYWORDS = {
     CONSULTA_FISCAL: [
       { word: 'resico', weight: 1.0 }, { word: 'isr', weight: 0.9 }, { word: 'declaración', weight: 0.8 },
@@ -81,6 +113,10 @@ ESQUEMA EXACTO: {"intent":"CATEGORIA","confidence":0.95,"keywords_detected":["k1
     REPORTE_PAGO: [
       { word: 'pago', weight: 0.7 }, { word: 'transferencia', weight: 0.9 }, { word: 'oxxo', weight: 0.9 },
       { word: 'deposité', weight: 0.9 }, { word: 'comprobante', weight: 0.8 }
+    ],
+    SALUD_FISCAL: [
+      { word: 'buzón', weight: 0.9 }, { word: 'efirma', weight: 0.9 }, { word: 'vencida', weight: 0.7 },
+      { word: 'multa', weight: 0.8 }, { word: 'sat', weight: 0.5 }
     ],
     OTROS: [{ word: 'hola', weight: 0.9 }, { word: 'gracias', weight: 0.8 }]
   };
@@ -101,17 +137,20 @@ ESQUEMA EXACTO: {"intent":"CATEGORIA","confidence":0.95,"keywords_detected":["k1
       confidence: Math.min(0.9, 0.4 + bestScore * 0.1),
       keywords_matched: matched,
       explanation: `Clasificación local: ${best}`,
-      resico_context: null, salud_fiscal_alerta: null, source: 'local'
+      resico_context: null, 
+      salud_fiscal_alerta: null, 
+      source: 'local'
     };
   }
 
+  // 🎯 Función principal de clasificación
   async function classify(message) {
     const key = message.trim().toLowerCase();
     const cached = classificationCache.get(key);
     if (cached && Date.now() - cached.ts < CACHE_TTL) return { ...cached.res, source: 'cached' };
 
     try {
-      const res = await classifyWithGemini(message);
+      const res = await classifyWithProxy(message);
       if (classificationCache.size >= CACHE_MAX) classificationCache.delete(classificationCache.keys().next().value);
       classificationCache.set(key, { res, ts: Date.now() });
       return res;
