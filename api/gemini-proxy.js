@@ -1,17 +1,19 @@
 // api/gemini-proxy.js
-// Vercel Edge Function — Puente seguro frontend → Google AI Studio
-// ✅ Cero exposición de API keys | Rate limiting | Auditoría integrada
+// Vercel Edge Function — Región iad1 + Google AI Studio Compatible
+// ✅ Sin fugas | Rate limiting | Auditoría fiscal integrada
 
 export const config = {
   runtime: 'edge',
-  regions: ['scl1'], // Región más cercana a México
+  // ✅ Región única: iad1 (Washington) — Compatible con Google AI Studio
+  // Alternativa: ['global'] para multi-región (mayor latencia)
+  regions: ['iad1'],
 };
 
 // Rate limiting in-memory (para producción usar Redis/Upstash)
 const rateLimitStore = new Map();
 const RATE_LIMIT = {
-  MAX_REQUESTS: 100,      // Máximo por hora por IP
-  WINDOW_MS: 60 * 60 * 1000, // 1 hora en milisegundos
+  MAX_REQUESTS: 100,
+  WINDOW_MS: 60 * 60 * 1000,
 };
 
 function checkRateLimit(ip) {
@@ -31,7 +33,7 @@ function checkRateLimit(ip) {
   return { allowed: true, remaining: RATE_LIMIT.MAX_REQUESTS - user.count, resetAt: user.resetAt };
 }
 
-// Limpieza periódica de store (cada 15 min)
+// Limpieza periódica
 setInterval(() => {
   const now = Date.now();
   for (const [ip, data] of rateLimitStore.entries()) {
@@ -40,12 +42,11 @@ setInterval(() => {
 }, 15 * 60 * 1000);
 
 export default async function handler(req) {
-  // 🔒 CORS estricto — solo dominio autorizado
+  // 🔒 CORS estricto
   const allowedOrigins = [
     'https://aliado-resico.vercel.app',
     'https://aliadoresico.com',
     process.env.NODE_ENV === 'development' ? 'http://localhost:3000' : null,
-    process.env.NODE_ENV === 'development' ? 'http://127.0.0.1:3000' : null,
   ].filter(Boolean);
   
   const origin = req.headers.get('origin') || '';
@@ -64,23 +65,15 @@ export default async function handler(req) {
     'Access-Control-Allow-Headers': 'Content-Type, Authorization, X-Forwarded-For',
     'Content-Type': 'application/json',
     'Vary': 'Origin',
-    // 🔐 Headers de seguridad adicionales
     'X-Content-Type-Options': 'nosniff',
     'X-Frame-Options': 'DENY',
     'X-XSS-Protection': '1; mode=block',
     'Strict-Transport-Security': 'max-age=31536000; includeSubDomains',
   });
 
-  // Preflight CORS
-  if (req.method === 'OPTIONS') {
-    return new Response(null, { status: 204, headers });
-  }
-
+  if (req.method === 'OPTIONS') return new Response(null, { status: 204, headers });
   if (req.method !== 'POST') {
-    return new Response(JSON.stringify({ error: 'Method not allowed' }), {
-      status: 405,
-      headers
-    });
+    return new Response(JSON.stringify({ error: 'Method not allowed' }), { status: 405, headers });
   }
 
   // 🔐 VALIDACIÓN DE API KEY (SOLO SERVER)
@@ -94,30 +87,23 @@ export default async function handler(req) {
     }), { status: 500, headers });
   }
 
-  // 🎯 Modelo fijo y validado
+  // 🎯 Modelo fijo compatible con Google AI Studio
   const MODEL = 'gemini-1.5-flash';
   const GEMINI_URL = `https://generativelanguage.googleapis.com/v1beta/models/${MODEL}:generateContent?key=${apiKey}`;
 
-  // 📦 Parseo seguro del body
+  // 📦 Parseo seguro
   let body;
   try {
     body = await req.json();
   } catch {
-    return new Response(JSON.stringify({ error: 'Body debe ser JSON válido' }), {
-      status: 400,
-      headers
-    });
+    return new Response(JSON.stringify({ error: 'Body debe ser JSON válido' }), { status: 400, headers });
   }
 
-  // ✅ Validación estricta del payload
   if (!body?.contents || !Array.isArray(body.contents)) {
-    return new Response(JSON.stringify({ 
-      error: 'Payload inválido: se requiere campo "contents[]"',
-      code: 'INVALID_PAYLOAD'
-    }), { status: 400, headers });
+    return new Response(JSON.stringify({ error: 'Payload inválido: se requiere "contents[]"', code: 'INVALID_PAYLOAD' }), { status: 400, headers });
   }
 
-  // 🧹 Limpieza de campos no soportados en v1beta
+  // 🧹 Limpieza de campos no soportados
   if (body.generationConfig) {
     delete body.generationConfig.responseMimeType;
     delete body.generationConfig.responseSchema;
@@ -125,21 +111,17 @@ export default async function handler(req) {
   delete body.system_instruction;
   delete body.systemInstruction;
 
-  // 🔍 Sanitización de prompts: prevenir inyección
+  // 🔍 Sanitización
   const sanitizePrompt = (text) => {
     if (typeof text !== 'string') return text;
-    return text
-      .slice(0, 32000) // Límite de seguridad
-      .replace(/<script[^>]*>.*?<\/script>/gi, '')
-      .replace(/javascript:/gi, '')
-      .replace(/["\\]/g, ''); // Escape de caracteres peligrosos
+    return text.slice(0, 32000).replace(/<script[^>]*>.*?<\/script>/gi, '').replace(/javascript:/gi, '').replace(/["\\]/g, '');
   };
 
   if (body.contents[0]?.parts?.[0]?.text) {
     body.contents[0].parts[0].text = sanitizePrompt(body.contents[0].parts[0].text);
   }
 
-  // 🚦 RATE LIMITING por IP
+  // 🚦 Rate limiting
   const ip = req.headers.get('x-forwarded-for')?.split(',')[0] || 'unknown';
   const rateCheck = checkRateLimit(ip);
   
@@ -153,15 +135,12 @@ export default async function handler(req) {
       code: 'RATE_LIMITED',
       message: `Máximo ${RATE_LIMIT.MAX_REQUESTS} solicitudes por hora. Reintente después de ${new Date(rateCheck.resetAt).toLocaleTimeString('es-MX')}`,
       retryAfter: Math.ceil((rateCheck.resetAt - Date.now()) / 1000)
-    }), { 
-      status: 429, 
-      headers: { ...headers, 'Retry-After': Math.ceil((rateCheck.resetAt - Date.now()) / 1000).toString() }
-    });
+    }), { status: 429, headers: { ...headers, 'Retry-After': Math.ceil((rateCheck.resetAt - Date.now()) / 1000).toString() } });
   }
 
-  // 📡 Llamada a Gemini con timeout y retry básico
+  // 📡 Llamada a Gemini con timeout
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 15000); // 15s timeout
+  const timeout = setTimeout(() => controller.abort(), 15000);
 
   try {
     const geminiRes = await fetch(GEMINI_URL, {
@@ -176,8 +155,6 @@ export default async function handler(req) {
 
     if (!geminiRes.ok) {
       console.error(`[Proxy] Gemini ${geminiRes.status}:`, data?.error?.message);
-      
-      // Mapeo de errores para el frontend
       const errorMap = {
         400: 'Solicitud inválida a Gemini',
         401: 'Autenticación fallida con Gemini',
@@ -186,47 +163,38 @@ export default async function handler(req) {
         500: 'Error interno de Gemini',
         503: 'Servicio de Gemini no disponible',
       };
-      
       return new Response(JSON.stringify({
         error: errorMap[geminiRes.status] || `Error de Gemini: ${geminiRes.status}`,
         code: `GEMINI_${geminiRes.status}`,
-        details: process.env.NODE_ENV === 'development' ? data : undefined,
-        fiscal_hint: geminiRes.status === 429 ? 'El sistema está protegido por rate limiting. Sus datos fiscales están seguros.' : undefined
+        details: process.env.NODE_ENV === 'development' ? data : undefined
       }), { status: geminiRes.status, headers });
     }
 
-    // ✅ Respuesta exitosa con metadatos de auditoría
     return new Response(JSON.stringify({
       ...data,
       _meta: {
-        proxy_version: '2.3',
+        proxy_version: '2.4',
         timestamp: new Date().toISOString(),
         model: MODEL,
-        rate_limit: {
-          remaining: rateCheck.remaining,
-          reset_at: new Date(rateCheck.resetAt).toISOString()
-        }
+        region: 'iad1',
+        rate_limit: { remaining: rateCheck.remaining, reset_at: new Date(rateCheck.resetAt).toISOString() }
       }
     }), { status: 200, headers });
 
   } catch (error) {
     clearTimeout(timeout);
-    
     if (error.name === 'AbortError') {
       return new Response(JSON.stringify({
         error: 'Tiempo de espera agotado',
         code: 'TIMEOUT',
-        message: 'La solicitud tardó más de 15 segundos. Intente nuevamente.',
-        fiscal_hint: 'Su consulta fiscal no se procesó. No se registró ningún cambio en sus datos.'
+        message: 'La solicitud tardó más de 15 segundos. Intente nuevamente.'
       }), { status: 504, headers });
     }
-
     console.error('[Proxy] Error de red:', error.message);
     return new Response(JSON.stringify({
       error: 'Error de conectividad con Gemini',
       code: 'NETWORK_ERROR',
-      message: process.env.NODE_ENV === 'development' ? error.message : 'No se pudo conectar con el servicio de IA. Intente en unos momentos.',
-      fiscal_hint: 'Sus datos fiscales no fueron transmitidos. El sistema opera en modo seguro.'
+      message: process.env.NODE_ENV === 'development' ? error.message : 'No se pudo conectar con el servicio de IA.'
     }), { status: 502, headers });
   }
 }

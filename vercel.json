@@ -3,7 +3,7 @@
   "framework": null,
   "buildCommand": null,
   "outputDirectory": ".",
-
+  "regions": ["iad1"],
   "headers": [
     {
       "source": "/(.*)",
@@ -16,14 +16,14 @@
         { "key": "Strict-Transport-Security", "value": "max-age=63072000; includeSubDomains; preload" },
         {
           "key": "Content-Security-Policy",
-          "value": "default-src 'self'; script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; connect-src 'self' https://*.supabase.co wss://*.supabase.co https://aliado-resico.vercel.app; img-src 'self' data: blob:; frame-ancestors 'none';"
+          "value": "default-src 'self'; script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; connect-src 'self' https://*.supabase.co wss://*.supabase.co https://generativelanguage.googleapis.com; img-src 'self' data: blob:; frame-ancestors 'none';"
         }
       ]
     },
     {
       "source": "/api/(.*)",
       "headers": [
-        { "key": "Access-Control-Allow-Origin", "value": "*" },
+        { "key": "Access-Control-Allow-Origin", "value": "https://aliado-resico.vercel.app" },
         { "key": "Access-Control-Allow-Methods", "value": "GET, POST, OPTIONS" },
         { "key": "Access-Control-Allow-Headers", "value": "Content-Type, Authorization, X-Source, X-Version" },
         { "key": "Access-Control-Max-Age", "value": "86400" },
@@ -31,10 +31,9 @@
       ]
     }
   ],
-
   "rewrites": [
-    { "source": "/api/config",                "destination": "/api/config.js" },
-    { "source": "/api/gemini-proxy",          "destination": "/api/gemini-proxy.js" },
-    { "source": "/api/telegram-diagnostics",  "destination": "/api/telegram-diagnostics.js" }
+    { "source": "/api/config", "destination": "/api/config.js" },
+    { "source": "/api/gemini-proxy", "destination": "/api/gemini-proxy.js" },
+    { "source": "/api/telegram-diagnostics", "destination": "/api/telegram-diagnostics.js" }
   ]
 }
