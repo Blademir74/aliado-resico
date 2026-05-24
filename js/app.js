@@ -1,340 +1,258 @@
 /* ============================================
-   ALIADO RESICO — App Core v4.1
-   Bug fix: process is not defined → eliminado
-   Bug fix: Supabase init secuenciado
-   ISR: ingresos brutos | IVA: precisión ≥ 97%
-   Art. 113-E LISR | Art. 17-K & 86-C CFF
+   ALIADO RESICO — App Core v5.0
+   Fix: process is not defined → eliminado
+   Fix: RFC validator inline (sin dependencia)
+   Fix: Chat wired a Chat.init()
+   Fix: OCR funciona sin DocumentProcessor
    ============================================ */
-
 const App = (() => {
-  const VIEWS = ['dashboard', 'classifier', 'documents'];
+  const VIEWS = ['dashboard', 'classifier', 'documents', 'settings'];
 
-  // =============================================
-  // DETECCIÓN DE ENTORNO — SIN process.env
-  // Usa window.location, nunca Node.js globals
-  // =============================================
-  const IS_PROD = !(
-    window.location.hostname === 'localhost' ||
-    window.location.hostname === '127.0.0.1' ||
-    window.location.hostname.startsWith('192.168.')
-  );
+  // ------------------------------------------
+  // ENTORNO — solo window.location, cero Node
+  // ------------------------------------------
+  const IS_DEV = ['localhost','127.0.0.1'].includes(window.location.hostname)
+    || window.location.hostname.startsWith('192.168.');
 
-  // =============================================
-  // ROUTER SPA
-  // =============================================
-  function navigateTo(viewName) {
-    if (!VIEWS.includes(viewName)) return;
-
+  // ------------------------------------------
+  // ROUTER
+  // ------------------------------------------
+  function navigateTo(view) {
+    if (!VIEWS.includes(view)) return;
     VIEWS.forEach(v => {
       const el = document.getElementById(`${v}-tab`);
       if (el) { el.classList.remove('active'); el.hidden = true; }
     });
-
-    const target = document.getElementById(`${viewName}-tab`);
+    const target = document.getElementById(`${view}-tab`);
     if (target) { target.classList.add('active'); target.hidden = false; }
-
-    document.querySelectorAll('.nav-btn').forEach(btn => {
-      const match = btn.getAttribute('data-tab') === viewName;
+    document.querySelectorAll('.nav-btn[data-tab]').forEach(btn => {
+      const match = btn.getAttribute('data-tab') === view;
       btn.classList.toggle('active', match);
       btn.setAttribute('aria-selected', String(match));
     });
-
-    if (viewName === 'dashboard') {
-      // Pequeño delay para que el tab sea visible antes de renderizar
-      setTimeout(() => Dashboard?.syncAndRender?.(), 50);
-    }
-
-    window.location.hash = viewName;
+    if (view === 'dashboard') setTimeout(() => Dashboard?.syncAndRender?.(), 60);
+    window.location.hash = view;
   }
 
   function initNavigation() {
-    document.querySelectorAll('.nav-btn[data-tab]').forEach(btn => {
-      btn.addEventListener('click', () => navigateTo(btn.getAttribute('data-tab')));
-    });
-
+    document.querySelectorAll('.nav-btn[data-tab]').forEach(btn =>
+      btn.addEventListener('click', () => navigateTo(btn.getAttribute('data-tab')))
+    );
     const hash = window.location.hash.replace('#', '');
     navigateTo(VIEWS.includes(hash) ? hash : 'dashboard');
-
     window.addEventListener('hashchange', () => {
       const h = window.location.hash.replace('#', '');
       if (VIEWS.includes(h)) navigateTo(h);
     });
   }
 
-  // =============================================
-  // THEME — dark/light toggle
-  // Bug fix: usa localStorage para preferencia,
-  // nunca toca process.env
-  // =============================================
+  // ------------------------------------------
+  // THEME
+  // ------------------------------------------
   function initTheme() {
-    const toggle = document.getElementById('theme-toggle');
-    if (!toggle) return;
-
-    const saved = localStorage.getItem('theme') || 'dark';
-    document.body.classList.toggle('light-mode', saved === 'light');
-    toggle.textContent = saved === 'light' ? '☀️' : '🌙';
-
-    toggle.addEventListener('click', () => {
-      const isLight = document.body.classList.toggle('light-mode');
-      localStorage.setItem('theme', isLight ? 'light' : 'dark');
-      toggle.textContent = isLight ? '☀️' : '🌙';
+    const btn = document.getElementById('theme-toggle');
+    if (!btn) return;
+    const apply = (mode) => {
+      document.body.classList.toggle('light-mode', mode === 'light');
+      btn.textContent = mode === 'light' ? '☀️' : '🌙';
+    };
+    apply(localStorage.getItem('theme') || 'dark');
+    btn.addEventListener('click', () => {
+      const next = document.body.classList.contains('light-mode') ? 'dark' : 'light';
+      localStorage.setItem('theme', next);
+      apply(next);
     });
   }
 
-  // =============================================
-  // PANEL DE CONFIGURACIÓN (solo desarrollo)
-  // Bug fix: sin process.env — usa IS_PROD
-  // =============================================
-  function initSettings() {
-    // Ocultar panel dev en producción
-    const devConfig = document.getElementById('dev-config');
-    if (devConfig && IS_PROD) {
-      devConfig.hidden = true;
-    }
+  // ------------------------------------------
+  // RFC VALIDATOR — standalone, sin dependencias
+  // ------------------------------------------
+  const RFC_PF = /^[A-ZÑ&]{4}\d{6}[A-Z0-9]{3}$/;
+  const RFC_PM = /^[A-ZÑ&]{3}\d{6}[A-Z0-9]{3}$/;
+  const RFC_GENERIC = ['XAXX010101000', 'XEXX010101000'];
 
-    // RFC Validator
+  function validateRFC(raw) {
+    if (!raw) return { valid: false, error: 'Ingresa un RFC.' };
+    const rfc = raw.trim().toUpperCase();
+    if (RFC_GENERIC.includes(rfc)) return { valid: true, type: 'RFC Genérico SAT', date: 'N/A', rfc };
+    const isPF = RFC_PF.test(rfc);
+    const isPM = RFC_PM.test(rfc);
+    if (!isPF && !isPM) return { valid: false, error: `Formato inválido. Longitud ${rfc.length} (esperado 12 PM / 13 PF).`, rfc };
+    const datePart = rfc.slice(isPF ? 4 : 3, isPF ? 10 : 9);
+    const yr = parseInt(datePart.slice(0,2), 10);
+    const yr4 = yr <= 24 ? 2000 + yr : 1900 + yr;
+    const fecha = `${yr4}-${datePart.slice(2,4)}-${datePart.slice(4,6)}`;
+    return { valid: true, type: isPF ? 'Persona Física' : 'Persona Moral', date: fecha, rfc };
+  }
+
+  function initSettings() {
+    // Panel dev: solo visible en localhost
+    const devPanel = document.getElementById('dev-config');
+    if (devPanel) devPanel.hidden = !IS_DEV;
+
+    // RFC
     const rfcBtn    = document.getElementById('rfc-validate-btn');
     const rfcInput  = document.getElementById('rfc-input');
     const rfcResult = document.getElementById('rfc-result');
-
     if (rfcBtn && rfcInput && rfcResult) {
-      const validateRFC = (rfc) => {
-        if (!rfc) return { valid: false, error: 'Ingresa un RFC.' };
-        const rfcClean = rfc.trim().toUpperCase();
-        // Persona Física: 4 letras + 6 dígitos + 3 alfanuméricos = 13 chars
-        // Persona Moral:  3 letras + 6 dígitos + 3 alfanuméricos = 12 chars
-        const rgx = /^([A-ZÑ&]{3,4})(\d{6})([A-Z0-9]{3})$/;
-        if (!rgx.test(rfcClean)) return { valid: false, error: 'Formato inválido. Usa 12 (PM) o 13 (PF) caracteres.' };
-        const tipo = rfcClean.length === 13 ? 'Persona Física' : 'Persona Moral';
-        const raw  = rfcClean.slice(-9, -3);
-        const yr   = parseInt(raw.slice(0, 2), 10);
-        const yr4  = yr > 24 ? 1900 + yr : 2000 + yr;
-        const fecha = `${yr4}-${raw.slice(2, 4)}-${raw.slice(4, 6)}`;
-        return { valid: true, tipo, fecha };
+      const run = () => {
+        const r = validateRFC(rfcInput.value);
+        rfcResult.innerHTML = r.valid
+          ? `<span class="success">✅ ${r.type} — <code>${r.rfc}</code><br><small>Fecha: ${r.date}</small></span>`
+          : `<span class="error">❌ ${r.error}</span>`;
       };
-
-      rfcBtn.addEventListener('click', () => {
-        const res = validateRFC(rfcInput.value);
-        rfcResult.innerHTML = res.valid
-          ? `<span class="success">✅ RFC válido — ${res.tipo}<br><small>Fecha de nacimiento/constitución: ${res.fecha}</small></span>`
-          : `<span class="error">❌ ${res.error}</span>`;
-      });
-      rfcInput.addEventListener('keydown', e => { if (e.key === 'Enter') rfcBtn.click(); });
+      rfcBtn.addEventListener('click', run);
+      rfcInput.addEventListener('keydown', e => { if (e.key === 'Enter') run(); });
     }
 
-    // Botones de ejemplo en el clasificador
-    document.querySelectorAll('.example-btn[data-msg]').forEach(btn => {
+    // Quick examples en clasificador
+    document.querySelectorAll('.quick-example-btn[data-msg]').forEach(btn =>
       btn.addEventListener('click', () => {
-        const input = document.getElementById('classifier-input');
-        if (input) { input.value = btn.getAttribute('data-msg'); input.focus(); }
-      });
-    });
+        const inp = document.getElementById('chat-input');
+        if (inp) { inp.value = btn.getAttribute('data-msg'); inp.focus(); }
+      })
+    );
 
-    // WhatsApp
-    document.getElementById('whatsapp-btn')?.addEventListener('click', () => {
-      window.open('https://wa.me/521XXXXXXXXXX?text=Hola%2C+necesito+ayuda+con+mi+RESICO', '_blank');
-    });
-
-    // Refresh feed
-    document.getElementById('refresh-feed')?.addEventListener('click', () => {
-      Dashboard?.syncAndRender?.();
-    });
-
-    // Botones de test en panel dev
+    // Test botones en panel dev
     document.getElementById('gemini-test')?.addEventListener('click', async () => {
-      const key = document.getElementById('gemini-key')?.value?.trim();
-      if (!key) return alert('Ingresa una API Key primero');
       try {
         const r = await fetch('/api/gemini-proxy', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ contents: [{ parts: [{ text: 'Responde solo OK' }] }] }),
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ contents: [{ parts: [{ text: 'Di solo OK' }] }] }),
         });
-        alert(r.ok ? '✅ Proxy Gemini responde correctamente' : `❌ Error ${r.status}`);
-      } catch (e) {
-        alert('❌ ' + e.message);
-      }
+        alert(r.ok ? '✅ Proxy Gemini OK' : `❌ Error ${r.status}`);
+      } catch (e) { alert('❌ ' + e.message); }
     });
 
     document.getElementById('supabase-test')?.addEventListener('click', async () => {
       const client = window.APP_STATE?.supabase;
-      if (!client) return alert('❌ Supabase no inicializado. Revisa las credenciales.');
+      if (!client) return alert('❌ Supabase no inicializado');
       try {
         const { error } = await client.from('conversations').select('id').limit(1);
-        alert(error ? `❌ ${error.message}` : '✅ Supabase conectado correctamente');
-      } catch (e) {
-        alert('❌ ' + e.message);
-      }
+        alert(error ? `❌ ${error.message}` : '✅ Supabase OK');
+      } catch (e) { alert('❌ ' + e.message); }
     });
+
+    document.getElementById('refresh-feed')?.addEventListener('click', () =>
+      Dashboard?.syncAndRender?.()
+    );
   }
 
-  // =============================================
-  // DOCUMENTOS / OCR
-  // =============================================
-  const FISCAL_EDUCATION = {
-    ISR: {
-      title: '📘 ISR en RESICO',
-      body: 'El ISR se calcula sobre tus <strong>ingresos brutos</strong>, sin deducir gastos. '
-          + 'La tasa va del 1% al 2.5% mensual según el monto acumulado. '
-          + 'No necesitas facturar tus gastos para calcular el ISR.',
-      ref:  'Art. 113-E LISR 2024',
-      css:  'isr',
-    },
-    IVA: {
-      title: '🟣 IVA — Acreditamiento',
-      body: 'Para <strong>acreditar el IVA</strong> necesitas CFDI 4.0 válido, RFC correcto del proveedor '
-          + 'y que el gasto sea estrictamente indispensable. '
-          + 'El motor OCR requiere <strong>≥ 97% de precisión</strong> para garantizar el acreditamiento '
-          + 'sin observaciones del SAT.',
-      ref:  'Art. 5 LIVA | Regla 2.7.1.19 RMF 2024',
-      css:  'iva',
-    },
-  };
-
-  function renderFiscalNote(container, type) {
-    const note = FISCAL_EDUCATION[type];
-    if (!note || !container) return;
-    const div = document.createElement('div');
-    div.className = `ocr-fiscal-note ${note.css}`;
-    div.innerHTML = `<strong>${note.title}</strong>${note.body}
-      <span class="alert-ref">${note.ref}</span>`;
-    container.appendChild(div);
-  }
-
+  // ------------------------------------------
+  // OCR fallback: si DocumentProcessor no cargó
+  // ------------------------------------------
   function initDocuments() {
-    const dropZone  = document.getElementById('drop-zone');
-    const fileInput = document.getElementById('file-input');
-    const ocrOutput = document.getElementById('ocr-output');
-    if (!dropZone) return;
+    const zone    = document.getElementById('drop-zone');
+    const input   = document.getElementById('file-input');
+    const output  = document.getElementById('ocr-output');
+    if (!zone) return;
 
-    dropZone.addEventListener('click', () => fileInput?.click());
-
-    ['dragenter', 'dragover', 'dragleave', 'drop'].forEach(evt =>
-      dropZone.addEventListener(evt, e => { e.preventDefault(); e.stopPropagation(); })
+    zone.addEventListener('click', () => input?.click());
+    ['dragenter','dragover','dragleave','drop'].forEach(e =>
+      zone.addEventListener(e, ev => { ev.preventDefault(); ev.stopPropagation(); })
     );
-    ['dragenter', 'dragover'].forEach(evt =>
-      dropZone.addEventListener(evt, () => dropZone.classList.add('drag-over'))
-    );
-    ['dragleave', 'drop'].forEach(evt =>
-      dropZone.addEventListener(evt, () => dropZone.classList.remove('drag-over'))
-    );
+    ['dragenter','dragover'].forEach(e => zone.addEventListener(e, () => zone.classList.add('drag-over')));
+    ['dragleave','drop'].forEach(e => zone.addEventListener(e, () => zone.classList.remove('drag-over')));
 
-    const handleFile = async (file) => {
-      if (!ocrOutput || !file) return;
-      ocrOutput.innerHTML = '<div class="loading">Procesando documento fiscal...</div>';
-
+    const handle = async (file) => {
+      if (!file || !output) return;
+      output.innerHTML = '<div class="loading">🔄 Procesando documento fiscal...</div>';
       try {
-        const res = window.DocumentProcessor
-          ? await window.DocumentProcessor.processImage(file)
-          : { data: { nota: 'OCR no disponible en modo demo' }, needsHumanReview: false, confidence: 1 };
-
-        const confidence = res.data?._confidence ?? res.confidence ?? 1;
-        const isFactura  = /factura|cfdi|xml/i.test(file.name) || res.data?.tipo_documento === 'CFDI';
-
+        let res;
+        if (window.DocumentProcessor?.processImage) {
+          res = await window.DocumentProcessor.processImage(file);
+        } else {
+          // Fallback: enviar imagen directo al proxy OCR
+          res = await ocrFallback(file);
+        }
         let html = `<pre class="ocr-json">${JSON.stringify(res.data, null, 2)}</pre>`;
-
-        if (isFactura && confidence < 0.97) {
-          html += `<div class="alert-warning">
-            ⚠️ Precisión ${(confidence * 100).toFixed(1)}% — Se requiere ≥ 97% para garantizar
-            acreditamiento de IVA sin observaciones del SAT.
-            <span class="alert-ref">Art. 5 LIVA | Regla 2.7.1.19 RMF 2024</span>
-          </div>`;
-        }
-        if (res.needsHumanReview) {
-          html += `<div class="alert-warning">⚠️ Revisión humana recomendada: ${res.humanReviewReason}</div>`;
-        }
-        if (res.data?._rfc_emisor_valid === false) {
-          html += `<div class="alert-error">❌ RFC del emisor inválido — CFDI no acreditable para IVA</div>`;
-        }
-
-        ocrOutput.innerHTML = html;
-        renderFiscalNote(ocrOutput, isFactura ? 'IVA' : 'ISR');
-
-        if (window.Store && res.data) Store.saveDocument({ ...res, fileName: file.name });
-
+        if (res.needsHumanReview) html += `<div class="alert-warning">⚠️ ${res.humanReviewReason || 'Revisión recomendada'}</div>`;
+        if (res.data?._rfc_emisor_valid === false) html += `<div class="alert-error">❌ RFC emisor inválido — CFDI no acreditable</div>`;
+        const isFactura = /cfdi|factura|xml/i.test(file.name) || res.data?.document_type === 'CFDI';
+        const conf = res.data?.confidence ?? 1;
+        if (isFactura && conf < 0.97) html += `<div class="alert-warning">⚠️ Precisión ${(conf*100).toFixed(1)}% &lt; 97% requerido para acreditamiento IVA<br><small>Art. 5 LIVA | Regla 2.7.1.19 RMF 2024</small></div>`;
+        output.innerHTML = html;
+        if (window.Store) Store.saveDocument({ ...res, fileName: file.name });
       } catch (err) {
-        ocrOutput.innerHTML = `<p class="error">❌ Error al procesar: ${err.message}</p>`;
+        output.innerHTML = `<p class="error">❌ ${err.message}</p>`;
         console.error('[OCR]', err);
       }
     };
 
-    dropZone.addEventListener('drop',       e => handleFile(e.dataTransfer.files[0]));
-    fileInput?.addEventListener('change',   e => handleFile(e.target.files[0]));
+    zone.addEventListener('drop', e => handle(e.dataTransfer.files[0]));
+    input?.addEventListener('change', e => handle(e.target.files[0]));
   }
 
-  // =============================================
-  // INICIALIZACIÓN — secuencia correcta con
-  // timeouts de seguridad para CDN lento
-  // =============================================
-  async function init() {
-    console.log(
-      '%c🧠 Aliado RESICO v4.1',
-      'color:#10b981;font-weight:bold;font-size:13px'
-    );
+  async function ocrFallback(file) {
+    const b64 = await new Promise((res, rej) => {
+      const r = new FileReader();
+      r.onload = () => res(r.result.split(',')[1]);
+      r.onerror = rej;
+      r.readAsDataURL(file);
+    });
+    const resp = await fetch('/api/gemini-proxy', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        contents: [{ parts: [
+          { text: 'Eres OCR fiscal. Extrae JSON: {document_type,confidence,emisor_rfc,total,iva,fecha}. Solo JSON.' },
+          { inline_data: { mime_type: file.type || 'image/jpeg', data: b64 } }
+        ]}],
+        generationConfig: { temperature: 0.05, maxOutputTokens: 400 },
+      }),
+    });
+    if (!resp.ok) throw new Error(`OCR HTTP ${resp.status}`);
+    const d = await resp.json();
+    const txt = d.candidates?.[0]?.content?.parts?.[0]?.text || '{}';
+    const clean = txt.replace(/```json|```/g,'').trim();
+    let data = {};
+    try { data = JSON.parse(clean.slice(clean.indexOf('{'), clean.lastIndexOf('}')+1)); } catch(_){}
+    return { data, needsHumanReview: (data.confidence||0) < 0.85, humanReviewReason: 'Confianza baja' };
+  }
 
-    // 1. Módulos síncronos primero
+  // ------------------------------------------
+  // BOOT
+  // ------------------------------------------
+  async function waitFor(globalName, ms = 4000) {
+    const t0 = Date.now();
+    return new Promise(res => {
+      const check = setInterval(() => {
+        if (window[globalName] || Date.now()-t0 > ms) { clearInterval(check); res(); }
+      }, 80);
+    });
+  }
+
+  async function init() {
+    console.log('%c🧠 Aliado RESICO v5.0', 'color:#10b981;font-weight:bold;font-size:14px');
+
+    // Módulos síncronos
     initTheme();
     initNavigation();
     initSettings();
     initDocuments();
 
-    // 2. Esperar a que el CDN de Supabase esté disponible (máx 3 s)
-    await waitForSupabase(3000);
+    // Esperar librería Supabase CDN
+    await waitFor('supabase', 4000);
 
-    // 3. Inicializar BD (init-db.js la expone como window.initDatabase)
+    // Inicializar BD
     if (typeof window.initDatabase === 'function') {
-      try {
-        await window.initDatabase();
-      } catch (err) {
-        console.warn('[App] initDatabase falló — modo offline:', err.message);
-      }
-    } else {
-      console.warn('[App] init-db.js no cargado — Supabase deshabilitado');
+      try { await window.initDatabase(); }
+      catch (e) { console.warn('[App] BD offline:', e.message); }
     }
 
-    // 4. Módulos de negocio
-    const mods = ['Store', 'IntentClassifier', 'DocumentProcessor', 'Dashboard'];
-    for (const mod of mods) {
-      try {
-        if (window[mod]?.init) await window[mod].init();
-      } catch (err) {
-        console.warn(`[App] Módulo ${mod}:`, err.message);
-      }
+    // Módulos en orden
+    for (const mod of ['Store', 'IntentClassifier', 'DocumentProcessor', 'Dashboard', 'Chat', 'ConversationManager']) {
+      try { if (window[mod]?.init) await window[mod].init(); }
+      catch (e) { console.warn(`[App] ${mod}:`, e.message); }
     }
 
-    // 5. Config del servidor (producción: proxy)
-    if (window.AppConfig?.loadServerConfig) {
-      try { await window.AppConfig.loadServerConfig(); } catch (_) {}
-    }
+    // Dashboard inicial
+    try { await Dashboard?.syncAndRender?.(); }
+    catch (e) { console.warn('[App] Dashboard sync:', e.message); }
 
-    // 6. Primer render del dashboard
-    try {
-      await Dashboard?.syncAndRender?.();
-    } catch (err) {
-      console.warn('[App] Dashboard sync inicial:', err.message);
-      // Fallback: render con ceros
-      Dashboard?.renderIncomeMonitor?.(0);
-      Dashboard?.renderHealthPanel?.(true, true);
-    }
-
-    console.log('%c✅ Aliado RESICO listo', 'color:#10b981');
+    console.log('%c✅ Sistema listo', 'color:#10b981');
   }
 
-  // Helper: espera a que window.supabase (librería CDN) esté disponible
-  function waitForSupabase(timeoutMs) {
-    return new Promise(resolve => {
-      if (window.supabase?.createClient) { resolve(); return; }
-      const t0 = Date.now();
-      const check = setInterval(() => {
-        if (window.supabase?.createClient || Date.now() - t0 > timeoutMs) {
-          clearInterval(check);
-          resolve();
-        }
-      }, 100);
-    });
-  }
-
-  return { init, navigateTo, IS_PROD, FISCAL_EDUCATION };
+  return { init, navigateTo, validateRFC, IS_DEV };
 })();
 
 document.addEventListener('DOMContentLoaded', () => App.init());

@@ -1,246 +1,192 @@
 /* ============================================
-   ALIADO RESICO — Dashboard v3.0
-   Monitor Art. 113-E LISR + Salud Fiscal CFF
-   Bug fix: #income-alert-container → IDs reales
-   Bug fix: supabase client desde APP_STATE
-   Bug fix: try-catch en toda llamada async
+   ALIADO RESICO — Dashboard v5.0
+   Fix: usa APP_STATE.supabase (cliente real)
+   Fix: IDs correctos del DOM
+   Fix: maybeSingle() — no lanza si fila ausente
+   Fix: renderIncomeAlert → IDs reales del HTML
    ============================================ */
 const Dashboard = (() => {
+  const L = { MAX: 3_500_000, A80: 2_800_000, A90: 3_150_000, A94: 3_300_000 };
 
-  const LIMITS = {
-    MAX: 3_500_000,
-    A80: 2_800_000,
-    A90: 3_150_000,
-    A94: 3_300_000,
-  };
-
-  // =============================================
-  // LÓGICA DE ALERTAS — Art. 113-E LISR
-  // =============================================
-  function getAlertLevel(income) {
-    const pct = (income / LIMITS.MAX) * 100;
-    if (income >= LIMITS.MAX) return {
-      level: 'expelled', pct: 100,
-      badge: '❌ EXPULSADO',
-      msg: `<strong>LÍMITE REBASADO ($${income.toLocaleString('es-MX')} MXN).</strong>
-        Expulsión automática al Régimen General. Tasas de hasta 35%.`,
-      ref: 'Art. 113-E, fracción III, LISR 2024',
-    };
-    if (income >= LIMITS.A94) return {
-      level: 'critical', pct,
-      badge: `🔴 CRÍTICO ${pct.toFixed(1)}%`,
-      msg: `<strong>ALERTA ROJA — $${income.toLocaleString('es-MX')} MXN (${pct.toFixed(1)}%).</strong>
-        Margen restante: $${(LIMITS.MAX - income).toLocaleString('es-MX')} MXN.
-        Detén operaciones facturadas hasta el cierre del ejercicio.`,
-      ref: 'Art. 113-E, fracción III, LISR 2024',
-    };
-    if (income >= LIMITS.A90) return {
-      level: 'high', pct,
-      badge: `🟠 RIESGO ${pct.toFixed(1)}%`,
-      msg: `<strong>ALERTA NARANJA — $${income.toLocaleString('es-MX')} MXN (${pct.toFixed(1)}%).</strong>
-        Margen restante: $${(LIMITS.MAX - income).toLocaleString('es-MX')} MXN.
-        Consulta con tu contador la proyección de ingresos del trimestre.`,
-      ref: 'Art. 113-E, fracción III, LISR 2024',
-    };
-    if (income >= LIMITS.A80) return {
-      level: 'warning', pct,
-      badge: `⚠️ ALERTA ${pct.toFixed(1)}%`,
-      msg: `<strong>ALERTA AMARILLA — $${income.toLocaleString('es-MX')} MXN (${pct.toFixed(1)}%).</strong>
-        Quedan $${(LIMITS.MAX - income).toLocaleString('es-MX')} MXN de margen anual.`,
-      ref: 'Art. 113-E, fracción III, LISR 2024',
-    };
-    return {
-      level: 'safe', pct,
-      badge: '✅ SEGURO',
-      msg: `Ingresos dentro del límite RESICO. Margen:
-        <strong>$${(LIMITS.MAX - income).toLocaleString('es-MX')} MXN</strong>.`,
-      ref: 'Art. 113-E, fracción III, LISR 2024',
-    };
+  // ------------------------------------------
+  // ALERTAS — Art. 113-E LISR
+  // ------------------------------------------
+  function level(income) {
+    const pct = (income / L.MAX) * 100;
+    if (income >= L.MAX) return { cls:'expelled', pct:100,
+      badge:'❌ EXPULSADO',
+      msg:`<strong>LÍMITE REBASADO — $${fmt(income)} MXN.</strong> Expulsión automática a Régimen General. Tasas hasta 35%.`,
+      ref:'Art. 113-E, fracc. III, LISR 2024' };
+    if (income >= L.A94) return { cls:'critical', pct,
+      badge:`🔴 CRÍTICO ${pct.toFixed(1)}%`,
+      msg:`<strong>ALERTA ROJA — $${fmt(income)} MXN.</strong> Margen restante: $${fmt(L.MAX-income)} MXN. Detén operaciones facturadas.`,
+      ref:'Art. 113-E, fracc. III, LISR 2024' };
+    if (income >= L.A90) return { cls:'high', pct,
+      badge:`🟠 RIESGO ${pct.toFixed(1)}%`,
+      msg:`<strong>ALERTA NARANJA — $${fmt(income)} MXN.</strong> Margen: $${fmt(L.MAX-income)} MXN. Revisa proyección con contador.`,
+      ref:'Art. 113-E, fracc. III, LISR 2024' };
+    if (income >= L.A80) return { cls:'warning', pct,
+      badge:`⚠️ ALERTA ${pct.toFixed(1)}%`,
+      msg:`<strong>ALERTA AMARILLA — $${fmt(income)} MXN.</strong> Quedan $${fmt(L.MAX-income)} MXN de margen anual.`,
+      ref:'Art. 113-E, fracc. III, LISR 2024' };
+    return { cls:'safe', pct,
+      badge:'✅ SEGURO',
+      msg:`Ingresos dentro del límite. Margen disponible: <strong>$${fmt(L.MAX-income)} MXN</strong>.`,
+      ref:'Art. 113-E, fracc. III, LISR 2024' };
   }
 
-  // =============================================
-  // RENDER — escribe en los IDs reales del DOM
-  // (NO usa #income-alert-container que no existe)
-  // =============================================
-  function renderIncomeMonitor(income) {
+  function fmt(n) { return n.toLocaleString('es-MX'); }
+
+  // ------------------------------------------
+  // RENDER — escribe en IDs reales del HTML
+  // (el div #income-alert-container no existe;
+  //  los IDs reales son los de abajo)
+  // ------------------------------------------
+  function renderIncomeMonitor(income = 0) {
     const fill  = document.getElementById('income-progress-fill');
     const badge = document.getElementById('income-alert-badge');
     const msg   = document.getElementById('income-alert-message');
     const curr  = document.getElementById('income-current');
     const rem   = document.getElementById('income-remaining');
-    if (!fill) return; // DOM no listo aún
+    if (!fill) return;
 
-    const a   = getAlertLevel(income);
-    const pct = Math.min(a.pct, 100);
-
-    fill.style.width = pct + '%';
-    fill.className   = `progress-fill ${a.level}`;
-
-    if (badge) { badge.className = `alert-badge ${a.level}`; badge.textContent = a.badge; }
-    if (curr)  curr.textContent  = '$' + income.toLocaleString('es-MX') + ' MXN';
-    if (rem)   rem.textContent   = '$' + Math.max(0, LIMITS.MAX - income).toLocaleString('es-MX') + ' MXN';
+    const a = level(income);
+    fill.style.width = Math.min(a.pct, 100) + '%';
+    fill.className   = `progress-fill ${a.cls}`;
+    if (badge) { badge.className = `alert-badge ${a.cls}`; badge.textContent = a.badge; }
+    if (curr)  curr.textContent  = `$${fmt(income)} MXN`;
+    if (rem)   rem.textContent   = `$${fmt(Math.max(0, L.MAX-income))} MXN`;
     if (msg) {
-      msg.className = `alert-message ${a.level}`;
+      msg.className = `alert-message ${a.cls}`;
       msg.innerHTML = a.msg + `<span class="alert-ref">${a.ref}</span>`;
     }
   }
 
-  // =============================================
+  // ------------------------------------------
   // SALUD FISCAL — Art. 17-K y 86-C CFF
-  // $10,260 MXN multa base | $20,520 reincidencia
-  // =============================================
-  function renderHealthPanel(buzonActive, efirmaActive) {
-    const buzonStatus  = document.getElementById('buzon-status');
-    const efirmaStatus = document.getElementById('efirma-status');
-    const alertBox     = document.getElementById('health-alert');
-    const alertMsg     = document.getElementById('health-alert-msg');
-    const alertRef     = document.getElementById('health-alert-ref');
+  // ------------------------------------------
+  function renderHealth(buzon, efirma) {
+    const bEl = document.getElementById('buzon-status');
+    const eEl = document.getElementById('efirma-status');
+    const box = document.getElementById('health-alert');
+    const mEl = document.getElementById('health-alert-msg');
+    const rEl = document.getElementById('health-alert-ref');
 
-    if (buzonStatus) {
-      buzonStatus.textContent = buzonActive ? '✅ Activo' : '❌ Inactivo';
-      buzonStatus.className   = 'status ' + (buzonActive ? 'ok' : 'error');
-    }
-    if (efirmaStatus) {
-      efirmaStatus.textContent = efirmaActive ? '✅ Vigente' : '⚠️ Revisar';
-      efirmaStatus.className   = 'status ' + (efirmaActive ? 'ok' : 'warning');
-    }
+    if (bEl) { bEl.textContent = buzon  ? '✅ Activo'  : '❌ Inactivo'; bEl.className = 'status ' + (buzon  ? 'ok' : 'error'); }
+    if (eEl) { eEl.textContent = efirma ? '✅ Vigente' : '⚠️ Revisar';  eEl.className = 'status ' + (efirma ? 'ok' : 'warning'); }
 
-    if (!buzonActive && alertBox) {
-      alertBox.classList.remove('hidden');
-      if (alertMsg) alertMsg.textContent =
-        'Buzón tributario inactivo. Multa inmediata: $10,260 MXN. ' +
-        'Por reincidencia la multa asciende a $20,520 MXN.';
-      if (alertRef) alertRef.textContent =
-        'Art. 17-K CFF (obligación de medios electrónicos) | Art. 86-C CFF (reincidencia)';
-    } else if (alertBox) {
-      alertBox.classList.add('hidden');
-    }
+    if (!buzon && box) {
+      box.classList.remove('hidden');
+      if (mEl) mEl.textContent = 'Buzón tributario inactivo. Multa inmediata: $10,260 MXN. Por reincidencia: $20,520 MXN.';
+      if (rEl) rEl.textContent = 'Art. 17-K CFF (medios electrónicos) | Art. 86-C CFF (reincidencia)';
+    } else if (box) { box.classList.add('hidden'); }
   }
 
-  // =============================================
-  // KPIs — usa datos de Store (sin Supabase directo)
-  // =============================================
-  function renderKPIs(metrics) {
-    const set = (id, val) => { const el = document.getElementById(id); if (el) el.textContent = val; };
-    set('kpi-total',         metrics.totalProcessed ?? 0);
-    set('kpi-auto-rate',     (metrics.autoResolutionRate ?? 0) + '%');
-    set('kpi-confidence',    (metrics.avgConfidence ?? 0) + '%');
-    set('kpi-response-time', (metrics.avgResponseTime ?? 0) + 's');
+  // ------------------------------------------
+  // KPIs
+  // ------------------------------------------
+  function renderKPIs(m = {}) {
+    const s = (id, v) => { const el = document.getElementById(id); if (el) el.textContent = v; };
+    s('kpi-total',        m.totalProcessed    || 0);
+    s('kpi-auto-rate',   (m.autoResolutionRate || 0) + '%');
+    s('kpi-confidence',  (m.avgConfidence     || 0) + '%');
+    s('kpi-response-time',(m.avgResponseTime  || 2.3).toFixed(1) + 's');
   }
 
-  // =============================================
-  // SYNC — obtiene el cliente de APP_STATE
-  // Bug fix: NO usa window.supabase directamente
-  // =============================================
-  async function syncAndRender() {
-    // 1. Renderizar KPIs desde Store local (inmediato, sin red)
-    if (window.Store) {
-      renderKPIs(Store.getMetrics());
-      renderIncomeMonitor(Store.getState().incomeYTD || 0);
-      const sf = Store.getSaludFiscal();
-      renderHealthPanel(sf.buzonTributarioActivo ?? true, sf.eFirmaVigente ?? true);
-    }
-
-    // 2. Intentar sincronizar con Supabase si el cliente está listo
-    const client = window.APP_STATE?.supabase;
-    if (!client) {
-      console.warn('[Dashboard] Cliente Supabase no disponible — usando datos locales');
-      return;
-    }
-
-    try {
-      const { data: authData, error: authErr } = await client.auth.getUser();
-      if (authErr || !authData?.user) {
-        console.warn('[Dashboard] Sin sesión de usuario — datos locales activos');
-        return;
-      }
-
-      const userId = authData.user.id;
-
-      // Métricas fiscales
-      const { data: metrics, error: metricsErr } = await client
-        .from('fiscal_metrics')
-        .select('income_ytd, total_processed, avg_confidence, by_category, updated_at')
-        .eq('user_id', userId)
-        .maybeSingle(); // maybeSingle no lanza si no encuentra fila
-
-      if (!metricsErr && metrics) {
-        renderIncomeMonitor(metrics.income_ytd || 0);
-        renderKPIs({
-          totalProcessed:    metrics.total_processed    || 0,
-          avgConfidence:     Math.round((metrics.avg_confidence || 0) * 100),
-          autoResolutionRate: 0,
-          avgResponseTime:   2.3,
-        });
-        if (window.Store) Store.updateIncome(metrics.income_ytd || 0);
-      }
-
-      // Actividad reciente
-      const { data: convs } = await client
-        .from('conversations')
-        .select('id, text, intent, confidence, created_at')
-        .eq('user_id', userId)
-        .order('created_at', { ascending: false })
-        .limit(10);
-
-      if (convs) renderFeed(convs);
-
-    } catch (err) {
-      console.error('[Dashboard] Error en sync:', err.message);
-      // No relanza — el fallback local ya renderizó
-    }
-  }
-
-  // =============================================
-  // FEED DE ACTIVIDAD
-  // =============================================
-  function renderFeed(items) {
+  // ------------------------------------------
+  // FEED
+  // ------------------------------------------
+  function renderFeed(items = []) {
     const list = document.getElementById('feed-list');
     if (!list) return;
-    if (!items?.length) {
-      list.innerHTML = '<p style="color:var(--text-muted);padding:1rem">Sin actividad reciente.</p>';
+    if (!items.length) {
+      list.innerHTML = '<p style="color:var(--text-muted);padding:1rem 0">Sin actividad reciente.</p>';
       return;
     }
-    const CAT = window.CATEGORY_CONFIG || {};
+    const CFG = window.CATEGORY_CONFIG || {};
     list.innerHTML = items.map(c => {
-      const cat = CAT[c.intent] || { icon: '💬', label: c.intent };
+      const cat = CFG[c.intent] || { icon:'💬', label: c.intent };
       const ts  = c.created_at
-        ? new Date(c.created_at).toLocaleTimeString('es-MX', { hour: '2-digit', minute: '2-digit' })
-        : '';
+        ? new Date(c.created_at).toLocaleTimeString('es-MX',{hour:'2-digit',minute:'2-digit'})
+        : c.time || '';
+      const txt = (c.text || '').slice(0, 90) + ((c.text?.length > 90) ? '…' : '');
       return `<div class="feed-item">
         <span class="feed-icon">${cat.icon}</span>
         <div class="feed-body">
-          <span class="feed-text">${c.text?.slice(0, 80) ?? ''}${(c.text?.length > 80) ? '...' : ''}</span>
-          <span class="feed-meta">${cat.label} · ${Math.round((c.confidence || 0) * 100)}% · ${ts}</span>
+          <span class="feed-text">${txt}</span>
+          <span class="feed-meta">${cat.label} · ${Math.round((c.confidence||0)*100)}% · ${ts}</span>
         </div>
       </div>`;
     }).join('');
   }
 
-  // =============================================
-  // INIT
-  // =============================================
-  function init() {
-    // Render inmediato con datos locales
-    renderIncomeMonitor(0);
-    renderHealthPanel(true, true);
-
-    // Suscribirse a eventos del Store
+  // ------------------------------------------
+  // SYNC — cliente desde APP_STATE, no window.supabase
+  // ------------------------------------------
+  async function syncAndRender() {
+    // 1. Render inmediato desde Store local
     if (window.Store) {
-      Store.on('income:updated',    income  => renderIncomeMonitor(income));
-      Store.on('metrics:updated',   metrics => renderKPIs(metrics));
-      Store.on('saludFiscal:updated', sf    => renderHealthPanel(sf.buzonTributarioActivo, sf.eFirmaVigente));
+      renderKPIs(Store.getMetrics());
+      renderIncomeMonitor(Store.getState().incomeYTD || 0);
+      const sf = Store.getSaludFiscal();
+      renderHealth(
+        sf.buzonTributarioActivo !== false,
+        sf.eFirmaVigente !== false
+      );
+      renderFeed(Store.getConversations().slice(0, 10));
+    }
+
+    // 2. Sync con Supabase si hay cliente y sesión
+    const client = window.APP_STATE?.supabase;
+    if (!client) return;
+
+    try {
+      const { data: auth } = await client.auth.getUser();
+      const uid = auth?.user?.id;
+      if (!uid) return;
+
+      const [{ data: met }, { data: convs }] = await Promise.all([
+        client.from('fiscal_metrics')
+          .select('income_ytd,total_processed,avg_confidence')
+          .eq('user_id', uid).maybeSingle(),
+        client.from('conversations')
+          .select('id,text,intent,confidence,created_at')
+          .eq('user_id', uid)
+          .order('created_at', { ascending: false }).limit(10),
+      ]);
+
+      if (met) {
+        renderIncomeMonitor(met.income_ytd || 0);
+        renderKPIs({
+          totalProcessed:    met.total_processed    || 0,
+          avgConfidence:     Math.round((met.avg_confidence || 0) * 100),
+          autoResolutionRate: 0,
+          avgResponseTime:   2.3,
+        });
+        Store?.updateIncome?.(met.income_ytd || 0);
+      }
+      if (convs) renderFeed(convs);
+
+    } catch (err) {
+      console.warn('[Dashboard] sync:', err.message);
     }
   }
 
-  return {
-    init,
-    syncAndRender,
-    renderIncomeMonitor,
-    renderHealthPanel,
-    renderKPIs,
-    LIMITS,
-  };
-})();
+  // ------------------------------------------
+  // INIT
+  // ------------------------------------------
+  function init() {
+    renderIncomeMonitor(0);
+    renderHealth(true, true);
 
+    if (window.Store) {
+      Store.on('income:updated',      v  => renderIncomeMonitor(v));
+      Store.on('metrics:updated',     m  => renderKPIs(m));
+      Store.on('saludFiscal:updated', sf => renderHealth(sf.buzonTributarioActivo, sf.eFirmaVigente));
+      Store.on('conversation:added',  () => renderFeed(Store.getConversations().slice(0,10)));
+    }
+  }
+
+  return { init, syncAndRender, renderIncomeMonitor, renderHealth, renderKPIs, LIMITS: L };
+})();
 if (typeof window !== 'undefined') window.Dashboard = Dashboard;
