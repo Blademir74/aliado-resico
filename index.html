@@ -34,7 +34,7 @@
   <!-- 🎨 PERFORMANCE & CSS -->
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link rel="stylesheet" href="/style.css">
+  <link rel="stylesheet" href="./styles.css">
   <link rel="icon" type="image/x-icon" href="/favicon.ico">
 </head>
 <body class="dark-mode">
@@ -194,18 +194,79 @@
 
   <!-- 🔗 Scripts (Orden seguro para módulos) -->
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2" defer></script>
-  <script src="/js/config.js" defer></script>
-  <script src="/js/store.js" defer></script>
-  <script src="/js/classifier.js" defer></script>
-  <script src="/js/ocr.js" defer></script>
-  <script src="/js/dashboard.js" defer></script>
-  <script src="/app.js" defer></script>
+  <script src="./js/config.js" defer></script>
+  <script src="./js/store.js" defer></script>
+  <script src="./js/classifier.js" defer></script>
+  <script src="./js/ocr.js" defer></script>
+  <script src="./js/dashboard.js" defer></script>
+  <script src="./js/app.js" defer></script>
 
   <script defer>
     // ✅ Configuración Fiscal Global
     window.RESICO_CONFIG = {
       INCOME_LIMIT: 3500000, ALERT_80: 2800000, ALERT_90: 3150000, ALERT_94: 3300000,
       MULTA_BUZON: 10260, CFF_ART_17K: 'Art. 17-K CFF', CFF_ART_86C: 'Art. 86-C CFF', LISR_ART_113E: 'Art. 113-E LISR'
+    };
+
+    // ✅ Monitor de Ingresos RESICO — Art. 113-E LISR
+    window.updateIncomeMonitor = function(income) {
+      const cfg = window.RESICO_CONFIG;
+      const pct = Math.min((income / cfg.INCOME_LIMIT) * 100, 100);
+      const fill = document.getElementById('income-progress-fill');
+      const badge = document.getElementById('income-alert-badge');
+      const msg = document.getElementById('income-alert-message');
+      const curr = document.getElementById('income-current');
+      const rem = document.getElementById('income-remaining');
+
+      if (!fill) return;
+
+      // Actualizar barra y valores
+      fill.style.width = pct + '%';
+      if (curr) curr.textContent = '$' + income.toLocaleString('es-MX') + ' MXN';
+      if (rem) rem.textContent = '$' + Math.max(0, cfg.INCOME_LIMIT - income).toLocaleString('es-MX') + ' MXN';
+
+      // Umbrales escalonados
+      if (income >= cfg.INCOME_LIMIT) {
+        fill.className = 'progress-fill expelled';
+        if (badge) { badge.className = 'alert-badge expelled'; badge.textContent = '❌ EXPULSADO'; }
+        if (msg) { msg.className = 'alert-message expelled'; msg.innerHTML = '❌ <strong>LÍMITE REBASADO ($3,500,000 MXN).</strong> Expulsión automática al Régimen General. Las tasas suben hasta 35%. <span class="alert-ref">Art. 113-E, fracc. III, LISR 2024</span>'; }
+      } else if (income >= cfg.ALERT_94) {
+        fill.className = 'progress-fill critical';
+        if (badge) { badge.className = 'alert-badge critical'; badge.textContent = '🔴 CRÍTICO 94%'; }
+        if (msg) { msg.className = 'alert-message critical'; msg.innerHTML = '🔴 <strong>ALERTA ROJA (94% — $3,300,000 MXN).</strong> Riesgo inminente de expulsión al Régimen General. Detén nuevas operaciones hasta el cierre de año. <span class="alert-ref">Art. 113-E, fracc. III, LISR 2024</span>'; }
+      } else if (income >= cfg.ALERT_90) {
+        fill.className = 'progress-fill high';
+        if (badge) { badge.className = 'alert-badge high'; badge.textContent = '🟠 RIESGO 90%'; }
+        if (msg) { msg.className = 'alert-message high'; msg.innerHTML = '🟠 <strong>ALERTA NARANJA (90% — $3,150,000 MXN).</strong> Si rebasa $3.5M, tributarás al 35% en Régimen General. Revisa proyección con tu contador. <span class="alert-ref">Art. 113-E, fracc. III, LISR 2024</span>'; }
+      } else if (income >= cfg.ALERT_80) {
+        fill.className = 'progress-fill warning';
+        if (badge) { badge.className = 'alert-badge warning'; badge.textContent = '⚠️ ALERTA 80%'; }
+        if (msg) { msg.className = 'alert-message warning'; msg.innerHTML = '⚠️ <strong>ALERTA AMARILLA (80% — $2,800,000 MXN).</strong> Quedan $700,000 MXN de margen anual. Monitorea tu proyección de ingresos. <span class="alert-ref">Art. 113-E, fracc. III, LISR 2024</span>'; }
+      } else {
+        fill.className = 'progress-fill safe';
+        if (badge) { badge.className = 'alert-badge safe'; badge.textContent = '✅ SEGURO'; }
+        if (msg) { msg.className = 'alert-message safe'; msg.innerHTML = '✅ Tus ingresos están dentro del límite seguro de RESICO. <span class="alert-ref">Art. 113-E, fracción III, LISR 2024</span>'; }
+      }
+    };
+
+    // Salud Fiscal — Art. 17-K CFF
+    window.updateHealthAlert = function(buzonActive, efirmaActive) {
+      const alertBox = document.getElementById('health-alert');
+      const alertMsg = document.getElementById('health-alert-msg');
+      const alertRef = document.getElementById('health-alert-ref');
+      const buzonStatus = document.getElementById('buzon-status');
+      const efirmaStatus = document.getElementById('efirma-status');
+
+      if (buzonStatus) { buzonStatus.textContent = buzonActive ? '✅ Activo' : '❌ Inactivo'; buzonStatus.className = 'status ' + (buzonActive ? 'ok' : 'error'); }
+      if (efirmaStatus) { efirmaStatus.textContent = efirmaActive ? '✅ Vigente' : '⚠️ Revisar'; efirmaStatus.className = 'status ' + (efirmaActive ? 'ok' : 'warning'); }
+
+      if (!buzonActive && alertBox && alertMsg && alertRef) {
+        alertBox.classList.remove('hidden');
+        alertMsg.textContent = 'Buzón tributario inactivo. Multa: $10,260 MXN (Art. 17-K CFF). Por reincidencia la multa puede duplicarse hasta $20,520 MXN.';
+        alertRef.textContent = 'Art. 17-K CFF — Obligaciones de Medios Electrónicos | Art. 86-C CFF — Reincidencia';
+      } else if (alertBox) {
+        alertBox.classList.add('hidden');
+      }
     };
     window.CATEGORY_CONFIG = {
       CONSULTA_FISCAL: { label: 'Consulta Fiscal', color: '#3b82f6', cssClass: 'fiscal', icon: '📘' },
