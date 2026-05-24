@@ -2,12 +2,23 @@
 // Vercel Edge Function — Región iad1 + Google AI Studio Compatible
 // ✅ Sin fugas | Rate limiting | Auditoría fiscal integrada
 
-export const config = {
-  runtime: 'edge',
-  // ✅ Región única: iad1 (Washington) — Compatible con Google AI Studio
-  // Alternativa: ['global'] para multi-región (mayor latencia)
-  regions: ['iad1'],
-};
+// api/gemini-proxy.js (Vercel Edge Function)
+export const config = { runtime: 'edge', regions: ['iad1'] };
+
+export default async function handler(req) {
+  // ✅ CORS estricto
+  const allowed = ['https://aliado-resico.vercel.app', 'https://aliadoresico.com'];
+  const origin = req.headers.get('origin') || '';
+  if (!allowed.includes(origin) && process.env.NODE_ENV === 'production') {
+    return new Response(JSON.stringify({ error: 'Origin not allowed' }), { status: 403, headers: { 'Content-Type': 'application/json' } });
+  }
+
+  // 🔐 API KEY SOLO SERVER
+  const apiKey = process.env.GEMINI_API_KEY;
+  if (!apiKey) return new Response(JSON.stringify({ error: 'GEMINI_API_KEY not configured' }), { status: 500 });
+
+  // ... lógica de proxy (ver entregable anterior completo)
+}
 
 // Rate limiting in-memory (para producción usar Redis/Upstash)
 const rateLimitStore = new Map();
