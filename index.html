@@ -3,38 +3,46 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  
+  <!-- 🔍 SEO TÉCNICO -->
   <title>Aliado RESICO — Blindaje Fiscal Inteligente | Evita Multas SAT</title>
   <meta name="description" content="Asistente contable IA para RESICO. Clasifica gastos, alerta sobre límite de $3.5M, verifica buzón tributario y e.firma. Cumplimiento Art. 113-E LISR y CFF.">
   <meta name="keywords" content="RESICO, SAT, buzón tributario, e.firma, multas CFF, declaración fiscal, timbrar facturas, contador IA México">
+  <meta name="robots" content="index, follow">
+  <meta name="author" content="Aliado RESICO">
+  <link rel="canonical" href="https://aliado-resico.vercel.app">
   
-  <!-- 🔒 Content Security Policy — Corregido para CDN + Source Maps -->
+  <!-- 🌐 OPEN GRAPH / WHATSAPP PREVIEW -->
+  <meta property="og:title" content="🇲🇽 Aliado RESICO — Tu Contador IA">
+  <meta property="og:description" content="Evita multas de $10,260 MXN. Monitor de ingresos RESICO + clasificación fiscal automática.">
+  <meta property="og:type" content="website">
+  <meta property="og:locale" content="es_MX">
+  <meta property="og:url" content="https://aliado-resico.vercel.app">
+  <meta property="og:image" content="https://aliado-resico.vercel.app/og-image.png">
+  
+  <!-- 🔒 CONTENT SECURITY POLICY -->
   <meta http-equiv="Content-Security-Policy" content="
-    default-src 'self';
-    script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net;
-    style-src 'self' 'unsafe-inline' https://fonts.googleapis.com;
-    font-src 'self' https://fonts.gstatic.com;
-    connect-src 'self' https://*.supabase.co wss://*.supabase.co https://generativelanguage.googleapis.com https://cdn.jsdelivr.net;
-    img-src 'self' data: blob: https:;
+    default-src 'self'; 
+    script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; 
+    style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; 
+    font-src 'self' https://fonts.gstatic.com; 
+    connect-src 'self' https://*.supabase.co wss://*.supabase.co https://generativelanguage.googleapis.com https://cdn.jsdelivr.net; 
+    img-src 'self' data: blob: https:; 
     frame-ancestors 'none';
   ">
   
-  <!-- 🎨 Preconnect para rendimiento -->
+  <!-- 🎨 PERFORMANCE & CSS -->
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link rel="preconnect" href="https://cdn.jsdelivr.net">
-  
-  <!-- 📄 CSS — Ruta absoluta para Vercel (CORREGIDO) -->
   <link rel="stylesheet" href="/style.css">
-  
-  <!-- 🖼️ Favicon -->
   <link rel="icon" type="image/x-icon" href="/favicon.ico">
 </head>
 <body class="dark-mode">
-  <!-- Toggle Dark Mode -->
+  <!-- 🌙 Theme Toggle -->
   <button id="theme-toggle" class="theme-toggle" aria-label="Cambiar tema">🌙</button>
 
   <div class="app-container glass">
-    <!-- Header Premium -->
+    <!-- 🧭 Header Premium -->
     <header class="header glass-panel">
       <div class="header-brand">
         <span class="brand-flag">🇲🇽</span>
@@ -46,37 +54,24 @@
         <button class="nav-btn" data-tab="classifier" aria-selected="false">💬 Clasificador</button>
         <button class="nav-btn" data-tab="documents" aria-selected="false">📄 Documentos</button>
       </nav>
+      <div class="header-actions">
+        <button id="whatsapp-btn" class="btn-whatsapp" title="Soporte por WhatsApp">💬 WhatsApp</button>
+      </div>
     </header>
 
-    <!-- Main Content -->
+    <!-- 📦 Main Content -->
     <main class="main-content">
       
-      <!-- ✅ TAB: Dashboard (Vista Inicial) -->
+      <!-- ✅ TAB: Dashboard -->
       <section id="dashboard-tab" class="tab-content active" role="tabpanel">
         <div class="kpi-grid">
-          <div class="kpi-card glass-panel">
-            <div class="kpi-icon">📩</div>
-            <h3>Mensajes procesados</h3>
-            <p id="kpi-total" class="kpi-value">0</p>
-          </div>
-          <div class="kpi-card glass-panel">
-            <div class="kpi-icon">🤖</div>
-            <h3>Resolución automática</h3>
-            <p id="kpi-auto-rate" class="kpi-value">0%</p>
-          </div>
-          <div class="kpi-card glass-panel">
-            <div class="kpi-icon">🎯</div>
-            <h3>Confianza promedio</h3>
-            <p id="kpi-confidence" class="kpi-value">0%</p>
-          </div>
-          <div class="kpi-card glass-panel">
-            <div class="kpi-icon">⏱️</div>
-            <h3>Tiempo respuesta</h3>
-            <p id="kpi-response-time" class="kpi-value">0s</p>
-          </div>
+          <div class="kpi-card glass-panel"><div class="kpi-icon">📩</div><h3>Mensajes procesados</h3><p id="kpi-total" class="kpi-value">0</p></div>
+          <div class="kpi-card glass-panel"><div class="kpi-icon">🤖</div><h3>Resolución automática</h3><p id="kpi-auto-rate" class="kpi-value">0%</p></div>
+          <div class="kpi-card glass-panel"><div class="kpi-icon">🎯</div><h3>Confianza promedio</h3><p id="kpi-confidence" class="kpi-value">0%</p></div>
+          <div class="kpi-card glass-panel"><div class="kpi-icon">⏱️</div><h3>Tiempo respuesta</h3><p id="kpi-response-time" class="kpi-value">0s</p></div>
         </div>
 
-        <!-- 🚨 Monitor de Ingresos RESICO — Alertas Escalonadas Art. 113-E LISR -->
+        <!-- 🚨 Monitor de Ingresos RESICO (Art. 113-E LISR) -->
         <section id="income-monitor" class="alert-section glass-panel">
           <div class="alert-header">
             <h3>📊 Monitor de Ingresos RESICO</h3>
@@ -102,47 +97,66 @@
           </div>
         </section>
 
-        <!-- Charts & Feed -->
         <div class="charts-grid">
           <div class="chart-card glass-panel"><canvas id="chart-donut" width="400" height="250"></canvas></div>
           <div class="chart-card glass-panel"><canvas id="chart-bar" width="400" height="250"></canvas></div>
         </div>
         <section class="activity-feed glass-panel">
-          <div class="feed-header"><h3>📋 Actividad Reciente</h3></div>
+          <div class="feed-header"><h3>📋 Actividad Reciente</h3><button id="refresh-feed" class="btn-sm">↻ Actualizar</button></div>
           <div id="feed-list" class="feed-list"></div>
         </section>
       </section>
 
       <!-- 💬 TAB: Clasificador -->
-      <section id="classifier-tab" class="tab-content" hidden>
+      <section id="classifier-tab" class="tab-content" hidden role="tabpanel">
         <div class="chat-container glass-panel">
-          <div id="chat-messages" class="chat-messages"></div>
+          <div id="chat-messages" class="chat-messages" aria-live="polite"></div>
           <form id="classifier-form" class="chat-input">
-            <input type="text" id="classifier-input" placeholder="Ej: ¿Cómo declaro mis ingresos en RESICO?" required>
+            <input type="text" id="classifier-input" placeholder="Ej: ¿Cómo declaro mis ingresos en RESICO?" required aria-label="Mensaje para clasificar">
             <button type="submit" class="btn-primary">Enviar ➤</button>
           </form>
         </div>
         <div class="result-panel glass-panel">
           <h3>🧠 Resultado del Clasificador</h3>
-          <div id="classifier-result">Envía un mensaje para ver el análisis en tiempo real</div>
+          <div id="classifier-result" class="result-content">Envía un mensaje para ver el análisis en tiempo real</div>
+          <div class="result-meta">
+            <span>Confianza: <strong id="result-confidence">0%</strong></span>
+            <span>Keywords: <strong id="result-keywords">—</strong></span>
+          </div>
+        </div>
+        <div class="quick-examples">
+          <span>⚡ Ejemplos:</span>
+          <button class="example-btn" data-msg="¿Puedo deducir gasolina en RESICO?">📘 Deducciones</button>
+          <button class="example-btn" data-msg="Necesito timbrar una factura">📑 Timbrar</button>
+          <button class="example-btn" data-msg="Gasté $500 en OXXO">🧾 Registrar gasto</button>
+          <button class="example-btn" data-msg="¿Mi buzón tributario está activo?">🏥 Salud fiscal</button>
         </div>
       </section>
 
-      <!-- 📄 TAB: Documentos / OCR -->
-      <section id="documents-tab" class="tab-content" hidden>
+      <!-- 📄 TAB: Documentos -->
+      <section id="documents-tab" class="tab-content" hidden role="tabpanel">
         <div class="upload-zone glass-panel" id="drop-zone">
           <div class="upload-icon">📤</div>
           <p>Arrastra un documento aquí</p>
-          <small>Tickets, facturas PDF (JPG, PNG, PDF)</small>
-          <input type="file" id="file-input" accept="image/*,.pdf" hidden>
+          <small>Tickets, facturas PDF, comprobantes (JPG, PNG, PDF)</small>
+          <input type="file" id="file-input" accept="image/*,.pdf" hidden aria-label="Subir documento">
+          <button class="btn-secondary" onclick="document.getElementById('file-input').click()">📁 Seleccionar archivo</button>
         </div>
         <div class="ocr-result glass-panel" id="ocr-output">
-          <p>📋 Sube un documento para ver los datos extraídos.</p>
+          <p>📋 Resultado del OCR: Sube un documento para ver los datos extraídos.</p>
+        </div>
+        <div class="rfc-validator glass-panel">
+          <h3>🔍 Validador de RFC</h3>
+          <div class="rfc-input-group">
+            <input type="text" id="rfc-input" placeholder="RFC a validar" maxlength="13" pattern="[A-ZÑ&]{3,4}\d{6}[A-Z0-9]{3}">
+            <button id="rfc-validate-btn" class="btn-primary">Validar</button>
+          </div>
+          <div id="rfc-result" class="rfc-result"></div>
         </div>
       </section>
     </main>
 
-    <!-- 🏥 Panel de Salud Fiscal (Sticky) -->
+    <!-- 🏥 Panel de Salud Fiscal -->
     <aside class="health-panel glass-panel">
       <h4>🏥 Salud Fiscal</h4>
       <div class="health-item">
@@ -153,14 +167,32 @@
         <span class="health-icon">🔑</span>
         <div class="health-info"><strong>e.firma</strong><span id="efirma-status" class="status unknown">Verificando...</span></div>
       </div>
+      <div id="health-alert" class="health-alert hidden">
+        ⚠️ <strong>Atención:</strong> <span id="health-alert-msg"></span>
+        <br><small id="health-alert-ref"></small>
+      </div>
       <p class="health-note">
-        <small>⚠️ Multa buzón inactivo: <strong>$10,260 MXN</strong> (Art. 17-K CFF). 
+        <small>📜 Multa por buzón inactivo: <strong>$10,260 MXN</strong> (Art. 17-K CFF). 
         Reincidencia duplica multa hasta <strong>$20,520 MXN</strong> (Art. 86-C CFF).</small>
       </p>
     </aside>
+
+    <!-- ⚙️ Config Panel (Dev Only) -->
+    <details class="dev-config glass-panel" id="dev-config" open>
+      <summary>⚙️ Configuración (SOLO DESARROLLO)</summary>
+      <div class="config-warning">🔒 <strong>Producción:</strong> Configura variables en Vercel Dashboard → Settings → Environment Variables</div>
+      <div class="config-section">
+        <label>Google Gemini</label>
+        <div class="config-row"><input type="password" id="gemini-key" placeholder="sk-..."><button class="btn-sm" id="gemini-test">Test</button><button class="btn-sm" id="gemini-save">Guardar</button></div>
+      </div>
+      <div class="config-section">
+        <label>Supabase</label>
+        <div class="config-row"><input type="text" id="supabase-url" placeholder="https://...supabase.co"><input type="password" id="supabase-key" placeholder="eyJ..."><button class="btn-sm" id="supabase-test">Test</button></div>
+      </div>
+    </details>
   </div>
 
-  <!-- 🔗 Scripts — Orden de carga seguro + rutas relativas CORREGIDAS -->
+  <!-- 🔗 Scripts (Orden seguro para módulos) -->
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2" defer></script>
   <script src="/js/config.js" defer></script>
   <script src="/js/store.js" defer></script>
@@ -168,44 +200,24 @@
   <script src="/js/ocr.js" defer></script>
   <script src="/js/dashboard.js" defer></script>
   <script src="/app.js" defer></script>
-  
-  <!-- Inicialización segura -->
-  <script defer>
-    window.RESICO_CONFIG = {
-      INCOME_LIMIT: 3500000,
-      ALERT_80: 2800000,    // Amarillo
-      ALERT_90: 3150000,    // Naranja  
-      ALERT_94: 3300000,    // Rojo
-      MULTA_BUZON: 10260,
-      CFF_ART_17K: 'Art. 17-K CFF',
-      CFF_ART_86C: 'Art. 86-C CFF',
-      LISR_ART_113E: 'Art. 113-E LISR'
-    };
 
+  <script defer>
+    // ✅ Configuración Fiscal Global
+    window.RESICO_CONFIG = {
+      INCOME_LIMIT: 3500000, ALERT_80: 2800000, ALERT_90: 3150000, ALERT_94: 3300000,
+      MULTA_BUZON: 10260, CFF_ART_17K: 'Art. 17-K CFF', CFF_ART_86C: 'Art. 86-C CFF', LISR_ART_113E: 'Art. 113-E LISR'
+    };
     window.CATEGORY_CONFIG = {
-      CONSULTA_FISCAL: { label: 'Consulta', color: '#3b82f6', cssClass: 'fiscal', icon: '📘' },
-      SOLICITUD_FACTURA: { label: 'Factura', color: '#8b5cf6', cssClass: 'factura', icon: '📑' },
-      REGISTRO_GASTO: { label: 'Gasto', color: '#10b981', cssClass: 'gasto', icon: '🧾' },
-      REPORTE_PAGO: { label: 'Pago', color: '#f59e0b', cssClass: 'pago', icon: '💳' },
-      SALUD_FISCAL: { label: 'Salud', color: '#ef4444', cssClass: 'salud', icon: '🏥' },
+      CONSULTA_FISCAL: { label: 'Consulta Fiscal', color: '#3b82f6', cssClass: 'fiscal', icon: '📘' },
+      SOLICITUD_FACTURA: { label: 'Factura CFDI', color: '#8b5cf6', cssClass: 'factura', icon: '📑' },
+      REGISTRO_GASTO: { label: 'Registro Gasto', color: '#10b981', cssClass: 'gasto', icon: '🧾' },
+      REPORTE_PAGO: { label: 'Reporte Pago', color: '#f59e0b', cssClass: 'pago', icon: '💳' },
+      SALUD_FISCAL: { label: 'Salud Fiscal', color: '#ef4444', cssClass: 'salud', icon: '🏥' },
       OTROS: { label: 'General', color: '#64748b', cssClass: 'otros', icon: '💬' }
     };
 
+    // ✅ Router SPA mínimo (para evitar conflictos con app.js)
     document.addEventListener('DOMContentLoaded', () => {
-      // Supabase init seguro
-      if (typeof window.supabase !== 'undefined') {
-        try {
-          window.supabaseClient = window.supabase.createClient(
-            process.env.NEXT_PUBLIC_SUPABASE_URL || '',
-            process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || ''
-          );
-        } catch(e) { console.warn('Supabase init skipped'); }
-      }
-      // Modules init
-      ['Store', 'IntentClassifier', 'DocumentProcessor', 'Dashboard'].forEach(mod => {
-        if (window[mod]?.init) window[mod].init();
-      });
-      // Router SPA
       document.querySelectorAll('.nav-btn').forEach(btn => {
         btn.addEventListener('click', () => {
           document.querySelectorAll('.nav-btn').forEach(b => b.classList.remove('active'));
@@ -215,7 +227,6 @@
           if (tab) { tab.classList.add('active'); tab.hidden = false; }
         });
       });
-      console.log('🚀 Aliado RESICO UI Premium + Blindaje Fiscal activo');
     });
   </script>
 </body>
