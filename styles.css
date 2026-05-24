@@ -365,9 +365,29 @@ body {
   background: rgba(245, 158, 11, 0.05);
 }
 
+.alert-message.high {
+  border-color: var(--accent-high);
+  background: rgba(249, 115, 22, 0.05);
+}
+
 .alert-message.critical, .alert-message.expelled {
   border-color: var(--accent-critical);
   background: rgba(239, 68, 68, 0.05);
+}
+
+/* Animación de pulso para alertas críticas */
+@keyframes pulse-border {
+  0%, 100% { border-left-color: var(--accent-critical); }
+  50%       { border-left-color: transparent; }
+}
+
+.alert-message.critical {
+  animation: pulse-border 1.8s ease-in-out infinite;
+}
+
+.alert-message.expelled {
+  border-color: var(--accent-expelled);
+  background: rgba(127, 29, 29, 0.1);
 }
 
 .alert-ref {
@@ -892,4 +912,40 @@ body {
   border-left: 3px solid var(--accent-critical);
   border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
   font-size: 0.9rem;
+}
+/* 📊 OCR Fiscal Education Panel */
+.ocr-fiscal-note {
+  margin-top: var(--sp-md);
+  padding: var(--sp-md);
+  border-radius: var(--radius-sm);
+  font-size: 0.85rem;
+  line-height: 1.5;
+}
+
+.ocr-fiscal-note.isr {
+  background: rgba(59, 130, 246, 0.08);
+  border-left: 3px solid #3b82f6;
+  color: var(--text-secondary);
+}
+
+.ocr-fiscal-note.iva {
+  background: rgba(139, 92, 246, 0.08);
+  border-left: 3px solid #8b5cf6;
+  color: var(--text-secondary);
+}
+
+.ocr-fiscal-note strong {
+  display: block;
+  color: var(--text-primary);
+  margin-bottom: var(--sp-xs);
+}
+
+.ocr-fiscal-note .precision-badge {
+  display: inline-block;
+  padding: 1px 6px;
+  border-radius: var(--radius-full);
+  font-weight: 600;
+  font-size: 0.75rem;
+  background: rgba(139, 92, 246, 0.2);
+  color: #8b5cf6;
 }
