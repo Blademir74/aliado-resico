@@ -1,36 +1,20 @@
 // api/gemini-proxy.js
-// Vercel Edge Function — Región iad1 + Google AI Studio Compatible
-// ✅ Sin fugas | Rate limiting | Auditoría fiscal integrada
+// Vercel Edge Function — Single Export, Secure, Rate-Limited
+export const config = {
+  runtime: 'edge',
+  regions: ['iad1'],
+};
 
-// api/gemini-proxy.js (Vercel Edge Function)
-export const config = { runtime: 'edge', regions: ['iad1'] };
-
-export default async function handler(req) {
-  // ✅ CORS estricto
-  const allowed = ['https://aliado-resico.vercel.app', 'https://aliadoresico.com'];
-  const origin = req.headers.get('origin') || '';
-  if (!allowed.includes(origin) && process.env.NODE_ENV === 'production') {
-    return new Response(JSON.stringify({ error: 'Origin not allowed' }), { status: 403, headers: { 'Content-Type': 'application/json' } });
-  }
-
-  // 🔐 API KEY SOLO SERVER
-  const apiKey = process.env.GEMINI_API_KEY;
-  if (!apiKey) return new Response(JSON.stringify({ error: 'GEMINI_API_KEY not configured' }), { status: 500 });
-
-  // ... lógica de proxy (ver entregable anterior completo)
-}
-
-// Rate limiting in-memory (para producción usar Redis/Upstash)
+// --- Rate Limiting (In-Memory) ---
 const rateLimitStore = new Map();
 const RATE_LIMIT = {
   MAX_REQUESTS: 100,
-  WINDOW_MS: 60 * 60 * 1000,
+  WINDOW_MS: 60 * 60 * 1000, // 1 hour
 };
 
 function checkRateLimit(ip) {
   const now = Date.now();
   const user = rateLimitStore.get(ip) || { count: 0, resetAt: now + RATE_LIMIT.WINDOW_MS };
-  
   if (now > user.resetAt) {
     user.count = 1;
     user.resetAt = now + RATE_LIMIT.WINDOW_MS;
@@ -39,12 +23,11 @@ function checkRateLimit(ip) {
   } else {
     user.count++;
   }
-  
   rateLimitStore.set(ip, user);
   return { allowed: true, remaining: RATE_LIMIT.MAX_REQUESTS - user.count, resetAt: user.resetAt };
 }
 
-// Limpieza periódica
+// Cleanup expired entries periodically
 setInterval(() => {
   const now = Date.now();
   for (const [ip, data] of rateLimitStore.entries()) {
@@ -52,6 +35,7 @@ setInterval(() => {
   }
 }, 15 * 60 * 1000);
 
+// --- SINGLE HANDLER EXPORT ---
 export default async function handler(req) {
   // 🔒 CORS estricto
   const allowedOrigins = [
@@ -59,14 +43,14 @@ export default async function handler(req) {
     'https://aliadoresico.com',
     process.env.NODE_ENV === 'development' ? 'http://localhost:3000' : null,
   ].filter(Boolean);
-  
+
   const origin = req.headers.get('origin') || '';
   const isAllowed = allowedOrigins.includes(origin);
-  
+
   if (!isAllowed && process.env.NODE_ENV === 'production') {
     return new Response(JSON.stringify({ error: 'Origen no autorizado' }), {
       status: 403,
-      headers: { 'Content-Type': 'application/json' }
+      headers: { 'Content-Type': 'application/json' },
     });
   }
 
@@ -82,7 +66,11 @@ export default async function handler(req) {
     'Strict-Transport-Security': 'max-age=31536000; includeSubDomains',
   });
 
-  if (req.method === 'OPTIONS') return new Response(null, { status: 204, headers });
+  // Preflight
+  if (req.method === 'OPTIONS') {
+    return new Response(null, { status: 204, headers });
+  }
+
   if (req.method !== 'POST') {
     return new Response(JSON.stringify({ error: 'Method not allowed' }), { status: 405, headers });
   }
@@ -91,18 +79,18 @@ export default async function handler(req) {
   const apiKey = process.env.GEMINI_API_KEY || process.env.ALIADO_GEMINI_KEY;
   if (!apiKey) {
     console.error('[Proxy] CRÍTICO: GEMINI_API_KEY no configurada en Vercel');
-    return new Response(JSON.stringify({ 
+    return new Response(JSON.stringify({
       error: 'Configuración del servidor incompleta',
       code: 'MISSING_API_KEY',
       hint: 'Configure GEMINI_API_KEY en Vercel Dashboard → Settings → Environment Variables'
     }), { status: 500, headers });
   }
 
-  // 🎯 Modelo fijo compatible con Google AI Studio
+  // 🎯 Modelo fijo
   const MODEL = 'gemini-1.5-flash';
   const GEMINI_URL = `https://generativelanguage.googleapis.com/v1beta/models/${MODEL}:generateContent?key=${apiKey}`;
 
-  // 📦 Parseo seguro
+  // 📦 Parseo seguro del body
   let body;
   try {
     body = await req.json();
@@ -135,7 +123,7 @@ export default async function handler(req) {
   // 🚦 Rate limiting
   const ip = req.headers.get('x-forwarded-for')?.split(',')[0] || 'unknown';
   const rateCheck = checkRateLimit(ip);
-  
+
   headers.set('X-RateLimit-Limit', RATE_LIMIT.MAX_REQUESTS.toString());
   headers.set('X-RateLimit-Remaining', rateCheck.remaining.toString());
   headers.set('X-RateLimit-Reset', Math.ceil(rateCheck.resetAt / 1000).toString());
@@ -184,7 +172,7 @@ export default async function handler(req) {
     return new Response(JSON.stringify({
       ...data,
       _meta: {
-        proxy_version: '2.4',
+        proxy_version: '3.0',
         timestamp: new Date().toISOString(),
         model: MODEL,
         region: 'iad1',
