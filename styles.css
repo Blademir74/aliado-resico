@@ -949,3 +949,75 @@ body {
   background: rgba(139, 92, 246, 0.2);
   color: #8b5cf6;
 }
+/* ============================================
+   AUTH OVERLAY — Login / Register
+   ============================================ */
+.auth-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(10, 15, 28, 0.97);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 9999;
+  animation: fadeIn 0.3s ease;
+}
+
+.auth-card {
+  width: 100%;
+  max-width: 420px;
+  padding: 2.5rem;
+  border-radius: var(--radius-lg);
+  animation: slideUp 0.4s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.auth-logo {
+  text-align: center;
+  margin-bottom: 2rem;
+}
+
+.auth-logo h2 {
+  font-size: 1.6rem;
+  font-weight: 700;
+  color: var(--text-primary);
+  margin: 0.5rem 0 0.25rem;
+}
+
+.auth-subtitle {
+  color: var(--accent-safe);
+  font-size: 0.85rem;
+  font-weight: 500;
+}
+
+@keyframes slideUp {
+  from { opacity: 0; transform: translateY(20px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+/* ============================================
+   INCOME BAR — Estados de alerta
+   ============================================ */
+.progress-fill.safe     { background: linear-gradient(90deg, #10b981, #059669); }
+.progress-fill.warning  { background: linear-gradient(90deg, #f59e0b, #d97706); }
+.progress-fill.high     { background: linear-gradient(90deg, #f97316, #ea580c); }
+.progress-fill.critical { background: linear-gradient(90deg, #ef4444, #dc2626); animation: pulse-red 1.5s ease-in-out infinite; }
+.progress-fill.expelled { background: linear-gradient(90deg, #7f1d1d, #991b1b); }
+
+@keyframes pulse-red {
+  0%, 100% { opacity: 1; }
+  50%       { opacity: 0.7; }
+}
+
+.alert-badge.safe     { background: rgba(16,185,129,0.15); color: var(--accent-safe); }
+.alert-badge.warning  { background: rgba(245,158,11,0.15); color: var(--accent-warning); }
+.alert-badge.high     { background: rgba(249,115,22,0.15); color: var(--accent-high); }
+.alert-badge.critical { background: rgba(239,68,68,0.15);  color: var(--accent-critical); }
+.alert-badge.expelled { background: rgba(127,29,29,0.2);   color: #fca5a5; }
+
+.alert-message.safe     { border-color: var(--accent-safe);     background: rgba(16,185,129,0.05); }
+.alert-message.warning  { border-color: var(--accent-warning);  background: rgba(245,158,11,0.05); }
+.alert-message.high     { border-color: var(--accent-high);     background: rgba(249,115,22,0.05); }
+.alert-message.critical { border-color: var(--accent-critical); background: rgba(239,68,68,0.05); }
+.alert-message.expelled { border-color: #7f1d1d;               background: rgba(127,29,29,0.1); }

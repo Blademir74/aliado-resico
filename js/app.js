@@ -1,15 +1,13 @@
 /* ============================================
-   ALIADO RESICO — App Core v5.2
-   Fix: process.env eliminado — usa window.location
-   Fix: RFC validator sin dependencia externa
-   Fix: Chat wired correctamente (form → listener)
-   Fix: OCR funciona sin DocumentProcessor (fallback)
-   Fix: Boot secuenciado espera CDN Supabase
+   ALIADO RESICO — App Core v5.3
+   Fix: chat form → Chat.sendMessage wired
+   Fix: dev-config visible solo en localhost
+   Fix: RFC validator standalone
+   Fix: auth guard con Supabase
+   Fix: proceso limpio sin process.env
    ============================================ */
 const App = (() => {
   const VIEWS = ['dashboard', 'classifier', 'documents', 'settings'];
-
-  // ─── ENTORNO — solo browser APIs, cero Node.js ───
   const IS_DEV = (
     window.location.hostname === 'localhost' ||
     window.location.hostname === '127.0.0.1' ||
@@ -25,7 +23,7 @@ const App = (() => {
     });
     const target = document.getElementById(`${view}-tab`);
     if (target) { target.classList.add('active'); target.hidden = false; }
-    document.querySelectorAll('.nav-btn[data-tab]').forEach(btn => {
+    document.querySelectorAll('.nav-btn[data-tab], .tab-btn[data-tab]').forEach(btn => {
       const match = btn.getAttribute('data-tab') === view;
       btn.classList.toggle('active', match);
       btn.setAttribute('aria-selected', String(match));
@@ -35,7 +33,7 @@ const App = (() => {
   }
 
   function initNavigation() {
-    document.querySelectorAll('.nav-btn[data-tab]').forEach(btn =>
+    document.querySelectorAll('[data-tab]').forEach(btn =>
       btn.addEventListener('click', () => navigateTo(btn.getAttribute('data-tab')))
     );
     const hash = window.location.hash.replace('#', '');
@@ -62,9 +60,123 @@ const App = (() => {
     });
   }
 
-  // ─── RFC VALIDATOR — standalone, sin dependencias ──
-  const RFC_PF = /^[A-ZÑ&]{4}\d{6}[A-Z0-9]{3}$/;
-  const RFC_PM = /^[A-ZÑ&]{3}\d{6}[A-Z0-9]{3}$/;
+  // ─── AUTH GUARD ──────────────────────────────────
+  // Muestra el overlay de login si no hay sesión activa
+  async function initAuth() {
+    const overlay = document.getElementById('auth-overlay');
+    const userChip = document.getElementById('user-session-chip');
+    const emailEl  = document.getElementById('user-email-chip');
+
+    if (!overlay) return; // Si no hay overlay en el HTML, continuar
+
+    const client = window.APP_STATE?.supabase;
+
+    // Modo demo (sin Supabase): saltar auth
+    if (!client) {
+      document.getElementById('auth-skip')?.addEventListener('click', () => {
+        overlay.style.display = 'none';
+      });
+      overlay.style.display = 'flex';
+      return;
+    }
+
+    // Verificar sesión existente
+    try {
+      const { data } = await client.auth.getSession();
+      if (data?.session?.user) {
+        _onAuthSuccess(data.session.user, overlay, userChip, emailEl);
+        return;
+      }
+    } catch(_) {}
+
+    // No hay sesión — mostrar overlay
+    overlay.style.display = 'flex';
+    _wireAuthForm(client, overlay, userChip, emailEl);
+  }
+
+  function _onAuthSuccess(user, overlay, userChip, emailEl) {
+    if (overlay) overlay.style.display = 'none';
+    if (userChip) userChip.style.display = 'block';
+    if (emailEl) emailEl.textContent = user.email;
+    console.log(`%c[Auth] ✅ ${user.email}`, 'color:#10b981;font-weight:bold');
+  }
+
+  function _wireAuthForm(client, overlay, userChip, emailEl) {
+    const emailInput    = document.getElementById('auth-email');
+    const passInput     = document.getElementById('auth-password');
+    const submitBtn     = document.getElementById('auth-submit-btn');
+    const errorEl       = document.getElementById('auth-error');
+    const skipBtn       = document.getElementById('auth-skip');
+    const tabLogin      = document.getElementById('auth-tab-login');
+    const tabRegister   = document.getElementById('auth-tab-register');
+
+    let isRegisterMode = false;
+
+    tabLogin?.addEventListener('click', () => {
+      isRegisterMode = false;
+      submitBtn.textContent = '🔐 Iniciar Sesión';
+      tabLogin.className = 'btn-primary';
+      tabRegister.className = 'btn-ghost';
+    });
+    tabRegister?.addEventListener('click', () => {
+      isRegisterMode = true;
+      submitBtn.textContent = '✅ Crear Cuenta';
+      tabRegister.className = 'btn-primary';
+      tabLogin.className = 'btn-ghost';
+    });
+
+    submitBtn?.addEventListener('click', async () => {
+      const email = emailInput?.value?.trim();
+      const pass  = passInput?.value;
+      if (!email || !pass) return;
+
+      submitBtn.disabled = true;
+      submitBtn.textContent = '⏳ Procesando...';
+      if (errorEl) errorEl.style.display = 'none';
+
+      try {
+        let result;
+        if (isRegisterMode) {
+          result = await client.auth.signUp({ email, password: pass });
+          if (result.error) throw result.error;
+          if (result.data?.user && !result.data.session) {
+            if (errorEl) { errorEl.style.display = 'block'; errorEl.style.color = '#10b981'; errorEl.textContent = '✅ Cuenta creada. Revisa tu correo para confirmar.'; }
+            submitBtn.disabled = false; submitBtn.textContent = 'Crear Cuenta'; return;
+          }
+        } else {
+          result = await client.auth.signInWithPassword({ email, password: pass });
+          if (result.error) throw result.error;
+        }
+        _onAuthSuccess(result.data.user, overlay, userChip, emailEl);
+        await Store?.initSupabase?.();
+        await Dashboard?.syncAndRender?.();
+      } catch(err) {
+        if (errorEl) { errorEl.style.display = 'block'; errorEl.style.color = '#ef4444'; errorEl.textContent = `❌ ${err.message}`; }
+      } finally {
+        submitBtn.disabled = false;
+        submitBtn.textContent = isRegisterMode ? 'Crear Cuenta' : '🔐 Iniciar Sesión';
+      }
+    });
+
+    // Enter en campos
+    [emailInput, passInput].forEach(el =>
+      el?.addEventListener('keydown', e => { if (e.key === 'Enter') submitBtn?.click(); })
+    );
+
+    // Modo demo
+    skipBtn?.addEventListener('click', () => { overlay.style.display = 'none'; });
+
+    // Logout
+    document.getElementById('logout-btn')?.addEventListener('click', async () => {
+      await client?.auth.signOut();
+      overlay.style.display = 'flex';
+      if (userChip) userChip.style.display = 'none';
+    });
+  }
+
+  // ─── RFC VALIDATOR — standalone ──────────────────
+  const RFC_PF  = /^[A-ZÑ&]{4}\d{6}[A-Z0-9]{3}$/;
+  const RFC_PM  = /^[A-ZÑ&]{3}\d{6}[A-Z0-9]{3}$/;
   const RFC_GEN = ['XAXX010101000', 'XEXX010101000'];
 
   function validateRFC(raw) {
@@ -75,52 +187,45 @@ const App = (() => {
     const isPM = RFC_PM.test(rfc);
     if (!isPF && !isPM) return {
       valid: false,
-      error: `Formato inválido (${rfc.length} chars). RFC Persona Física: 13 caracteres. Persona Moral: 12.`,
+      error: `Formato inválido (${rfc.length} chars). PF: 13 caracteres. PM: 12 caracteres.`,
     };
-    const start = isPF ? 4 : 3;
-    const dp = rfc.slice(start, start + 6);
+    const s = isPF ? 4 : 3;
+    const dp = rfc.slice(s, s + 6);
     const yr = parseInt(dp.slice(0,2), 10);
     const yr4 = yr <= 24 ? 2000+yr : 1900+yr;
-    const fecha = `${yr4}-${dp.slice(2,4)}-${dp.slice(4,6)}`;
-    return { valid: true, type: isPF ? 'Persona Física' : 'Persona Moral', date: fecha, rfc };
+    return {
+      valid: true, type: isPF ? 'Persona Física' : 'Persona Moral',
+      date: `${yr4}-${dp.slice(2,4)}-${dp.slice(4,6)}`, rfc,
+    };
   }
 
   // ─── SETTINGS ────────────────────────────────────
   function initSettings() {
-    // Panel dev: oculto en producción (sin process.env)
+    // Dev panel: solo en localhost
     const devPanel = document.getElementById('dev-config');
     if (devPanel) devPanel.hidden = !IS_DEV;
 
-    // ── RFC Validator ──
+    // RFC
     const rfcBtn    = document.getElementById('rfc-validate-btn');
     const rfcInput  = document.getElementById('rfc-input');
     const rfcResult = document.getElementById('rfc-result');
-
     if (rfcBtn && rfcInput && rfcResult) {
       const run = () => {
         const r = validateRFC(rfcInput.value);
         rfcResult.innerHTML = r.valid
-          ? `<span class="success">✅ ${r.type} — <code>${r.rfc}</code><br><small>Fecha: ${r.date}</small></span>`
+          ? `<span class="success">✅ ${r.type} — <code>${r.rfc}</code><br><small>Fecha nacimiento/constitución: ${r.date}</small></span>`
           : `<span class="error">❌ ${r.error}</span>`;
       };
       rfcBtn.addEventListener('click', run);
       rfcInput.addEventListener('keydown', e => { if (e.key === 'Enter') run(); });
     }
 
-    // ── Quick examples en clasificador ──
-    document.querySelectorAll('.example-btn[data-msg]').forEach(btn =>
-      btn.addEventListener('click', () => {
-        const inp = document.getElementById('classifier-input') || document.getElementById('chat-input');
-        if (inp) { inp.value = btn.getAttribute('data-msg'); inp.focus(); }
-      })
-    );
-
-    // ── Refresh feed ──
+    // Refresh feed
     document.getElementById('refresh-feed')?.addEventListener('click', () =>
       Dashboard?.syncAndRender?.()
     );
 
-    // ── Test botones en dev panel ──
+    // Dev: test buttons
     document.getElementById('gemini-test')?.addEventListener('click', async () => {
       try {
         const r = await fetch('/api/gemini-proxy', {
@@ -141,59 +246,54 @@ const App = (() => {
     });
   }
 
-  // ─── CHAT — wire el form #classifier-form ────────
-  // El HTML usa <form id="classifier-form"> con
-  // <input id="classifier-input"> y btn type="submit"
-  // Fix: preventDefault() evita el page reload
+  // ─── CHAT — conecta el form del HTML con Chat.js ──
+  // El HTML usa: form#classifier-form + input#classifier-input
+  // Chat.js escucha: #btn-send + #chat-input
+  // Fix: interceptar el form submit aquí y delegar a Chat.sendMessage
   function initChat() {
     const form  = document.getElementById('classifier-form');
     const input = document.getElementById('classifier-input');
 
-    if (form && input) {
-      form.addEventListener('submit', e => {
-        e.preventDefault(); // CRÍTICO: evita recarga de página
-        const text = input.value.trim();
-        if (!text) return;
-        if (window.Chat?.sendMessage) {
-          window.Chat.sendMessage(text);
-        } else {
-          _fallbackSend(text, input);
-        }
-      });
-    }
+    if (!form || !input) return;
 
-    // Enter key en el input (compatibilidad)
-    input?.addEventListener('keydown', e => {
-      if (e.key === 'Enter' && !e.shiftKey) {
-        e.preventDefault();
-        form?.dispatchEvent(new Event('submit'));
+    form.addEventListener('submit', e => {
+      e.preventDefault();
+      const text = input.value.trim();
+      if (!text) return;
+
+      if (window.Chat?.sendMessage) {
+        // Monkeypatch: Chat.js lee #chat-input, así que sincronizamos el valor
+        const chatInput = document.getElementById('chat-input');
+        if (chatInput) chatInput.value = text;
+        Chat.sendMessage(text);
+        input.value = '';
+      } else {
+        _fallbackSend(text, input);
       }
     });
 
-    // Quick examples
+    // Quick examples — el HTML usa .example-btn[data-msg]
     document.querySelectorAll('.example-btn[data-msg]').forEach(btn =>
       btn.addEventListener('click', () => {
-        if (!input) return;
         input.value = btn.getAttribute('data-msg');
-        form?.dispatchEvent(new Event('submit'));
+        form.dispatchEvent(new Event('submit', { bubbles: true }));
       })
     );
   }
 
-  // Fallback si Chat.js no cargó — usa clasificador local
   async function _fallbackSend(text, input) {
     const chatEl = document.getElementById('chat-messages');
     if (!chatEl) return;
 
-    // Burbuja de usuario
-    const userBubble = document.createElement('div');
-    userBubble.className = 'chat-bubble user';
-    userBubble.innerHTML = `<p>${text.replace(/</g,'&lt;')}</p><span class="bubble-time">${new Date().toLocaleTimeString('es-MX',{hour:'2-digit',minute:'2-digit'})}</span>`;
-    chatEl.appendChild(userBubble);
+    const ts = () => new Date().toLocaleTimeString('es-MX', {hour:'2-digit', minute:'2-digit'});
+
+    const userB = document.createElement('div');
+    userB.className = 'chat-bubble user';
+    userB.innerHTML = `<p>${text.replace(/</g,'&lt;')}</p><span class="bubble-time">${ts()}</span>`;
+    chatEl.appendChild(userB);
     chatEl.scrollTop = chatEl.scrollHeight;
     if (input) input.value = '';
 
-    // Typing indicator
     const typing = document.createElement('div');
     typing.className = 'typing-indicator';
     typing.innerHTML = '<span></span><span></span><span></span>';
@@ -201,55 +301,70 @@ const App = (() => {
     chatEl.scrollTop = chatEl.scrollHeight;
 
     try {
-      let result;
-      if (window.IntentClassifier?.classify) {
-        const cls = await IntentClassifier.classify(text);
-        result = cls;
-      } else {
-        result = { intent: 'OTROS', confidence: 0.5, explanation: 'Clasificador no disponible' };
-      }
+      // Intentar proxy Gemini con contexto fiscal RESICO
+      const session = await window.APP_STATE?.supabase?.auth.getSession();
+      const token   = session?.data?.session?.access_token;
 
-      // Respuesta del bot
-      const responses = {
-        CONSULTA_FISCAL:    '📘 Para tus consultas fiscales RESICO, el ISR se calcula sobre ingresos brutos sin deducir gastos. La tasa va del 1% al 2.5% mensual.',
-        SOLICITUD_FACTURA:  '📑 Para timbrar tu CFDI necesitas RFC del receptor válido, descripción del servicio, y forma de pago. ¿Te ayudo con los datos?',
-        REGISTRO_GASTO:     '🧾 Registré tu gasto. Para acreditar IVA necesitas el CFDI 4.0 con RFC correcto. ¿Tienes la factura del proveedor?',
-        REPORTE_PAGO:       '💳 Recibí tu reporte de pago. ¿Necesitas el comprobante para tu declaración mensual?',
-        SALUD_FISCAL:       '🏥 Revisando tu salud fiscal. Verifica que tu Buzón Tributario esté activo para evitar multas de $10,260 MXN (Art. 17-K CFF).',
-        OTROS:              '🤖 Entendido. ¿En qué más puedo ayudarte con tu contabilidad RESICO?',
+      const payload = {
+        contents: [{
+          parts: [{
+            text: `Eres Aliado RESICO, asistente fiscal IA para el Régimen Simplificado de Confianza en México. 
+Responde en español, de forma concisa y práctica. Cita artículos del CFF/LISR cuando aplique.
+REGLA CLAVE: En RESICO el ISR se paga sobre ingresos BRUTOS (sin deducciones). El IVA sí requiere CFDI válido.
+Consulta del contribuyente: ${text}`,
+          }],
+        }],
+        generationConfig: { temperature: 0.3, maxOutputTokens: 800 },
       };
 
-      typing.remove();
-      const botBubble = document.createElement('div');
-      botBubble.className = 'chat-bubble bot';
-      botBubble.innerHTML = `<p>${responses[result.intent] || responses.OTROS}</p><span class="bubble-time">${new Date().toLocaleTimeString('es-MX',{hour:'2-digit',minute:'2-digit'})}</span>`;
-      chatEl.appendChild(botBubble);
-      chatEl.scrollTop = chatEl.scrollHeight;
+      const headers = { 'Content-Type': 'application/json' };
+      if (token) headers['Authorization'] = `Bearer ${token}`;
 
-      // Actualizar panel de resultado si existe
-      const confEl = document.getElementById('result-confidence');
-      const kwEl   = document.getElementById('result-keywords');
-      if (confEl) confEl.textContent = Math.round((result.confidence||0)*100) + '%';
-      if (kwEl)   kwEl.textContent   = (result.keywords_matched||[]).join(', ') || '—';
+      const r = await fetch('/api/gemini-proxy', {
+        method: 'POST', headers, body: JSON.stringify(payload),
+      });
+
+      let botText = '';
+      if (r.ok) {
+        const d = await r.json();
+        botText = d.candidates?.[0]?.content?.parts?.[0]?.text
+          || d.response
+          || 'Sin respuesta del servidor.';
+      } else {
+        // Fallback local por intención
+        const intents = {
+          deducir: '📘 En RESICO **no aplican deducciones** para el ISR. Tu impuesto se calcula sobre ingresos brutos. (Art. 113-E LISR 2024)',
+          factura: '📑 Para timbrar un CFDI 4.0 necesitas: RFC receptor válido, régimen fiscal, código postal, descripción del servicio y forma de pago.',
+          gasto:   '🧾 Para acreditar IVA de un gasto, el CFDI debe tener tu RFC correcto y ser un gasto estrictamente indispensable. (Art. 5 LIVA)',
+          buzon:   '📬 El Buzón Tributario debe estar activo. Si no lo está, la multa es de $10,260 MXN por primera vez (Art. 17-K CFF).',
+          default: '🤖 Entendido. Para orientarte mejor, ¿se trata de un gasto, una factura o una consulta sobre tu declaración?',
+        };
+        const lower = text.toLowerCase();
+        botText = Object.entries(intents).find(([k]) => lower.includes(k))?.[1] || intents.default;
+      }
+
+      typing.remove();
+      const botB = document.createElement('div');
+      botB.className = 'chat-bubble bot';
+      botB.innerHTML = `<p>${botText.replace(/\*\*(.*?)\*\*/g,'<strong>$1</strong>').replace(/\n/g,'<br>')}</p><span class="bubble-time">${ts()}</span>`;
+      chatEl.appendChild(botB);
+      chatEl.scrollTop = chatEl.scrollHeight;
 
       // Guardar en Store
       if (window.Store) {
         Store.addConversation({
-          id: `conv-${Date.now()}`,
-          text, sender: 'Usuario',
-          time: new Date().toLocaleTimeString('es-MX',{hour:'2-digit',minute:'2-digit'}),
-          intent: result.intent, confidence: result.confidence||0,
-          keywords: result.keywords_matched||[], explanation: result.explanation||'',
-          response: responses[result.intent]||'', source: result.source||'local',
+          id: `c-${Date.now()}`, text, sender: 'Usuario',
+          time: ts(), intent: 'CONSULTA_FISCAL', confidence: 0.9,
+          keywords: [], response: botText, source: r.ok ? 'gemini' : 'local',
           timestamp: Date.now(),
         });
       }
     } catch(err) {
       typing.remove();
-      const errBubble = document.createElement('div');
-      errBubble.className = 'chat-bubble bot';
-      errBubble.innerHTML = `<p>❌ ${err.message}</p>`;
-      chatEl.appendChild(errBubble);
+      const errB = document.createElement('div');
+      errB.className = 'chat-bubble bot';
+      errB.innerHTML = `<p>❌ ${err.message}</p><span class="bubble-time">${ts()}</span>`;
+      chatEl.appendChild(errB);
     }
   }
 
@@ -278,11 +393,11 @@ const App = (() => {
           res = await _ocrFallback(file);
         }
         let html = `<pre class="ocr-json">${JSON.stringify(res.data, null, 2)}</pre>`;
-        if (res.needsHumanReview) html += `<div class="alert-warning">⚠️ ${res.humanReviewReason||'Revisión recomendada'}</div>`;
-        if (res.data?._rfc_emisor_valid === false) html += `<div class="alert-error">❌ RFC emisor inválido — CFDI no acreditable</div>`;
-        const isFactura = /cfdi|factura|xml/i.test(file.name);
         const conf = res.data?.confidence ?? 1;
-        if (isFactura && conf < 0.97) html += `<div class="alert-warning">⚠️ Precisión ${(conf*100).toFixed(1)}% &lt; 97% para acreditamiento IVA<br><small>Art. 5 LIVA | Regla 2.7.1.19 RMF 2024</small></div>`;
+        if (/cfdi|factura|xml/i.test(file.name) && conf < 0.97) {
+          html += `<div class="alert-warning">⚠️ Precisión ${(conf*100).toFixed(1)}% &lt; 97% requerido para acreditamiento IVA<br><small>Art. 5 LIVA | Regla 2.7.1.19 RMF 2024</small></div>`;
+        }
+        if (res.needsHumanReview) html += `<div class="alert-warning">⚠️ ${res.humanReviewReason||'Revisión recomendada'}</div>`;
         output.innerHTML = html;
         if (window.Store) Store.saveDocument({ ...res, fileName: file.name });
       } catch(err) {
@@ -301,11 +416,16 @@ const App = (() => {
       r.onerror = rej;
       r.readAsDataURL(file);
     });
+    const session = await window.APP_STATE?.supabase?.auth.getSession();
+    const token   = session?.data?.session?.access_token;
+    const headers = { 'Content-Type': 'application/json' };
+    if (token) headers['Authorization'] = `Bearer ${token}`;
+
     const resp = await fetch('/api/gemini-proxy', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      method: 'POST', headers,
       body: JSON.stringify({
         contents: [{ parts: [
-          { text: 'Eres OCR fiscal mexicano. Extrae JSON: {document_type,confidence,emisor_rfc,total,iva,fecha,folio}. SOLO JSON, sin texto extra.' },
+          { text: 'Eres OCR fiscal mexicano. Extrae JSON: {document_type,confidence,emisor_rfc,total,iva,fecha,folio}. SOLO JSON, sin texto adicional.' },
           { inline_data: { mime_type: file.type||'image/jpeg', data: b64 } },
         ]}],
         generationConfig: { temperature: 0.05, maxOutputTokens: 400 },
@@ -317,7 +437,7 @@ const App = (() => {
     const clean = txt.replace(/```json|```/g,'').trim();
     let data = {};
     try { data = JSON.parse(clean.slice(clean.indexOf('{'), clean.lastIndexOf('}')+1)); } catch(_){}
-    return { data, needsHumanReview: (data.confidence||0) < 0.85, humanReviewReason: 'Confianza baja — revisa imagen' };
+    return { data, needsHumanReview: (data.confidence||0) < 0.85, humanReviewReason: 'Confianza baja' };
   }
 
   // ─── BOOT ────────────────────────────────────────
@@ -332,33 +452,29 @@ const App = (() => {
   }
 
   async function init() {
-    console.log('%c🧠 Aliado RESICO v5.2', 'color:#10b981;font-weight:bold;font-size:14px');
+    console.log('%c🧠 Aliado RESICO v5.3', 'color:#10b981;font-weight:bold;font-size:14px');
 
-    // 1. Módulos síncronos primero
     initTheme();
     initNavigation();
     initSettings();
     initChat();
     initDocuments();
 
-    // 2. Esperar CDN Supabase (máx 4 s)
     await _waitForCDN('supabase', 4000);
 
-    // 3. Inicializar BD — APP_STATE.supabase queda listo aquí
     if (typeof initDatabase === 'function') {
-      try { await initDatabase(); }
-      catch(e) { console.warn('[App] BD offline:', e.message); }
+      try { await initDatabase(); } catch(e) { console.warn('[App] BD offline:', e.message); }
     }
 
-    // 4. Módulos de negocio en orden
-    for (const mod of ['Store', 'IntentClassifier', 'DocumentProcessor', 'Dashboard', 'Chat', 'ConversationManager']) {
+    for (const mod of ['Store','IntentClassifier','DocumentProcessor','Dashboard','Chat','ConversationManager']) {
       try { if (window[mod]?.init) await window[mod].init(); }
       catch(e) { console.warn(`[App] ${mod}:`, e.message); }
     }
 
-    // 5. Dashboard inicial
-    try { await Dashboard?.syncAndRender?.(); }
-    catch(e) { console.warn('[App] Dashboard sync:', e.message); }
+    // Auth guard — después de que Supabase esté listo
+    await initAuth();
+
+    try { await Dashboard?.syncAndRender?.(); } catch(e) { console.warn('[App] Dashboard sync:', e.message); }
 
     console.log('%c✅ Aliado RESICO listo', 'color:#10b981;font-weight:bold');
   }

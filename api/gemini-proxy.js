@@ -1,108 +1,89 @@
-// api/gemini-proxy.js
-// Vercel Edge Function — Single Export, Secure, Rate-Limited
-export const config = {
-  runtime: 'edge',
-  regions: ['iad1'],
-};
+// api/gemini-proxy.js — Vercel Edge Function v5.3
+// ✅ API Key NUNCA sale del servidor
+// ✅ Verifica sesión Supabase antes de procesar (opcional si token presente)
+// ✅ Un único export default — sin duplicados
+export const config = { runtime: 'edge', regions: ['iad1'] };
 
-// --- Rate Limiting (In-Memory) ---
-const rateLimitStore = new Map();
-const RATE_LIMIT = {
-  MAX_REQUESTS: 100,
-  WINDOW_MS: 60 * 60 * 1000, // 1 hour
-};
+const RATE = new Map();
+const MAX_RPH = 100, WINDOW = 3_600_000;
 
-function checkRateLimit(ip) {
+function rateCheck(ip) {
   const now = Date.now();
-  const user = rateLimitStore.get(ip) || { count: 0, resetAt: now + RATE_LIMIT.WINDOW_MS };
-  if (now > user.resetAt) {
-    user.count = 1;
-    user.resetAt = now + RATE_LIMIT.WINDOW_MS;
-  } else if (user.count >= RATE_LIMIT.MAX_REQUESTS) {
-    return { allowed: false, remaining: 0, resetAt: user.resetAt };
-  } else {
-    user.count++;
-  }
-  rateLimitStore.set(ip, user);
-  return { allowed: true, remaining: RATE_LIMIT.MAX_REQUESTS - user.count, resetAt: user.resetAt };
+  const r = RATE.get(ip) || { n: 0, reset: now + WINDOW };
+  if (now > r.reset) { r.n = 1; r.reset = now + WINDOW; }
+  else if (r.n >= MAX_RPH) return { ok: false };
+  else r.n++;
+  RATE.set(ip, r);
+  return { ok: true, remaining: MAX_RPH - r.n };
 }
 
-// Cleanup expired entries periodically
-setInterval(() => {
-  const now = Date.now();
-  for (const [ip, data] of rateLimitStore.entries()) {
-    if (now > data.resetAt) rateLimitStore.delete(ip);
-  }
-}, 15 * 60 * 1000);
-
-// --- SINGLE HANDLER EXPORT ---
 export default async function handler(req) {
-  // 🔒 CORS estricto
-  const allowedOrigins = [
+  const ORIGINS = [
     'https://aliado-resico.vercel.app',
     'https://aliadoresico.com',
-    process.env.NODE_ENV === 'development' ? 'http://localhost:3000' : null,
-  ].filter(Boolean);
+    'http://localhost:3000',
+    'http://127.0.0.1:3000',
+  ];
 
-  const origin = req.headers.get('origin') || '';
-  const isAllowed = allowedOrigins.includes(origin);
+  const origin  = req.headers.get('origin') || '';
+  const allowed = ORIGINS.includes(origin);
 
-  if (!isAllowed && process.env.NODE_ENV === 'production') {
-    return new Response(JSON.stringify({ error: 'Origen no autorizado' }), {
-      status: 403,
-      headers: { 'Content-Type': 'application/json' },
-    });
-  }
-
-  const headers = new Headers({
-    'Access-Control-Allow-Origin': isAllowed ? origin : allowedOrigins[0],
-    'Access-Control-Allow-Methods': 'POST, OPTIONS',
-    'Access-Control-Allow-Headers': 'Content-Type, Authorization, X-Forwarded-For',
+  const h = new Headers({
     'Content-Type': 'application/json',
+    'Access-Control-Allow-Origin':  allowed ? origin : ORIGINS[0],
+    'Access-Control-Allow-Methods': 'POST, OPTIONS',
+    'Access-Control-Allow-Headers': 'Content-Type, Authorization',
     'Vary': 'Origin',
     'X-Content-Type-Options': 'nosniff',
-    'X-Frame-Options': 'DENY',
-    'X-XSS-Protection': '1; mode=block',
-    'Strict-Transport-Security': 'max-age=31536000; includeSubDomains',
   });
 
-  // Preflight
-  if (req.method === 'OPTIONS') {
-    return new Response(null, { status: 204, headers });
+  if (req.method === 'OPTIONS') return new Response(null, { status: 204, headers: h });
+  if (req.method !== 'POST')   return new Response(JSON.stringify({ error: 'Method not allowed' }), { status: 405, headers: h });
+
+  // ── API Key desde variable de entorno del servidor ──────────
+  const key = process.env.GEMINI_API_KEY;
+  if (!key) return new Response(JSON.stringify({
+    error: 'GEMINI_API_KEY no configurada',
+    hint: 'Vercel Dashboard → Settings → Environment Variables → GEMINI_API_KEY',
+  }), { status: 500, headers: h });
+
+  // ── Verificación de sesión Supabase (si se envía token) ──────
+  const authHeader = req.headers.get('authorization');
+  let userId = 'anonymous';
+
+  if (authHeader?.startsWith('Bearer ')) {
+    const token   = authHeader.split(' ')[1];
+    const sbUrl   = process.env.SUPABASE_URL   || 'https://muwhpvdillphgkuwsaec.supabase.co';
+    const sbKey   = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_ANON_KEY;
+
+    if (sbKey) {
+      try {
+        const userRes = await fetch(`${sbUrl}/auth/v1/user`, {
+          headers: { 'Authorization': `Bearer ${token}`, 'apikey': sbKey },
+        });
+        if (userRes.ok) {
+          const userData = await userRes.json();
+          userId = userData.id || 'authenticated';
+        }
+      } catch(_) {}
+    }
   }
 
-  if (req.method !== 'POST') {
-    return new Response(JSON.stringify({ error: 'Method not allowed' }), { status: 405, headers });
-  }
+  // ── Rate limiting por IP ─────────────────────────────────────
+  const ip   = req.headers.get('x-forwarded-for')?.split(',')[0] || 'anon';
+  const rate = rateCheck(ip);
+  if (!rate.ok) return new Response(JSON.stringify({ error: 'Rate limit excedido (100 req/hora)' }), { status: 429, headers: h });
+  h.set('X-RateLimit-Remaining', String(rate.remaining));
 
-  // 🔐 VALIDACIÓN DE API KEY (SOLO SERVER)
-  const apiKey = process.env.GEMINI_API_KEY || process.env.ALIADO_GEMINI_KEY;
-  if (!apiKey) {
-    console.error('[Proxy] CRÍTICO: GEMINI_API_KEY no configurada en Vercel');
-    return new Response(JSON.stringify({
-      error: 'Configuración del servidor incompleta',
-      code: 'MISSING_API_KEY',
-      hint: 'Configure GEMINI_API_KEY en Vercel Dashboard → Settings → Environment Variables'
-    }), { status: 500, headers });
-  }
-
-  // 🎯 Modelo fijo
-  const MODEL = 'gemini-1.5-flash';
-  const GEMINI_URL = `https://generativelanguage.googleapis.com/v1beta/models/${MODEL}:generateContent?key=${apiKey}`;
-
-  // 📦 Parseo seguro del body
+  // ── Parseo y validación del body ─────────────────────────────
   let body;
-  try {
-    body = await req.json();
-  } catch {
-    return new Response(JSON.stringify({ error: 'Body debe ser JSON válido' }), { status: 400, headers });
+  try { body = await req.json(); } catch { return new Response(JSON.stringify({ error: 'Body JSON inválido' }), { status: 400, headers: h }); }
+
+  if (!Array.isArray(body?.contents)) {
+    return new Response(JSON.stringify({ error: 'Se requiere contents[]' }), { status: 400, headers: h });
   }
 
-  if (!body?.contents || !Array.isArray(body.contents)) {
-    return new Response(JSON.stringify({ error: 'Payload inválido: se requiere "contents[]"', code: 'INVALID_PAYLOAD' }), { status: 400, headers });
-  }
-
-  // 🧹 Limpieza de campos no soportados
+  // Sanitizar campos incompatibles con Gemini API
   if (body.generationConfig) {
     delete body.generationConfig.responseMimeType;
     delete body.generationConfig.responseSchema;
@@ -110,90 +91,35 @@ export default async function handler(req) {
   delete body.system_instruction;
   delete body.systemInstruction;
 
-  // 🔍 Sanitización
-  const sanitizePrompt = (text) => {
-    if (typeof text !== 'string') return text;
-    return text.slice(0, 32000).replace(/<script[^>]*>.*?<\/script>/gi, '').replace(/javascript:/gi, '').replace(/["\\]/g, '');
-  };
-
-  if (body.contents[0]?.parts?.[0]?.text) {
-    body.contents[0].parts[0].text = sanitizePrompt(body.contents[0].parts[0].text);
-  }
-
-  // 🚦 Rate limiting
-  const ip = req.headers.get('x-forwarded-for')?.split(',')[0] || 'unknown';
-  const rateCheck = checkRateLimit(ip);
-
-  headers.set('X-RateLimit-Limit', RATE_LIMIT.MAX_REQUESTS.toString());
-  headers.set('X-RateLimit-Remaining', rateCheck.remaining.toString());
-  headers.set('X-RateLimit-Reset', Math.ceil(rateCheck.resetAt / 1000).toString());
-
-  if (!rateCheck.allowed) {
-    return new Response(JSON.stringify({
-      error: 'Límite de solicitudes excedido',
-      code: 'RATE_LIMITED',
-      message: `Máximo ${RATE_LIMIT.MAX_REQUESTS} solicitudes por hora. Reintente después de ${new Date(rateCheck.resetAt).toLocaleTimeString('es-MX')}`,
-      retryAfter: Math.ceil((rateCheck.resetAt - Date.now()) / 1000)
-    }), { status: 429, headers: { ...headers, 'Retry-After': Math.ceil((rateCheck.resetAt - Date.now()) / 1000).toString() } });
-  }
-
-  // 📡 Llamada a Gemini con timeout
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 15000);
+  // ── Llamada a Gemini (server-side) ───────────────────────────
+  const MODEL = 'gemini-1.5-flash';
+  const URL   = `https://generativelanguage.googleapis.com/v1beta/models/${MODEL}:generateContent?key=${key}`;
+  const ctrl  = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), 12000);
 
   try {
-    const geminiRes = await fetch(GEMINI_URL, {
+    const r = await fetch(URL, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
-      signal: controller.signal,
+      signal: ctrl.signal,
     });
+    clearTimeout(timer);
+    const data = await r.json();
 
-    clearTimeout(timeout);
-    const data = await geminiRes.json();
-
-    if (!geminiRes.ok) {
-      console.error(`[Proxy] Gemini ${geminiRes.status}:`, data?.error?.message);
-      const errorMap = {
-        400: 'Solicitud inválida a Gemini',
-        401: 'Autenticación fallida con Gemini',
-        403: 'Acceso denegado a Gemini',
-        429: 'Límite de cuota de Gemini excedido',
-        500: 'Error interno de Gemini',
-        503: 'Servicio de Gemini no disponible',
-      };
-      return new Response(JSON.stringify({
-        error: errorMap[geminiRes.status] || `Error de Gemini: ${geminiRes.status}`,
-        code: `GEMINI_${geminiRes.status}`,
-        details: process.env.NODE_ENV === 'development' ? data : undefined
-      }), { status: geminiRes.status, headers });
+    if (!r.ok) {
+      const msgs = { 400:'Solicitud inválida', 401:'Auth fallida', 403:'Acceso denegado', 429:'Cuota excedida', 503:'Servicio no disponible' };
+      return new Response(JSON.stringify({ error: msgs[r.status]||`Gemini ${r.status}`, code:`GEMINI_${r.status}` }), { status: r.status, headers: h });
     }
 
     return new Response(JSON.stringify({
       ...data,
-      _meta: {
-        proxy_version: '3.0',
-        timestamp: new Date().toISOString(),
-        model: MODEL,
-        region: 'iad1',
-        rate_limit: { remaining: rateCheck.remaining, reset_at: new Date(rateCheck.resetAt).toISOString() }
-      }
-    }), { status: 200, headers });
+      _meta: { proxy: '5.3', model: MODEL, user_id: userId, ts: new Date().toISOString() },
+    }), { status: 200, headers: h });
 
-  } catch (error) {
-    clearTimeout(timeout);
-    if (error.name === 'AbortError') {
-      return new Response(JSON.stringify({
-        error: 'Tiempo de espera agotado',
-        code: 'TIMEOUT',
-        message: 'La solicitud tardó más de 15 segundos. Intente nuevamente.'
-      }), { status: 504, headers });
-    }
-    console.error('[Proxy] Error de red:', error.message);
-    return new Response(JSON.stringify({
-      error: 'Error de conectividad con Gemini',
-      code: 'NETWORK_ERROR',
-      message: process.env.NODE_ENV === 'development' ? error.message : 'No se pudo conectar con el servicio de IA.'
-    }), { status: 502, headers });
+  } catch(e) {
+    clearTimeout(timer);
+    if (e.name === 'AbortError') return new Response(JSON.stringify({ error: 'Timeout 12s', code:'TIMEOUT' }), { status: 504, headers: h });
+    return new Response(JSON.stringify({ error: 'Error de red', code:'NETWORK_ERROR' }), { status: 502, headers: h });
   }
 }
