@@ -640,12 +640,47 @@ REGLAS FISCALES:
   }
 
   // ══════════════════════════════════════════════
+  // AUTH CALLBACK — confirmación de email Supabase
+  // Procesa ?token_hash=...&type=email en la URL
+  // ══════════════════════════════════════════════
+  async function _handleAuthCallback() {
+    const params = new URLSearchParams(window.location.search);
+    const tokenHash = params.get('token_hash');
+    const type      = params.get('type');
+    if (!tokenHash || !type) return;
+
+    // Esperar cliente Supabase
+    if (typeof initDatabase === 'function') {
+      try { await initDatabase(); } catch(_) {}
+    }
+
+    const client = window.APP_STATE?.supabase;
+    if (!client) return;
+
+    try {
+      const { error } = await client.auth.verifyOtp({ token_hash: tokenHash, type });
+      if (error) {
+        console.error('[Auth] Error verificando token:', error.message);
+      } else {
+        console.log('[Auth] ✅ Email confirmado correctamente');
+        // Limpiar URL sin recargar
+        window.history.replaceState({}, '', window.location.pathname);
+      }
+    } catch(e) {
+      console.warn('[Auth] Callback error:', e.message);
+    }
+  }
+
+  // ══════════════════════════════════════════════
   // BOOT — secuencia robusta v6.1
   // Supabase CDN carga sin defer (síncrono)
   // app.js carga sin defer, se auto-invoca
   // ══════════════════════════════════════════════
   async function init() {
     console.log('%c🛡️ Aliado RESICO v6.1', 'color:#10b981;font-weight:bold;font-size:14px');
+
+    // 0. Manejar callback de confirmación de email (token_hash en URL)
+    await _handleAuthCallback();
 
     // 1. Módulos UI síncronos — siempre primero
     initTheme();
