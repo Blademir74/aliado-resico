@@ -17,20 +17,20 @@ async function initDatabase() {
 
   try {
     if (!window.supabase?.createClient) {
-      throw new Error('CDN supabase-js no cargó aún');
+      console.warn('[Supabase] CDN no disponible — modo demo activo');
+      return;
     }
 
     // Crear el CLIENTE INSTANCIADO — distinto de window.supabase (librería CDN)
     window.APP_STATE.supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
-
-    // Health check — PGRST116 = sin filas, es OK
-    const { error } = await window.APP_STATE.supabase
-      .from('conversations').select('id').limit(1);
-
-    if (error && error.code !== 'PGRST116') throw error;
-
     window.APP_STATE.dbConnected = true;
-    console.log('%c[Supabase] ✅ Conexión establecida', 'color:#10b981;font-weight:bold');
+    console.log('%c[Supabase] ✅ Cliente instanciado', 'color:#10b981;font-weight:bold');
+
+    // Verificar sesión activa (no hacer query pesada al arrancar)
+    const { data: sessionData } = await window.APP_STATE.supabase.auth.getSession();
+    if (sessionData?.session) {
+      console.log('[Supabase] Sesión activa:', sessionData.session.user.email);
+    }
 
     // Store.initSupabase() espera que APP_STATE.supabase ya esté listo
     if (typeof Store !== 'undefined' && Store.initSupabase) {

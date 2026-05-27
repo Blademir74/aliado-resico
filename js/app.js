@@ -640,22 +640,14 @@ REGLAS FISCALES:
   }
 
   // ══════════════════════════════════════════════
-  // BOOT — secuencia estricta
+  // BOOT — secuencia robusta v6.1
+  // Supabase CDN carga sin defer (síncrono)
+  // app.js carga sin defer, se auto-invoca
   // ══════════════════════════════════════════════
-  function _waitFor(name, ms=5000) {
-    return new Promise(res => {
-      if (window[name]) return res();
-      const t0 = Date.now();
-      const id = setInterval(() => {
-        if (window[name] || Date.now()-t0>ms) { clearInterval(id); res(); }
-      }, 80);
-    });
-  }
-
   async function init() {
-    console.log('%c🛡️ Aliado RESICO v6.0', 'color:#10b981;font-weight:bold;font-size:14px');
-    console.log('%cFiscal IA · Art. 113-E & 113-F LISR · Art. 17-K CFF', 'color:#6ee7b7;font-size:11px');
+    console.log('%c🛡️ Aliado RESICO v6.1', 'color:#10b981;font-weight:bold;font-size:14px');
 
+    // 1. Módulos UI síncronos — siempre primero
     initTheme();
     initNavigation();
     initSettings();
@@ -663,34 +655,47 @@ REGLAS FISCALES:
     initChat();
     initDocuments();
 
-    await _waitFor('supabase', 5000);
-
+    // 2. Supabase CDN ya cargó sin defer — instanciar cliente
     if (typeof initDatabase === 'function') {
-      try { await initDatabase(); } catch(e) { console.warn('[App] BD offline:', e.message); }
+      try { await initDatabase(); }
+      catch(e) { console.warn('[App] BD offline:', e.message); }
+    } else {
+      console.warn('[App] initDatabase no disponible — modo offline');
     }
 
+    // 3. Módulos de negocio
     for (const mod of ['Store','IntentClassifier','DocumentProcessor','Dashboard','Chat','ConversationManager']) {
       try { if (window[mod]?.init) await window[mod].init(); }
       catch(e) { console.warn(`[App] ${mod}:`, e.message); }
     }
 
+    // 4. Auth guard — después de que Supabase esté listo
     await initAuth();
 
-    // Cargar datos demo si no hay sesión
+    // 5. Datos demo
     if (window.MockData && window.Store) {
       MockData.load(Store);
     }
 
-    // Inicializar tracker mensual DESPUÉS de auth (necesita user ID para la key)
+    // 6. Monthly tracker
     initMonthlyTracker();
 
-    try { await Dashboard?.syncAndRender?.(); } catch(e) { console.warn('[App] Dashboard:', e.message); }
+    // 7. Dashboard
+    try { await Dashboard?.syncAndRender?.(); }
+    catch(e) { console.warn('[App] Dashboard:', e.message); }
 
-    console.log('%c✅ Listo', 'color:#10b981;font-weight:bold');
+    console.log('%c✅ Aliado RESICO listo', 'color:#10b981;font-weight:bold');
   }
 
   return { init, navigateTo, validateRFC, IS_DEV };
 })();
 
-document.addEventListener('DOMContentLoaded', () => App.init());
+// Auto-boot: app.js carga sin defer, DOM ya está listo
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', () => App.init());
+} else {
+  // DOM ya cargado (script al final del body sin defer)
+  App.init();
+}
+
 if (typeof window !== 'undefined') window.App = App;
