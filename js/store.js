@@ -147,12 +147,13 @@ const Store = (() => {
   async function _upsertMetrics() {
     if (!db || !usr) return;
     try {
+      // Columnas exactas — solo las 3 que siempre existen en la tabla
+      // by_category y updated_at se omiten para evitar error 400
       await db.from('fiscal_metrics').upsert({
-        user_id: usr.id, income_ytd: state.incomeYTD,
+        user_id:         usr.id,
+        income_ytd:      state.incomeYTD,
         total_processed: state.metrics.totalProcessed,
-        by_category: state.metrics.byCategory,
-        avg_confidence: state.metrics.avgConfidence / 100,
-        updated_at: new Date().toISOString(),
+        avg_confidence:  state.metrics.avgConfidence / 100,
       }, { onConflict: 'user_id' });
     } catch(e) { console.warn('[Store] upsertMetrics:', e.message); }
   }

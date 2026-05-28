@@ -192,11 +192,43 @@ const App = (() => {
     });
 
     logoutBtn?.addEventListener('click', async () => {
-      await client?.auth.signOut();
+      try {
+        // 1. Cerrar sesión en Supabase
+        await client?.auth.signOut();
+      } catch(e) { console.warn('[Auth] signOut:', e.message); }
+
+      // 2. Limpiar estado local
+      if (window.Store?.reset) Store.reset();
+      try { sessionStorage.clear(); } catch(_) {}
+
+      // 3. Ocultar UI inmediatamente
       chip && (chip.hidden = true);
       if (emailEl) emailEl.textContent = '';
       if (logoutBtn) logoutBtn.hidden = true;
+      if (appEl) appEl.hidden = true;
+
+      // 4. Prevenir retroceso con historial (LFPDPPP)
+      // Reemplaza la entrada actual en el historial con la página de login
+      window.history.replaceState(null, '', window.location.pathname);
+      // Agrega una entrada bloqueadora: si el usuario presiona "atrás"
+      // solo puede ir a la misma URL (que mostrará el login)
+      window.history.pushState(null, '', window.location.pathname);
+
+      // 5. Mostrar overlay de login
       _showOverlay(overlay, appEl);
+
+      // 6. Limpiar hash de navegación
+      if (window.location.hash) {
+        window.history.replaceState(null, '', window.location.pathname);
+      }
+    });
+
+    // Interceptar botón "Atrás" del browser después del logout
+    window.addEventListener('popstate', () => {
+      if (overlay && overlay.style.display !== 'none') {
+        // El usuario intentó retroceder — mantener en login
+        window.history.pushState(null, '', window.location.pathname);
+      }
     });
 
     client.auth.onAuthStateChange((event) => {
