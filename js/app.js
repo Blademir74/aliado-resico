@@ -409,6 +409,8 @@ const App = (() => {
   }
 
   async function _sendMessage(text, input, chatEl) {
+    // Sanitizar contra prompt injection antes de enviar a Gemini
+    if (window.InputSanitizer?.sanitizeForAI) text = window.InputSanitizer.sanitizeForAI(text);
     const ts = () => new Date().toLocaleTimeString('es-MX',{hour:'2-digit',minute:'2-digit'});
 
     // Burbuja usuario

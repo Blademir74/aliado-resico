@@ -118,14 +118,9 @@ const AppConfig = (() => {
     emit('config:changed', { service: 'gemini' });
   }
 
-  // --- Gemini API URL (producción usa proxy, desarrollo directo) ---
+  // --- Gemini API — SIEMPRE via proxy (nunca directo desde browser) ---
   function getGeminiEndpoint(model) {
-    const modelName = model || 'gemini-2.5-flash';
-    if (IS_PRODUCTION) {
-      return `/api/gemini-proxy?model=${modelName}`;
-    }
-    const key = getGeminiKey();
-    return `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${key}`;
+    return '/api/gemini-proxy';
   }
 
   // --- Supabase ---
@@ -213,25 +208,19 @@ const AppConfig = (() => {
       }
     }
 
-    // Local test
-    const key = getGeminiKey();
-    if (!key) return { ok: false, error: 'No API Key configured' };
-
+    // Test via proxy — NUNCA directo a Gemini desde el browser
     try {
-      const res = await fetch(
-        `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${key}`,
-        {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            contents: [{ parts: [{ text: 'Responde solo "OK"' }] }],
-            generationConfig: { maxOutputTokens: 5 },
-          }),
-        }
-      );
+      const res = await fetch('/api/gemini-proxy', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          contents: [{ parts: [{ text: 'Responde solo OK' }] }],
+          generationConfig: { maxOutputTokens: 5 },
+        }),
+      });
       if (res.ok) return { ok: true };
       const err = await res.json();
-      return { ok: false, error: err.error?.message || `HTTP ${res.status}` };
+      return { ok: false, error: err.error || `HTTP ${res.status}` };
     } catch (e) {
       return { ok: false, error: e.message };
     }

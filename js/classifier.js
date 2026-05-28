@@ -107,7 +107,8 @@ ESQUEMA DE RESPUESTA (SOLO JSON — ningún texto adicional):
 
   // ─── LLAMADA AL PROXY (sin API key en frontend) ───
   async function classifyWithProxy(message) {
-    const safe = message.replace(/["\\\n]/g, ' ').slice(0, 1500);
+    const sanitized = window.InputSanitizer?.sanitizeForAI ? window.InputSanitizer.sanitizeForAI(message) : message;
+    const safe = sanitized.replace(/["\\\n]/g, ' ').slice(0, 1500);
     const session = await window.APP_STATE?.supabase?.auth?.getSession?.();
     const token   = session?.data?.session?.access_token;
     const headers = { 'Content-Type': 'application/json' };

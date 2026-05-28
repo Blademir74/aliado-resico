@@ -95,6 +95,21 @@ export default async function handler(req) {
   delete body.system_instruction;
   delete body.systemInstruction;
 
+  // Sanitización de prompt injection server-side
+  const INJECTION_PATTERNS = [
+    /ignore\s+(all\s+)?(previous|prior|above)\s+(instructions|prompts|rules)/gi,
+    /disregard\s+(all\s+)?(previous|prior)\s/gi,
+    /you\s+are\s+now\s+a/gi,
+    /new\s+instructions?\s*:/gi,
+    /system\s*prompt\s*:/gi,
+    /forget\s+(everything|all)/gi,
+  ];
+  if (body.contents?.[0]?.parts?.[0]?.text) {
+    let userText = body.contents[0].parts[0].text;
+    for (const p of INJECTION_PATTERNS) { userText = userText.replace(p, '[FILTERED]'); }
+    body.contents[0].parts[0].text = userText.slice(0, 8000);
+  }
+
   // ── Llamada a Gemini — server-side únicamente ──────
   const MODEL = 'gemini-1.5-flash';
   const URL   = `https://generativelanguage.googleapis.com/v1beta/models/${MODEL}:generateContent?key=${key}`;

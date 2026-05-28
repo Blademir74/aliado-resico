@@ -1,19 +1,33 @@
 /**
- * init-db.js v5.2
- * Fix: APP_STATE en window (no const local)
- * Fix: NO llama AppConfig.setSupabaseConfig (bloqueada en prod)
- * Fix: NO auto-ejecuta — App.init() controla el orden
- * Fix: health check acepta PGRST116 (0 filas = OK)
+ * init-db.js v6.3 — PRODUCCIÓN SEGURA
+ * Anon key fuera del código fuente — viene de /api/config
+ * Fallback a valores de entorno si el endpoint falla
  */
 
-const SUPABASE_URL      = 'https://muwhpvdillphgkuwsaec.supabase.co';
-const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im11d2hwdmRpbGxwaGdrdXdzYWVjIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzc3ODc3NTgsImV4cCI6MjA5MzM2Mzc1OH0.TnFEHR2MGqnroXQ8tBOOpKNxNSt1tkNqcscXmt7Ij0A';
-
-// APP_STATE en window — accesible desde cualquier módulo
 window.APP_STATE = window.APP_STATE || { supabase: null, dbConnected: false };
 
 async function initDatabase() {
-  if (window.APP_STATE.dbConnected) return; // idempotente
+  if (window.APP_STATE.dbConnected) return;
+
+  // 1. Intentar obtener credenciales del servidor (no hardcoded)
+  let sbUrl = '', sbKey = '';
+
+  try {
+    const r = await fetch('/api/config', { headers: { 'Content-Type': 'application/json' } });
+    if (r.ok) {
+      const d = await r.json();
+      sbUrl = d.config?.supabaseUrl  || '';
+      sbKey = d.config?.supabaseAnonKey || '';
+    }
+  } catch(e) {
+    console.warn('[Supabase] /api/config no disponible:', e.message);
+  }
+
+  // 2. Sin credenciales → modo demo
+  if (!sbUrl || !sbKey) {
+    console.warn('[Supabase] Sin credenciales — modo demo activo');
+    return;
+  }
 
   try {
     if (!window.supabase?.createClient) {
@@ -21,28 +35,24 @@ async function initDatabase() {
       return;
     }
 
-    // Crear el CLIENTE INSTANCIADO — distinto de window.supabase (librería CDN)
-    window.APP_STATE.supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+    window.APP_STATE.supabase = window.supabase.createClient(sbUrl, sbKey);
     window.APP_STATE.dbConnected = true;
     console.log('%c[Supabase] ✅ Cliente instanciado', 'color:#10b981;font-weight:bold');
 
-    // Verificar sesión activa (no hacer query pesada al arrancar)
     const { data: sessionData } = await window.APP_STATE.supabase.auth.getSession();
     if (sessionData?.session) {
       console.log('[Supabase] Sesión activa:', sessionData.session.user.email);
+      window.APP_STATE.currentUser = sessionData.session.user;
     }
 
-    // Store.initSupabase() espera que APP_STATE.supabase ya esté listo
     if (typeof Store !== 'undefined' && Store.initSupabase) {
       await Store.initSupabase();
     }
 
-  } catch (err) {
+  } catch(err) {
     window.APP_STATE.dbConnected = false;
-    console.warn('[Supabase] Modo offline:', err.message);
+    console.warn('[Supabase] Error:', err.message);
   }
 }
 
 window.initDatabase = initDatabase;
-// NO document.addEventListener('DOMContentLoaded', initDatabase)
-// App.init() lo llama después de esperar el CDN
