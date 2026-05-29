@@ -2,32 +2,22 @@
   "version": 2,
   "cleanUrls": true,
   "functions": {
-    "api/gemini-proxy.js": {
+    "api/*.js": {
       "runtime": "vercel-nodejs@24.x",
       "maxDuration": 30
-    },
-    "api/config.js": {
-      "runtime": "vercel-nodejs@24.x"
-    },
-    "api/auth-callback.js": {
-      "runtime": "vercel-nodejs@24.x"
     }
   },
   "rewrites": [
     { "src": "/api/gemini-proxy", "dest": "/api/gemini-proxy.js" },
-    { "src": "/api/config", "dest": "/api/config.js" },
-    { "src": "/api/auth-callback", "dest": "/api/auth-callback.js" }
+    { "src": "/api/config", "dest": "/api/config.js" }
   ],
   "headers": [
     {
       "source": "/(.*)",
       "headers": [
-        { "key": "X-Frame-Options", "value": "DENY" },
-        { "key": "X-Content-Type-Options", "value": "nosniff" },
-        { "key": "Referrer-Policy", "value": "strict-origin-when-cross-origin" },
         {
           "key": "Content-Security-Policy",
-          "value": "default-src 'self'; script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://*.supabase.co; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com data:; img-src 'self' data: https: blob:; connect-src 'self' https://*.supabase.co wss://*.supabase.co https://generativelanguage.googleapis.com https://cdn.jsdelivr.net; frame-ancestors 'none';"
+          "value": "default-src 'self'; script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://*.supabase.co; connect-src 'self' https://*.supabase.co wss://*.supabase.co https://generativelanguage.googleapis.com https://cdn.jsdelivr.net; frame-ancestors 'none';"
         }
       ]
     }

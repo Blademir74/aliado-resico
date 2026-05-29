@@ -1,7 +1,7 @@
 {
   "name": "aliado-resico",
-  "version": "2.1.0",
-  "description": "Infraestructura de blindaje fiscal para RESICO México",
+  "version": "2.5.0",
+  "description": "Infraestructura de blindaje fiscal RESICO",
   "main": "app.js",
   "engines": {
     "node": "24.x"
