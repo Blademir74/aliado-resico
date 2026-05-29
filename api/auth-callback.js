@@ -1,22 +1,16 @@
-// api/auth-callback.js — Vercel Serverless Function
+// api/auth-callback.js — Vercel Serverless (CommonJS)
 // Maneja el redirect de confirmación de email de Supabase
-// Supabase envía el usuario aquí después de confirmar su correo
+'use strict';
 
-export default function handler(req, res) {
+module.exports = function handler(req, res) {
   const { token_hash, type, next } = req.query;
-
-  // Redirigir al frontend con los parámetros de Supabase
-  // El cliente de Supabase los procesa automáticamente
-  const baseUrl = 'https://aliado-resico.vercel.app';
-  const redirectUrl = next || '/';
+  const base = 'https://aliado-resico.vercel.app';
 
   if (token_hash && type) {
-    // Pasar los parámetros al frontend para que supabase-js los consuma
-    return res.redirect(
-      302,
-      `${baseUrl}${redirectUrl}?token_hash=${token_hash}&type=${type}`
-    );
+    const dest = next ? `${base}${next}` : base;
+    const sep  = dest.includes('?') ? '&' : '?';
+    return res.redirect(302, `${dest}${sep}token_hash=${token_hash}&type=${type}`);
   }
 
-  return res.redirect(302, baseUrl);
-}
+  return res.redirect(302, base);
+};
