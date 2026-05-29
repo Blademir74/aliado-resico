@@ -1,0 +1,9 @@
+{
+  "name": "aliado-resico",
+  "version": "6.6.0",
+  "description": "Aliado RESICO — Blindaje Fiscal IA",
+  "private": true,
+  "engines": {
+    "node": "18.x"
+  }
+}
