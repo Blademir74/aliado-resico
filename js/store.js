@@ -147,15 +147,24 @@ const Store = (() => {
   async function _upsertMetrics() {
     if (!db || !usr) return;
     try {
-      // Columnas exactas — solo las 3 que siempre existen en la tabla
-      // by_category y updated_at se omiten para evitar error 400
-      await db.from('fiscal_metrics').upsert({
-        user_id:         usr.id,
-        income_ytd:      state.incomeYTD,
-        total_processed: state.metrics.totalProcessed,
-        avg_confidence:  state.metrics.avgConfidence / 100,
-      }, { onConflict: 'user_id' });
-    } catch(e) { console.warn('[Store] upsertMetrics:', e.message); }
+      // Columnas exactas que existen en la tabla Supabase.
+      // La tabla puede tener columnas adicionales (alert_level, updated_at)
+      // pero NO se envían — Supabase las usa con su valor DEFAULT.
+      const { error } = await db.from('fiscal_metrics')
+        .upsert({
+          user_id:         usr.id,
+          income_ytd:      Number(state.incomeYTD)           || 0,
+          total_processed: Number(state.metrics.totalProcessed) || 0,
+          avg_confidence:  Number(state.metrics.avgConfidence)  / 100 || 0,
+        }, {
+          onConflict:        'user_id',
+          ignoreDuplicates:  false,
+        });
+
+      if (error) {
+        console.warn('[Store] upsertMetrics error:', error.message, '| code:', error.code);
+      }
+    } catch(e) { console.warn('[Store] upsertMetrics exception:', e.message); }
   }
 
   function addConversation(c) {

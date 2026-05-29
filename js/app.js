@@ -66,11 +66,9 @@ const App = (() => {
   }
 
   // ══════════════════════════════════════════════
-  // AUTH GUARD
-  // IDs del HTML: #auth-overlay, #auth-submit,
-  // #auth-email, #auth-password, #auth-msg,
-  // #auth-demo, #tab-login, #tab-register,
-  // #app, #user-chip, #user-email-display, #logout-btn
+  // AUTH GUARD — v6.5
+  // Fix: logout listener siempre registrado,
+  // sin cloneNode (causaba referencia huérfana)
   // ══════════════════════════════════════════════
   async function initAuth() {
     const overlay   = document.getElementById('auth-overlay');
@@ -82,8 +80,46 @@ const App = (() => {
 
     const client = window.APP_STATE?.supabase;
 
+    // Registrar logout ANTES de verificar sesión
+    // Usar flag para no duplicar el listener
+    if (logoutBtn && !logoutBtn._logoutWired) {
+      logoutBtn._logoutWired = true;
+      logoutBtn.addEventListener('click', async () => {
+        try { await window.APP_STATE?.supabase?.auth.signOut(); }
+        catch(e) { console.warn('[Auth] signOut:', e.message); }
+
+        // Limpiar estado
+        if (window.Store?.reset) Store.reset();
+        try { sessionStorage.clear(); } catch(_) {}
+
+        // Ocultar app, mostrar login
+        const btn = document.getElementById('logout-btn');
+        const ch  = document.getElementById('user-chip');
+        const em  = document.getElementById('user-email-display');
+        const ap  = document.getElementById('app');
+        const ov  = document.getElementById('auth-overlay');
+
+        if (ch)  ch.hidden  = true;
+        if (em)  em.textContent = '';
+        if (btn) btn.hidden = true;
+        if (ap)  ap.hidden  = true;
+        if (ov)  { ov.style.display = 'flex'; }
+
+        // Bloquear botón Atrás (LFPDPPP)
+        window.history.replaceState(null, '', window.location.pathname);
+        window.history.pushState(null, '', window.location.pathname);
+      });
+
+      // Anti-back-button: si overlay visible, bloquear retroceso
+      window.addEventListener('popstate', () => {
+        const ov = document.getElementById('auth-overlay');
+        if (ov?.style.display === 'flex') {
+          window.history.pushState(null, '', window.location.pathname);
+        }
+      });
+    }
+
     if (!client) {
-      // Sin Supabase — modo demo directo
       _showApp(overlay, appEl, chip, emailEl, logoutBtn, null);
       return;
     }
@@ -92,6 +128,7 @@ const App = (() => {
       const { data } = await client.auth.getSession();
       if (data?.session?.user) {
         _showApp(overlay, appEl, chip, emailEl, logoutBtn, data.session.user);
+        _wireAuthForm(client, overlay, appEl, chip, emailEl, logoutBtn);
         return;
       }
     } catch(_) {}

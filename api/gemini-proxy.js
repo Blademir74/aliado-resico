@@ -1,9 +1,6 @@
-// api/gemini-proxy.js — Vercel Edge Function v5.4
-// ✅ Un único export default
-// ✅ GEMINI_API_KEY solo en servidor (process.env)
-// ✅ Verifica sesión Supabase si token presente
-// ✅ Rate limit 100 req/hora por IP
-export const config = { runtime: 'edge', regions: ['iad1'] };
+// api/gemini-proxy.js — Vercel Serverless Function v6.5
+// CommonJS export para compatibilidad con vercel.json framework:null
+// GEMINI_API_KEY solo en process.env del servidor
 
 const RATE = new Map();
 const MAX = 100, WIN = 3_600_000;
@@ -18,48 +15,87 @@ function rateCheck(ip) {
   return { ok: true, rem: MAX - r.n };
 }
 
-export default async function handler(req) {
-  const ORIGINS = [
-    'https://aliado-resico.vercel.app',
-    'https://aliadoresico.com',
-    'http://localhost:3000',
-    'http://127.0.0.1:3000',
-    'http://localhost:5500',
-  ];
+const INJECTION_PATTERNS = [
+  /ignore\s+(all\s+)?(previous|prior|above)\s+(instructions|prompts|rules)/gi,
+  /disregard\s+(all\s+)?(previous|prior)\s/gi,
+  /you\s+are\s+now\s+a/gi,
+  /new\s+instructions?\s*:/gi,
+  /system\s*prompt\s*:/gi,
+  /forget\s+(everything|all)/gi,
+];
 
-  const origin  = req.headers.get('origin') || '';
+const ORIGINS = [
+  'https://aliado-resico.vercel.app',
+  'https://aliadoresico.com',
+  'http://localhost:3000',
+  'http://127.0.0.1:3000',
+  'http://localhost:5500',
+  'http://127.0.0.1:5500',
+];
+
+module.exports = async function handler(req, res) {
+  const origin  = req.headers['origin'] || '';
   const allowed = ORIGINS.includes(origin);
-  const cors    = allowed ? origin : ORIGINS[0];
 
-  const h = new Headers({
-    'Content-Type': 'application/json',
-    'Access-Control-Allow-Origin':  cors,
-    'Access-Control-Allow-Methods': 'POST, OPTIONS',
-    'Access-Control-Allow-Headers': 'Content-Type, Authorization',
-    'Vary': 'Origin',
-    'X-Content-Type-Options': 'nosniff',
-    'X-Frame-Options': 'DENY',
-  });
+  res.setHeader('Access-Control-Allow-Origin',  allowed ? origin : ORIGINS[0]);
+  res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+  res.setHeader('Vary', 'Origin');
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('X-Frame-Options', 'DENY');
+  res.setHeader('Content-Type', 'application/json');
 
-  if (req.method === 'OPTIONS') return new Response(null, { status: 204, headers: h });
-  if (req.method !== 'POST')   return new Response(JSON.stringify({ error: 'Method not allowed' }), { status: 405, headers: h });
+  if (req.method === 'OPTIONS') return res.status(204).end();
+  if (req.method !== 'POST')   return res.status(405).json({ error: 'Method not allowed' });
 
-  // ── API Key — NUNCA llega al frontend ──────────────
+  // API Key — SOLO en el servidor
   const key = process.env.GEMINI_API_KEY;
-  if (!key) return new Response(JSON.stringify({
-    error: 'GEMINI_API_KEY no configurada en el servidor',
-    hint: 'Vercel Dashboard → Settings → Environment Variables → GEMINI_API_KEY',
-  }), { status: 500, headers: h });
+  if (!key) {
+    console.error('[Proxy] GEMINI_API_KEY no configurada en Vercel');
+    return res.status(500).json({
+      error: 'GEMINI_API_KEY no configurada',
+      hint: 'Vercel Dashboard → Settings → Environment Variables → GEMINI_API_KEY',
+    });
+  }
 
-  // ── Verificación de sesión Supabase (opcional) ─────
-  const authHeader = req.headers.get('authorization') || '';
+  // Rate limiting
+  const ip   = (req.headers['x-forwarded-for'] || '').split(',')[0].trim() || 'unknown';
+  const rate = rateCheck(ip);
+  res.setHeader('X-RateLimit-Remaining', String(rate.rem ?? 0));
+  if (!rate.ok) return res.status(429).json({ error: 'Rate limit: máx 100 req/hora', code: 'RATE_LIMITED' });
+
+  // Parseo del body
+  let body = req.body;
+  if (typeof body === 'string') {
+    try { body = JSON.parse(body); } catch { return res.status(400).json({ error: 'Body JSON inválido' }); }
+  }
+  if (!Array.isArray(body?.contents)) {
+    return res.status(400).json({ error: 'Se requiere contents[]' });
+  }
+
+  // Limpiar campos incompatibles
+  if (body.generationConfig) {
+    delete body.generationConfig.responseMimeType;
+    delete body.generationConfig.responseSchema;
+  }
+  delete body.system_instruction;
+  delete body.systemInstruction;
+
+  // Sanitización prompt injection
+  if (body.contents?.[0]?.parts?.[0]?.text) {
+    let txt = body.contents[0].parts[0].text;
+    for (const p of INJECTION_PATTERNS) { txt = txt.replace(p, '[FILTERED]'); }
+    body.contents[0].parts[0].text = txt.slice(0, 8000);
+  }
+
+  // Verificar sesión Supabase (opcional)
+  const authHeader = req.headers['authorization'] || '';
   let userId = 'anon';
-
   if (authHeader.startsWith('Bearer ')) {
     const token = authHeader.slice(7);
-    const sbUrl = process.env.SUPABASE_URL || 'https://muwhpvdillphgkuwsaec.supabase.co';
+    const sbUrl = process.env.SUPABASE_URL || '';
     const sbKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_ANON_KEY || '';
-    if (sbKey) {
+    if (sbUrl && sbKey) {
       try {
         const ur = await fetch(`${sbUrl}/auth/v1/user`, {
           headers: { Authorization: `Bearer ${token}`, apikey: sbKey },
@@ -69,87 +105,37 @@ export default async function handler(req) {
     }
   }
 
-  // ── Rate limit ─────────────────────────────────────
-  const ip   = req.headers.get('x-forwarded-for')?.split(',')[0]?.trim() || 'unknown';
-  const rate = rateCheck(ip);
-  h.set('X-RateLimit-Remaining', String(rate.rem ?? 0));
-  if (!rate.ok) return new Response(JSON.stringify({
-    error: 'Rate limit excedido. Máximo 100 solicitudes/hora.',
-    code: 'RATE_LIMITED',
-  }), { status: 429, headers: h });
-
-  // ── Parseo del body ────────────────────────────────
-  let body;
-  try { body = await req.json(); }
-  catch { return new Response(JSON.stringify({ error: 'Body JSON inválido' }), { status: 400, headers: h }); }
-
-  if (!Array.isArray(body?.contents)) {
-    return new Response(JSON.stringify({ error: 'Se requiere contents[]' }), { status: 400, headers: h });
-  }
-
-  // Limpiar campos incompatibles con Gemini API
-  if (body.generationConfig) {
-    delete body.generationConfig.responseMimeType;
-    delete body.generationConfig.responseSchema;
-  }
-  delete body.system_instruction;
-  delete body.systemInstruction;
-
-  // Sanitización de prompt injection server-side
-  const INJECTION_PATTERNS = [
-    /ignore\s+(all\s+)?(previous|prior|above)\s+(instructions|prompts|rules)/gi,
-    /disregard\s+(all\s+)?(previous|prior)\s/gi,
-    /you\s+are\s+now\s+a/gi,
-    /new\s+instructions?\s*:/gi,
-    /system\s*prompt\s*:/gi,
-    /forget\s+(everything|all)/gi,
-  ];
-  if (body.contents?.[0]?.parts?.[0]?.text) {
-    let userText = body.contents[0].parts[0].text;
-    for (const p of INJECTION_PATTERNS) { userText = userText.replace(p, '[FILTERED]'); }
-    body.contents[0].parts[0].text = userText.slice(0, 8000);
-  }
-
-  // ── Llamada a Gemini — server-side únicamente ──────
+  // Llamada a Gemini
   const MODEL = 'gemini-1.5-flash';
   const URL   = `https://generativelanguage.googleapis.com/v1beta/models/${MODEL}:generateContent?key=${key}`;
-  const ctrl  = new AbortController();
-  const timer = setTimeout(() => ctrl.abort(), 12_000);
 
   try {
     const gr = await fetch(URL, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
-      signal: ctrl.signal,
+      signal: AbortSignal.timeout(12000),
     });
-    clearTimeout(timer);
 
     const data = await gr.json();
     if (!gr.ok) {
       const msgs = {
-        400: 'Solicitud inválida para Gemini',
-        401: 'GEMINI_API_KEY inválida — verifica en Vercel',
-        403: 'Acceso denegado a Gemini API',
-        429: 'Cuota de Gemini excedida — espera unos minutos',
-        503: 'Gemini no disponible temporalmente',
+        400: 'Solicitud inválida', 401: 'API Key inválida',
+        403: 'Acceso denegado', 429: 'Cuota excedida', 503: 'Servicio no disponible',
       };
-      return new Response(JSON.stringify({
-        error: msgs[gr.status] || `Gemini ${gr.status}`,
-        code: `GEMINI_${gr.status}`,
-      }), { status: gr.status, headers: h });
+      return res.status(gr.status).json({ error: msgs[gr.status] || `Gemini ${gr.status}`, code: `GEMINI_${gr.status}` });
     }
 
-    return new Response(JSON.stringify({
+    return res.status(200).json({
       ...data,
-      _meta: { proxy: '5.4', model: MODEL, user_id: userId, ts: new Date().toISOString() },
-    }), { status: 200, headers: h });
+      _meta: { proxy: '6.5', model: MODEL, user_id: userId, ts: new Date().toISOString() },
+    });
 
   } catch(e) {
-    clearTimeout(timer);
-    if (e.name === 'AbortError') {
-      return new Response(JSON.stringify({ error: 'Timeout 12s — Gemini tardó demasiado', code: 'TIMEOUT' }), { status: 504, headers: h });
+    if (e.name === 'TimeoutError' || e.name === 'AbortError') {
+      return res.status(504).json({ error: 'Timeout 12s', code: 'TIMEOUT' });
     }
-    return new Response(JSON.stringify({ error: 'Error de red hacia Gemini', code: 'NETWORK_ERROR' }), { status: 502, headers: h });
+    console.error('[Proxy] Error:', e.message);
+    return res.status(502).json({ error: 'Error de red hacia Gemini', code: 'NETWORK_ERROR' });
   }
-}
+};
