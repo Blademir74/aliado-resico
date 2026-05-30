@@ -1,12 +1,8 @@
 {
   "name": "aliado-resico",
-  "version": "2.5.0",
-  "description": "Infraestructura de blindaje fiscal RESICO",
-  "main": "app.js",
+  "version": "6.8.0",
+  "private": true,
   "engines": {
-    "node": "22.x"
-  },
-  "dependencies": {
-    "@supabase/supabase-js": "^2.0.0"
+    "node": "18.x"
   }
-}   
+}
