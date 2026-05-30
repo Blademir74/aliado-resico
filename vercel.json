@@ -6,30 +6,6 @@
   "regions": [
     "iad1"
   ],
-  "rewrites": [
-    {
-      "source": "/api/(.*)",
-      "destination": "/api/$1"
-    }
-  ],
-  "functions": {
-    "api/gemini-proxy.js": {
-      "runtime": "nodejs22.x",
-      "maxDuration": 15
-    },
-    "api/config.js": {
-      "runtime": "nodejs22.x",
-      "maxDuration": 5
-    },
-    "api/auth-callback.js": {
-      "runtime": "nodejs22.x",
-      "maxDuration": 5
-    },
-    "api/telegram-diagnostics.js": {
-      "runtime": "nodejs22.x",
-      "maxDuration": 5
-    }
-  },
   "headers": [
     {
       "source": "/(.*)",
@@ -100,4 +76,4 @@
       ]
     }
   ]
-}   
+}
