@@ -1,6 +1,6 @@
 const fs = require('fs');
 
-const API_KEY = 'AIzaSyDIdD-653orilkl7vC5Z-W6cxFndXeIHkU';
+const API_KEY = process.env.GEMINI_API_KEY || ''; // NUNCA hardcodear keys;
 const ENDPOINT = `https://generativelanguage.googleapis.com/v1beta/models/gemini-flash-latest:generateContent?key=${API_KEY}`;
 
 const SYSTEM_PROMPT = `Eres un clasificador fiscal mexicano EXPERTO en el Régimen Simplificado de Confianza (RESICO). Tu trabajo es clasificar mensajes de contribuyentes mexicanos con máxima precisión.
