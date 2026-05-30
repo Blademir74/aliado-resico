@@ -147,24 +147,16 @@ const Store = (() => {
   async function _upsertMetrics() {
     if (!db || !usr) return;
     try {
-      // Columnas exactas que existen en la tabla Supabase.
-      // La tabla puede tener columnas adicionales (alert_level, updated_at)
-      // pero NO se envían — Supabase las usa con su valor DEFAULT.
       const { error } = await db.from('fiscal_metrics')
         .upsert({
           user_id:         usr.id,
-          income_ytd:      Number(state.incomeYTD)           || 0,
-          total_processed: Number(state.metrics.totalProcessed) || 0,
-          avg_confidence:  Number(state.metrics.avgConfidence)  / 100 || 0,
-        }, {
-          onConflict:        'user_id',
-          ignoreDuplicates:  false,
-        });
+          income_ytd:      Number(state.incomeYTD)                     || 0,
+          total_processed: Number(state.metrics.totalProcessed)         || 0,
+          avg_confidence:  (Number(state.metrics.avgConfidence) / 100)  || 0,
+        }, { onConflict: 'user_id' });
 
-      if (error) {
-        console.warn('[Store] upsertMetrics error:', error.message, '| code:', error.code);
-      }
-    } catch(e) { console.warn('[Store] upsertMetrics exception:', e.message); }
+      if (error) console.warn('[Store] metrics:', error.message);
+    } catch(e) { console.warn('[Store] metrics:', e.message); }
   }
 
   function addConversation(c) {
