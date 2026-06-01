@@ -4,7 +4,7 @@
     "iad1"
   ],
   "functions": {
-    "api/**/*.js": {
+    "api/gemini-proxy.js": {
       "maxDuration": 30
     }
   },
