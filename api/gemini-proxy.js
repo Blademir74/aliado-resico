@@ -1,12 +1,10 @@
-// api/gemini-proxy.js
 export const config = {
-  runtime: 'nodejs', // Hereda nodejs24.x del vercel.json
-  maxDuration: 30,   // Blindaje para OCR de IVA
+  maxDuration: 30,
 };
 
 const RATE = new Map();
 const MAX = 100;
-const WIN = 3_600_000; // 1 hora
+const WIN = 3_600_000;
 
 function rateCheck(ip) {
   const now = Date.now();
