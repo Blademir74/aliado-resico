@@ -381,7 +381,26 @@ const App = (() => {
           method:'POST', headers:{'Content-Type':'application/json'},
           body: JSON.stringify({ contents:[{parts:[{text:'Di solo OK'}]}] }),
         });
-        alert(r.ok ? '✅ Proxy Gemini OK' : `❌ Error ${r.status}`);
+        if (r.ok) {
+          if (window.IntentClassifier?.setProxyOffline) {
+            window.IntentClassifier.setProxyOffline(false);
+          }
+          alert('✅ Proxy Gemini OK');
+          const chatEl = document.getElementById('chat-messages');
+          if (chatEl) {
+            const ts = new Date().toLocaleTimeString('es-MX',{hour:'2-digit',minute:'2-digit'});
+            const b = document.createElement('div');
+            b.className = 'chat-bubble bot';
+            b.innerHTML = `<p>🔄 <strong>Conexión restablecida con el servidor.</strong><br><br>
+            Se aplica el <strong>Art. 113-E de la LISR</strong> (Monitor de ingresos con límite anual de 3.5 MDP).<br><br>
+            ⚠️ <strong>Alerta Fiscal (Art. 17-K CFF):</strong> Evita la multa de <strong>$10,260 MXN</strong> por Buzón Tributario inactivo o medios de contacto no actualizados.</p>
+            <span class="bubble-time">${ts}</span>`;
+            chatEl.appendChild(b);
+            chatEl.scrollTop = chatEl.scrollHeight;
+          }
+        } else {
+          alert(`❌ Error ${r.status}`);
+        }
       } catch(e) { alert('❌ '+e.message); }
     });
     document.getElementById('supabase-test')?.addEventListener('click', async () => {
@@ -534,6 +553,9 @@ REGLAS FISCALES:
       if (r.ok) {
         const d = await r.json();
         botText = d.candidates?.[0]?.content?.parts?.[0]?.text || '⚠️ Sin respuesta.';
+        if (cls.connection_restored) {
+          botText += `\n\n🔄 **Conexión restablecida con el servidor.**\n• Se aplica el **Art. 113-E de la LISR** (Monitor de ingresos con límite anual de 3.5 MDP).\n• ⚠️ **Alerta Fiscal (Art. 17-K CFF):** Evita la multa de **$10,260 MXN** por Buzón Tributario inactivo o medios de contacto no actualizados. ¡Actívalo hoy!`;
+        }
       } else {
         botText = _localFallback(cls.intent);
       }

@@ -161,6 +161,10 @@ Antes de continuar, necesito verificar 3 puntos críticos:
       response += `\n\n📌 **Contexto RESICO:** ${classification.resico_context}`;
     }
 
+    if (classification.connection_restored) {
+      response += `\n\n🔄 **Conexión restablecida con el servidor.**\n• Se aplica el **Art. 113-E de la LISR** (Monitor de ingresos con límite anual de 3.5 MDP).\n• ⚠️ **Alerta Fiscal (Art. 17-K CFF):** Evita la multa de **$10,260 MXN** por Buzón Tributario inactivo o medios de contacto no actualizados. ¡Actívalo hoy!`;
+    }
+
     // Evaluar riesgo de ingresos y agregar alerta proactiva si aplica
     const incomeRisk = evaluateIncomeRisk(Store.getState().incomeYTD || 0);
     if (incomeRisk.alert && classification.intent !== 'OTROS') {

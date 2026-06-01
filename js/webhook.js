@@ -118,7 +118,7 @@ const WebhookBridge = (() => {
   async function sendToN8N(payload, retryCount = 0) {
     const webhookUrl = AppConfig.getWebhookUrl();
     if (!webhookUrl) {
-      console.log('%c[Webhook] No webhook URL configured — skipping', 'color:#64748b');
+      console.info('[Webhook] Webhook no configurado. Envío omitido.');
       return { sent: false, reason: 'not_configured' };
     }
 

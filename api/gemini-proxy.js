@@ -31,7 +31,7 @@ const ALLOWED = [
   'http://127.0.0.1:5500',
 ];
 
-module.exports = async function handler(req, res) {
+export default async function handler(req, res) {
   const origin  = req.headers['origin'] || '';
   const allowed = ALLOWED.includes(origin);
   const cors    = allowed ? origin : ALLOWED[0];

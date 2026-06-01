@@ -7,6 +7,7 @@
 const IntentClassifier = (() => {
   const CACHE = new Map();
   const CACHE_MAX = 100, CACHE_TTL = 5 * 60 * 1000;
+  let proxyOffline = false;
 
   // Slang mexicano → término fiscal formal
   const SLANG_MAP = {
@@ -241,10 +242,18 @@ ESQUEMA DE RESPUESTA (SOLO JSON — ningún texto adicional):
 
     try {
       const res = await classifyWithProxy(message);
+      
+      // Si estaba offline y ahora funciona, la conexión se ha restablecido
+      if (proxyOffline) {
+        proxyOffline = false;
+        res.connection_restored = true;
+      }
+      
       if (CACHE.size >= CACHE_MAX) CACHE.delete(CACHE.keys().next().value);
       CACHE.set(key, { res, ts: Date.now() });
       return res;
     } catch(e) {
+      proxyOffline = true;
       console.warn('[Classifier] Proxy → fallback local:', e.message);
       const local = classifyLocal(message);
       local.explanation += ` (offline: ${e.message.slice(0,60)})`;
@@ -252,6 +261,6 @@ ESQUEMA DE RESPUESTA (SOLO JSON — ningún texto adicional):
     }
   }
 
-  return { classify, classifyLocal, SLANG_MAP };
+  return { classify, classifyLocal, SLANG_MAP, getProxyOffline: () => proxyOffline, setProxyOffline: (v) => { proxyOffline = v; } };
 })();
 if (typeof window !== 'undefined') window.IntentClassifier = IntentClassifier;

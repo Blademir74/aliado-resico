@@ -12,7 +12,7 @@
   "rewrites": [
     {
       "source": "/api/gemini-proxy",
-      "destination": "/api/gemini-proxy"
+      "destination": "/api/gemini-proxy.js"
     },
     {
       "source": "/((?!api|styles.css|js).*)",
