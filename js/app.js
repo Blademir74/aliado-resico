@@ -393,7 +393,9 @@ const App = (() => {
             b.className = 'chat-bubble bot';
             b.innerHTML = `<p>🔄 <strong>Conexión restablecida con el servidor.</strong><br><br>
             Se aplica el <strong>Art. 113-E de la LISR</strong> (Monitor de ingresos con límite anual de 3.5 MDP).<br><br>
-            ⚠️ <strong>Alerta Fiscal (Art. 17-K CFF):</strong> Evita la multa de <strong>$10,260 MXN</strong> por Buzón Tributario inactivo o medios de contacto no actualizados.</p>
+            ⚠️ <strong>Alerta Fiscal (Art. 17-K CFF):</strong> Evita la multa de <strong>$10,260 MXN</strong> por Buzón Tributario inactivo. ¡Actívalo hoy!<br><br>
+            🚨 <strong>Reincidencia (Art. 86-C CFF):</strong> La reincidencia duplicará de forma automática el monto de la multa.<br><br>
+            📋 <strong>Declaración Anual (Art. 113-F LISR):</strong> Recuerda que tienes la obligación de presentar tu declaración anual en el mes de abril.</p>
             <span class="bubble-time">${ts}</span>`;
             chatEl.appendChild(b);
             chatEl.scrollTop = chatEl.scrollHeight;
@@ -554,7 +556,7 @@ REGLAS FISCALES:
         const d = await r.json();
         botText = d.candidates?.[0]?.content?.parts?.[0]?.text || '⚠️ Sin respuesta.';
         if (cls.connection_restored) {
-          botText += `\n\n🔄 **Conexión restablecida con el servidor.**\n• Se aplica el **Art. 113-E de la LISR** (Monitor de ingresos con límite anual de 3.5 MDP).\n• ⚠️ **Alerta Fiscal (Art. 17-K CFF):** Evita la multa de **$10,260 MXN** por Buzón Tributario inactivo o medios de contacto no actualizados. ¡Actívalo hoy!`;
+          botText += `\n\n🔄 **Conexión restablecida con el servidor.**\n• Se aplica el **Art. 113-E de la LISR** (Monitor de ingresos con límite anual de 3.5 MDP).\n• ⚠️ **Alerta Fiscal (Art. 17-K CFF):** Evita la multa de **$10,260 MXN** por Buzón Tributario inactivo. ¡Actívalo hoy!\n• 🚨 **Reincidencia (Art. 86-C CFF):** La reincidencia en esta infracción duplicará la multa de forma automática.\n• 📋 **Declaración Anual (Art. 113-F LISR):** Recuerda que tienes la obligación de presentar tu declaración anual en el mes de abril.`;
         }
       } else {
         botText = _localFallback(cls.intent);
