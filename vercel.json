@@ -3,6 +3,22 @@
   "regions": [
     "iad1"
   ],
+  "functions": {
+    "api/**/*.js": {
+      "runtime": "nodejs24.x",
+      "maxDuration": 30
+    }
+  },
+  "rewrites": [
+    {
+      "source": "/api/gemini-proxy",
+      "destination": "/api/gemini-proxy"
+    },
+    {
+      "source": "/((?!api|styles.css|js).*)",
+      "destination": "/index.html"
+    }
+  ],
   "headers": [
     {
       "source": "/(.*)",
