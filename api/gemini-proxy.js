@@ -1,7 +1,3 @@
-const config = {
-  maxDuration: 30,
-};
-
 const RATE = new Map();
 const MAX = 100;
 const WIN = 3_600_000;
@@ -64,4 +60,5 @@ module.exports = async function handler(req, res) {
   }
 };
 
-module.exports.config = config;
+// Opcional: exportar configuración de duración (no es necesario en Vercel con maxDuration)
+module.exports.config = { maxDuration: 30 };
