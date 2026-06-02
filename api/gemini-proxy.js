@@ -1,4 +1,4 @@
-export const config = {
+const config = {
   maxDuration: 30,
 };
 
@@ -23,7 +23,7 @@ const ALLOWED = [
   'http://127.0.0.1:3000',
 ];
 
-export default async function handler(req, res) {
+module.exports = async function handler(req, res) {
   const origin = req.headers['origin'] || '';
   const cors = ALLOWED.includes(origin) ? origin : ALLOWED[0];
 
@@ -62,4 +62,6 @@ export default async function handler(req, res) {
   } catch (e) {
     return res.status(502).json({ error: 'Network error' });
   }
-}
+};
+
+module.exports.config = config;
