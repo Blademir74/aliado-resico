@@ -1,8 +1,8 @@
 {
-  "name": "aliado-resico",
+  "name":"aliado-resico",
   "version": "7.0.0",
   "private": true,
   "engines": {
-    "node": "20.x"
+    "node":"20.x"
   }
 }
