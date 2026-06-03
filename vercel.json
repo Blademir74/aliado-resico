@@ -1,11 +1,10 @@
 {
   "version": 2,
-  "functions": {
-    "api/*.js": {
-      "maxDuration": 30
-    }
-  },
   "rewrites": [
+    {
+      "source": "/api/(.*)",
+      "destination": "/api/$1"
+    },
     {
       "source": "/((?!api|styles.css|js).*)",
       "destination": "/index.html"
