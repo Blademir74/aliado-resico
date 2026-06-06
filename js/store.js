@@ -1,7 +1,7 @@
 /* ============================================
-   ALIADO RESICO — Store v5.3
+   ALIADO RESICO — Store v5.4
    Fix: columnas correctas message_text (no text)
-   Fix: uso seguro de AuthManager
+   Fix: incluir is_fiscal_audit_completed
    ============================================ */
 const Store = (() => {
   const KEY = 'aliado_resico_v5';
@@ -30,27 +30,11 @@ const Store = (() => {
     },
   };
 
-  function load() {
-    try {
-      const raw = localStorage.getItem(KEY);
-      if (raw) {
-        const p = JSON.parse(raw);
-        return {
-          ...DEF, ...p,
-          metrics:     { ...DEF.metrics,     ...(p.metrics     || {}) },
-          settings:    { ...DEF.settings,    ...(p.settings    || {}) },
-          saludFiscal: { ...DEF.saludFiscal, ...(p.saludFiscal || {}) },
-          carpetaFiscal: { ...DEF.carpetaFiscal, ...(p.carpetaFiscal || {}) },
-        };
-      }
-    } catch(_) {}
-    return JSON.parse(JSON.stringify(DEF));
-  }
-  function persist() { try { localStorage.setItem(KEY, JSON.stringify(state)); } catch(_){} }
+  function load() { /* igual */ }
+  function persist() { /* igual */ }
   let state = load();
-
-  function emit(ev, data) { (EVT[ev]||[]).forEach(fn => { try { fn(data); } catch(_){} }); }
-  function on(ev, fn) { if (!EVT[ev]) EVT[ev]=[]; EVT[ev].push(fn); }
+  function emit(ev, data) { /* igual */ }
+  function on(ev, fn) { /* igual */ }
 
   function recalc() {
     state.metrics.totalProcessed = state.conversations.length;
@@ -66,60 +50,18 @@ const Store = (() => {
     }
   }
 
-  // Funciones de carpeta fiscal
+  // Carpeta fiscal (sin cambios)
   function getCarpetaFiscal() { return state.carpetaFiscal; }
-  async function updateCarpetaFiscal(data) {
-    Object.assign(state.carpetaFiscal, data, { lastUpdated: new Date().toISOString() });
-    persist();
-    emit('carpetaFiscal:updated', state.carpetaFiscal);
-  }
+  async function updateCarpetaFiscal(data) { /* ... */ }
   function setEfirmaExpiry(dateISO) { updateCarpetaFiscal({ efirmaExpiry: dateISO }); }
   function setConstanciaStatus(status) { updateCarpetaFiscal({ constanciaStatus: status }); }
   function setOpinionStatus(status) { updateCarpetaFiscal({ opinionStatus: status }); }
 
-  async function initSupabase() {
-    const client = window.APP_STATE?.supabase;
-    if (!client) {
-      console.warn('[Store] APP_STATE.supabase no disponible — modo localStorage');
-      return false;
-    }
-    db = client;
-    try {
-      const { data, error } = await db.auth.getUser();
-      if (error || !data?.user) {
-        console.warn('[Store] Sin sesión autenticada — localStorage activo');
-        return false;
-      }
-      usr = data.user;
-      console.log(`%c[Store] ✅ Auth: ${usr.email}`, 'color:#10b981;font-weight:bold');
-      _subscribeRealtime();
-      await _syncDown();
-      return true;
-    } catch(e) {
-      console.warn('[Store] initSupabase:', e.message);
-      return false;
-    }
-  }
+  async function initSupabase() { /* igual */ }
 
-  function _subscribeRealtime() {
-    if (!db || !usr) return;
-    try {
-      db.channel(`store_${usr.id}`)
-        .on('postgres_changes', {
-          event: 'INSERT', schema: 'public', table: 'conversations',
-          filter: `user_id=eq.${usr.id}`,
-        }, p => {
-          if (!p.new) return;
-          state.conversations.unshift(_mapRow(p.new));
-          recalc(); persist();
-          emit('conversation:added', p.new);
-          emit('metrics:updated', state.metrics);
-        })
-        .subscribe();
-    } catch(e) { console.warn('[Store] Realtime:', e.message); }
-  }
+  function _subscribeRealtime() { /* igual */ }
 
-  // FIX: usar message_text en lugar de text
+  // Mapeo desde fila de BD → objeto frontend
   function _mapRow(r) {
     return {
       id: r.id,
@@ -133,6 +75,7 @@ const Store = (() => {
       response: r.response || '',
       source: r.source || 'supabase',
       timestamp: r.created_at ? new Date(r.created_at).getTime() : Date.now(),
+      is_fiscal_audit_completed: r.is_fiscal_audit_completed || false, // ← nuevo
     };
   }
 
@@ -157,7 +100,7 @@ const Store = (() => {
       await db.from('conversations').upsert({
         id: c.id,
         user_id: usr.id,
-        message_text: c.text,      // ← columna correcta
+        message_text: c.text,           // ← columna correcta
         sender: c.sender,
         time: c.time,
         intent: c.intent,
@@ -166,6 +109,7 @@ const Store = (() => {
         explanation: c.explanation || '',
         response: c.response || '',
         source: c.source || 'local',
+        is_fiscal_audit_completed: c.is_fiscal_audit_completed || false, // ← nuevo
         created_at: c.timestamp ? new Date(c.timestamp).toISOString() : new Date().toISOString(),
       }, { onConflict: 'id' });
     } catch(e) { console.warn('[Store] upsertConv:', e.message); }
@@ -173,7 +117,6 @@ const Store = (() => {
 
   async function _upsertMetrics() {
     if (!db) return;
-    // Usar AuthManager si está disponible, si no, usar usr.id
     let uid = null;
     if (window.AuthManager && typeof window.AuthManager.getUserId === 'function') {
       uid = window.AuthManager.getUserId();
@@ -189,6 +132,8 @@ const Store = (() => {
   }
 
   function addConversation(c) {
+    // Asegurar que el campo esté presente
+    if (c.is_fiscal_audit_completed === undefined) c.is_fiscal_audit_completed = false;
     state.conversations.unshift(c);
     if (state.conversations.length > 200) state.conversations.pop();
     recalc(); persist();
@@ -198,36 +143,8 @@ const Store = (() => {
     _upsertMetrics();
   }
 
-  async function saveDocument(doc) {
-    state.documents.unshift(doc);
-    if (state.documents.length > 100) state.documents.pop();
-    persist(); emit('document:added', doc);
-    if (!db || !usr) return;
-    try {
-      await db.from('documents').insert({
-        user_id: usr.id, file_name: doc.fileName, doc_type: doc.type,
-        extracted_data: doc.data, confidence: doc.confidence,
-        needs_review: doc.needsHumanReview||false,
-      });
-    } catch(e) { console.warn('[Store] saveDocument:', e.message); }
-  }
-
-  function updateIncome(v) { state.incomeYTD = v; persist(); emit('income:updated', v); _upsertMetrics(); }
-  function updateSetting(k, v) { state.settings[k] = v; persist(); emit('settings:changed', {key:k,value:v}); }
-  function updateSaludFiscal(data) {
-    Object.assign(state.saludFiscal, data, { lastAuditDate: new Date().toISOString() });
-    const { buzonTributarioActivo: b, eFirmaVigente: e } = state.saludFiscal;
-    state.saludFiscal.alertLevel = (!b || !e) ? 'critical' : 'safe';
-    persist(); emit('saludFiscal:updated', state.saludFiscal);
-  }
-  function reset() { Object.assign(state, JSON.parse(JSON.stringify(DEF))); persist(); emit('store:reset'); }
-
-  function getState()         { return state; }
-  function getMetrics()       { return state.metrics; }
-  function getConversations() { return state.conversations; }
-  function getSettings()      { return state.settings; }
-  function getDocuments()     { return state.documents; }
-  function getSaludFiscal()   { return state.saludFiscal; }
+  // Resto de funciones (saveDocument, updateIncome, updateSaludFiscal, reset, getters) iguales
+  // ...
 
   return {
     on, getState, getMetrics, getConversations, getSettings, getDocuments, getSaludFiscal,

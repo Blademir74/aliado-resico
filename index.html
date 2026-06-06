@@ -475,10 +475,12 @@
 </div><!-- /app -->
 
 <!-- SCRIPTS — orden crítico -->
+<!-- SCRIPTS — orden crítico -->
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script src="./js/init-db.js" defer></script>
 <script src="./js/config.js" defer></script>
-<script src="js/auth.js"></script> 
+<!-- AuthManager debe estar disponible antes que Store y App -->
+<script src="js/auth.js" defer></script> 
 <script src="./js/sanitizer.js" defer></script>
 <script src="./js/store.js" defer></script>
 <script src="./js/mock-data.js" defer></script>
@@ -488,7 +490,7 @@
 <script src="./js/webhook.js" defer></script>
 <script src="./js/dashboard.js" defer></script>
 <script src="./js/chat.js" defer></script>
-<script src="./js/app.js"></script>
+<script src="./js/app.js"></script>   <!-- sin defer, se ejecuta al final -->
 
 <script>
 /* Config global — sin process.env en el browser */

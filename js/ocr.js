@@ -26,24 +26,33 @@ REGLAS: Montos SOLO números. Si no es legible, pon null. Confidence refleja cal
   }
 
   async function processWithGemini(file) {
-    const base64 = await fileToBase64(file);
-    const res = await fetch('/api/gemini-proxy', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        contents: [{ parts: [{ text: OCR_PROMPT }, { inline_data: { mime_type: file.type || 'image/jpeg', data: base64 } }] }],
-        generationConfig: { temperature: 0.05, maxOutputTokens: 600 }
-      })
-    });
-    if (!res.ok) throw new Error(`OCR HTTP ${res.status}`);
-    const data = await res.json();
-    const txt = data.candidates?.[0]?.content?.parts?.[0]?.text;
-    if (!txt) throw new Error('Respuesta OCR vacía');
-    
-    const json = extractJSON(txt);
-    if (!json) throw new Error('OCR no retornó JSON');
-    return JSON.parse(json);
-  }
+  const base64 = await fileToBase64(file);
+  
+  // ⬇️ FETCH AL PROXY – esta es la línea que necesitas
+  const res = await fetch('/api/gemini-proxy', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      contents: [{
+        parts: [
+          { text: OCR_PROMPT },
+          { inline_data: { mime_type: file.type || 'image/jpeg', data: base64 } }
+        ]
+      }],
+      generationConfig: { temperature: 0.05, maxOutputTokens: 600 }
+    })
+  });
+  // ⬆️
+
+  if (!res.ok) throw new Error(`OCR HTTP ${res.status}`);
+  const data = await res.json();
+  const txt = data.candidates?.[0]?.content?.parts?.[0]?.text;
+  if (!txt) throw new Error('Respuesta OCR vacía');
+  
+  const json = extractJSON(txt);
+  if (!json) throw new Error('OCR no retornó JSON');
+  return JSON.parse(json);
+}
 
   async function processImage(file) {
     const start = performance.now();

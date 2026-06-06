@@ -154,6 +154,24 @@ Antes de continuar, necesito verificar 3 puntos críticos:
     const classification = await IntentClassifier.classify(text);
     let response = getAutoResponse(classification.intent);
 
+    // Dentro de processMessage, después de obtener classification
+const conversation = {
+  id: `conv-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+  text,
+  sender: 'Usuario',
+  time: formatTimestamp(),
+  intent: classification.intent,
+  confidence: classification.confidence,
+  keywords: classification.keywords_matched,
+  explanation: classification.explanation,
+  response,
+  timestamp: Date.now(),
+  source: classification.source || 'unknown',
+  is_fiscal_audit_completed: false,   // ← se actualizará después si el usuario completa auditoría
+};
+
+Store.addConversation(conversation);
+
     if (classification.salud_fiscal_alerta) {
       response += `\n\n⚠️ **Alerta de Salud Fiscal:** ${classification.salud_fiscal_alerta}`;
     }
@@ -172,6 +190,9 @@ if (classification.annual_obligation === 'ask_mixed_income') {
   // Luego, al recibir "sí" o "no", llamar a checkAnnualObligation(bool)
 }
 
+if (classification.intent === 'SALUD_FISCAL') {
+  response += "\n\n⚠️ **Multa por buzón inactivo:** hasta $10,260 MXN (Art. 17-K CFF). Actívalo hoy en sat.gob.mx.";
+}
     // Evaluar riesgo de ingresos y agregar alerta proactiva si aplica
     const incomeRisk = evaluateIncomeRisk(Store.getState().incomeYTD || 0);
     if (incomeRisk.alert && classification.intent !== 'OTROS') {
