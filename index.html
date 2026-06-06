@@ -15,13 +15,33 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="./styles.css">
+
+  <!-- Config global disponible antes de cualquier módulo defer -->
+  <script>
+  window.RESICO_CONFIG = {
+    INCOME_LIMIT: 3500000,
+    ALERT_80: 2800000, ALERT_90: 3150000, ALERT_94: 3300000,
+    CFF_17K: 'Art. 17-K CFF', CFF_86C: 'Art. 86-C CFF',
+    LISR_113E: 'Art. 113-E LISR', LISR_113F: 'Art. 113-F LISR',
+    CFF_17D: 'Art. 17-D CFF',
+  };
+  window.CATEGORY_CONFIG = {
+    CONSULTA_FISCAL:          { label:'Consulta Fiscal',   icon:'\u{1F4D8}', cssClass:'fiscal'     },
+    SOLICITUD_FACTURA:        { label:'Factura / CFDI',    icon:'\u{1F4C4}', cssClass:'factura'    },
+    REGISTRO_GASTO:           { label:'Registro de Gasto', icon:'\u{1F9FE}', cssClass:'gasto'      },
+    REPORTE_PAGO:             { label:'Reporte de Pago',   icon:'\u{1F4B3}', cssClass:'pago'       },
+    SALUD_FISCAL:             { label:'Salud Fiscal',      icon:'\u{1F3E5}', cssClass:'salud'      },
+    DEVOLUCION_SALDO_A_FAVOR: { label:'Saldo a Favor',     icon:'\u{1F4B0}', cssClass:'devolucion' },
+    OTROS:                    { label:'Consulta General',  icon:'\u{1F4AC}', cssClass:'otros'      },
+  };
+  </script>
 </head>
 <body class="dark-mode">
 
 <!-- ═══════════════════════════════════════════════════
      LOGIN
 ═══════════════════════════════════════════════════ -->
-<div id="auth-overlay" class="auth-overlay">
+<div id="auth-overlay" class="auth-overlay" style="display:flex">
   <div class="auth-card">
 
     <div class="auth-logo">
@@ -58,7 +78,7 @@
 <!-- ═══════════════════════════════════════════════════
      APP
 ═══════════════════════════════════════════════════ -->
-<div id="app" class="app-wrap" hidden>
+<div id="app" class="app-wrap" hidden style="display:none">
 
   <!-- HEADER -->
   <header class="header">
@@ -474,65 +494,120 @@
 
 </div><!-- /app -->
 
-<!-- SCRIPTS — orden jerárquico estricto -->
-<!-- 1. Configuración de llaves y constantes globales -->
+<!-- SCRIPTS — orden crítico -->
+<script src="./js/init-db.js" defer></script>
 <script src="./js/config.js" defer></script>
-
-<!-- 2. Manejo de sesión (AuthManager) -->
-<script src="./js/auth.js" defer></script>
-
-<!-- 3. Utilidades de sanitización -->
+<script src="js/auth.js" defer></script>
 <script src="./js/sanitizer.js" defer></script>
-
-<!-- 4. Persistencia y Supabase (Store) -->
-<script src="./js/store.js" defer></script>
-
-<!-- 5. Datos de prueba (solo dev) -->
+<script src="./js/store.js" defer></script>          <!-- ← Store -->
 <script src="./js/mock-data.js" defer></script>
-
-<!-- 6. Cerebro IA: clasificador de intenciones -->
 <script src="./js/classifier.js" defer></script>
-
-<!-- 7. Motor OCR -->
 <script src="./js/ocr.js" defer></script>
-
-<!-- 8. Lógica de respuesta fiscal (ConversationManager) -->
-<script src="./js/conversation.js" defer></script>
-
-<!-- 9. Bridge con n8n y WhatsApp Cloud API -->
+<script src="./js/conversation.js" defer></script>   <!-- ← ConversationManager -->
 <script src="./js/webhook.js" defer></script>
-
-<!-- 10. Dashboard: monitor de ingresos y salud fiscal -->
 <script src="./js/dashboard.js" defer></script>
+<script src="./js/chat.js" defer></script>           <!-- ← Chat -->
+<script src="./js/app.js" defer></script>    <!-- sin defer, se ejecuta al final -->
 
-<!-- 11. Interfaz de simulación de chat -->
-<script src="./js/chat.js" defer></script>
 
-<!-- 12. Orquestador final — TAMBIÉN con defer para respetar la cola -->
-<script src="./js/app.js" defer></script>
 
-<!-- 13. Constantes fiscales globales -->
+<!-- ══════════════════════════════════════════
+     INIT — Auth Guard + Logout binding
+     Corre después de todos los módulos defer
+══════════════════════════════════════════ -->
 <script defer>
-  window.RESICO_CONFIG = {
-    INCOME_LIMIT: 3_500_000,
-    ALERT_80: 2_800_000,
-    ALERT_90: 3_150_000,
-    ALERT_94: 3_300_000,
-    CFF_17K:  'Art. 17-K CFF',
-    CFF_86C:  'Art. 86-C CFF',
-    LISR_113E: 'Art. 113-E LISR',
-    LISR_113F: 'Art. 113-F LISR',
-    CFF_17D:  'Art. 17-D CFF',
-  };
-  window.CATEGORY_CONFIG = {
-    CONSULTA_FISCAL:          { label: 'Consulta Fiscal',   icon: '📘', cssClass: 'fiscal'     },
-    SOLICITUD_FACTURA:        { label: 'Factura / CFDI',    icon: '📑', cssClass: 'factura'    },
-    REGISTRO_GASTO:           { label: 'Registro de Gasto', icon: '🧾', cssClass: 'gasto'      },
-    REPORTE_PAGO:             { label: 'Reporte de Pago',   icon: '💳', cssClass: 'pago'       },
-    SALUD_FISCAL:             { label: 'Salud Fiscal',      icon: '🏥', cssClass: 'salud'      },
-    DEVOLUCION_SALDO_A_FAVOR: { label: 'Saldo a Favor',     icon: '💰', cssClass: 'devolucion' },
-    OTROS:                    { label: 'Consulta General',  icon: '💬', cssClass: 'otros'      },
-  };
+document.addEventListener('DOMContentLoaded', () => {
+
+  // Referencia única al cliente Supabase creado por config.js/app.js
+  function getSupabase() {
+    return window.APP_STATE?.supabase || null;
+  }
+
+  const authOverlay = document.getElementById('auth-overlay');
+  const appEl       = document.getElementById('app');
+  const userChip    = document.getElementById('user-chip');
+  const emailEl     = document.getElementById('user-email-display');
+  const logoutBtn   = document.getElementById('logout-btn');
+
+  function mostrarApp(user) {
+    authOverlay.style.display = 'none';
+    authOverlay.hidden = true;
+    appEl.style.display = '';
+    appEl.removeAttribute('hidden');
+    if (userChip)  { userChip.hidden = false; }
+    if (emailEl)   { emailEl.textContent = user?.email ?? ''; }
+    if (logoutBtn) { logoutBtn.hidden = false; }
+  }
+
+  function mostrarLogin() {
+    authOverlay.style.display = 'flex';
+    authOverlay.hidden = false;
+    appEl.style.display = 'none';
+    appEl.hidden = true;
+    if (userChip)  { userChip.hidden = true; }
+    if (logoutBtn) { logoutBtn.hidden = true; }
+  }
+
+  // Botón Salir — event listener definitivo
+  if (logoutBtn) {
+    logoutBtn.addEventListener('click', async () => {
+      const sb = getSupabase();
+      try {
+        if (sb) await sb.auth.signOut();
+        if (window.AuthManager?.logout) await window.AuthManager.logout();
+      } catch (e) { console.warn('[Auth] signOut error:', e.message); }
+      // Limpiar estado local y forzar recarga limpia
+      sessionStorage.clear();
+      localStorage.removeItem('aliado_resico_v5');
+      window.location.reload();
+    });
+  }
+
+  // Esperar a que config.js/app.js inicialice Supabase
+  // Si ya está listo lo usamos; si no, reintentamos hasta 3 segundos
+  let intentos = 0;
+  const MAX_INTENTOS = 30;
+
+  function arrancar() {
+    const sb = getSupabase();
+
+    if (!sb) {
+      intentos++;
+      if (intentos < MAX_INTENTOS) {
+        setTimeout(arrancar, 100);
+      } else {
+        console.error('[Auth] Supabase no disponible después de 3s. Mostrando login.');
+        mostrarLogin();
+      }
+      return;
+    }
+
+    // Escuchar cambios de sesión en tiempo real
+    sb.auth.onAuthStateChange((event, session) => {
+      if ((event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED') && session?.user) {
+        mostrarApp(session.user);
+        if (window.Store?.initSupabase) window.Store.initSupabase();
+      } else if (event === 'SIGNED_OUT') {
+        mostrarLogin();
+      }
+    });
+
+    // Verificar sesión activa al cargar
+    sb.auth.getSession().then(({ data, error }) => {
+      if (error) { console.warn('[Auth] getSession error:', error.message); mostrarLogin(); return; }
+      if (data?.session?.user) {
+        mostrarApp(data.session.user);
+        if (window.Store?.initSupabase) window.Store.initSupabase();
+      } else {
+        mostrarLogin();
+      }
+    });
+  }
+
+  // Pequeño delay para que app.js y config.js terminen de crear APP_STATE.supabase
+  setTimeout(arrancar, 150);
+
+});
 </script>
 </body>
 </html>
