@@ -80,7 +80,7 @@ export default async function handler(req, res) {
 
     // Metadatos de trazabilidad para debugging en producción
     data._meta = {
-      model: 'gemini-1.5-flash',
+      model: 'gemini-2.0-flash',
       proxy: 'vercel-serverless',
       ts: new Date().toISOString(),
     };
