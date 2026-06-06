@@ -1,17 +1,17 @@
 /* ============================================
-   ALIADO RESICO — Conversation Manager
-   Auto-responses + Auditoría de Salud Fiscal
-   v3.0 — Tabla ISR Art. 113-E LISR, e.firma Art. 17-D CFF
+   ALIADO RESICO — Conversation Manager v3.1
+   Fix: declaración doble de `conversation`
+   Fix: annual_obligation handler implementado
+   Fix: window.ConversationManager garantizado
+   Art. 113-E LISR / Art. 17-D CFF / Art. 17-K CFF
    ============================================ */
 
 const ConversationManager = (() => {
 
   let auditCompleted = false;
+  let _awaitingAnnualAnswer = false;  // estado del wizard de declaración anual
 
-  // =============================================
-  // TABLA ISR RESICO — Art. 113-E LISR
-  // Tasas sobre INGRESOS BRUTOS (sin deducciones)
-  // =============================================
+  /* ── Tabla ISR RESICO (Art. 113-E LISR) ── */
   const ISR_RATES_RESICO = [
     { lowerLimit: 0,          upperLimit: 25000,      rate: 1.00, label: 'Hasta $25,000' },
     { lowerLimit: 25000.01,   upperLimit: 50000,      rate: 1.10, label: 'De $25,000.01 a $50,000' },
@@ -20,36 +20,21 @@ const ConversationManager = (() => {
     { lowerLimit: 208333.34,  upperLimit: 3500000,    rate: 2.50, label: 'De $208,333.34 en adelante' },
   ];
 
-  const RESICO_INCOME_LIMIT = 3500000; // Límite anual Art. 113-E
+  const RESICO_INCOME_LIMIT = 3_500_000;
 
-  /**
-   * Calcula ISR mensual según Art. 113-E LISR
-   * @param {number} monthlyIncome - Ingresos brutos facturados del mes
-   * @returns {object} { rate, amount, bracket, warning }
-   */
   function calculateISR(monthlyIncome) {
-    if (!monthlyIncome || monthlyIncome <= 0) {
-      return { rate: 0, amount: 0, bracket: null, warning: null };
-    }
-
-    // Encontrar el bracket aplicable
-    let applicableRate = ISR_RATES_RESICO[ISR_RATES_RESICO.length - 1]; // Default: tasa más alta
+    if (!monthlyIncome || monthlyIncome <= 0) return { rate: 0, amount: 0, bracket: null, warning: null };
+    let applicableRate = ISR_RATES_RESICO[ISR_RATES_RESICO.length - 1];
     for (const bracket of ISR_RATES_RESICO) {
       if (monthlyIncome >= bracket.lowerLimit && monthlyIncome <= bracket.upperLimit) {
-        applicableRate = bracket;
-        break;
+        applicableRate = bracket; break;
       }
     }
-
     const isrAmount = monthlyIncome * (applicableRate.rate / 100);
-    let warning = null;
-
-    // Alerta de proximidad al límite mensual equivalente
-    const monthlyLimit = RESICO_INCOME_LIMIT / 12; // ~$291,666
-    if (monthlyIncome > monthlyLimit * 0.85) {
-      warning = `⚠️ Ingreso mensual ($${monthlyIncome.toLocaleString('es-MX')}) supera el 85% del promedio mensual permitido. Riesgo de exceder $3,500,000 anuales.`;
-    }
-
+    const monthlyLimit = RESICO_INCOME_LIMIT / 12;
+    const warning = monthlyIncome > monthlyLimit * 0.85
+      ? `⚠️ Ingreso mensual ($${monthlyIncome.toLocaleString('es-MX')}) supera el 85% del promedio mensual. Riesgo de exceder $3,500,000 anuales (Art. 113-E LISR).`
+      : null;
     return {
       rate: applicableRate.rate,
       amount: Math.round(isrAmount * 100) / 100,
@@ -59,74 +44,61 @@ const ConversationManager = (() => {
     };
   }
 
-  /**
-   * Evalúa salud fiscal del ingreso acumulado anual
-   * @param {number} incomeYTD - Ingresos acumulados del año
-   * @returns {object} { status, pct, alert }
-   */
   function evaluateIncomeRisk(incomeYTD) {
     const pct = (incomeYTD / RESICO_INCOME_LIMIT) * 100;
-    let status = 'safe';
-    let alert = null;
-
+    let status = 'safe', alert = null;
     if (pct >= 100) {
       status = 'exceeded';
-      alert = `🚨 CRÍTICO: Has EXCEDIDO el límite de $3,500,000 MXN ($${incomeYTD.toLocaleString('es-MX')}). El SAT procederá a expulsarte de RESICO automáticamente. Contacta a tu contador de inmediato.`;
+      alert = `🚨 CRÍTICO: Excediste el límite de $3,500,000 MXN. El SAT iniciará tu expulsión de RESICO (Art. 113-E LISR). Contacta a tu contador.`;
+    } else if (pct >= 94) {
+      status = 'expulsion';
+      alert = `🚨 RIESGO DE EXPULSIÓN: Llevas $${incomeYTD.toLocaleString('es-MX')} (${pct.toFixed(1)}%). A $${(RESICO_INCOME_LIMIT - incomeYTD).toLocaleString('es-MX')} del límite. El SAT puede migrarte a Actividad Empresarial automáticamente.`;
     } else if (pct >= 90) {
       status = 'critical';
-      alert = `🚨 URGENTE: Llevas $${incomeYTD.toLocaleString('es-MX')} (${pct.toFixed(1)}% del límite). Estás a $${(RESICO_INCOME_LIMIT - incomeYTD).toLocaleString('es-MX')} de ser expulsado de RESICO.`;
-    } else if (pct >= 75) {
+      alert = `🚨 URGENTE: Llevas $${incomeYTD.toLocaleString('es-MX')} (${pct.toFixed(1)}% del límite anual). Planifica reducir ingresos o prepara la transición de régimen.`;
+    } else if (pct >= 80) {
       status = 'warning';
-      alert = `⚠️ ALERTA: Llevas $${incomeYTD.toLocaleString('es-MX')} (${pct.toFixed(1)}%). Monitorea tus ingresos para no exceder el límite anual.`;
+      alert = `⚠️ ALERTA: Llevas $${incomeYTD.toLocaleString('es-MX')} (${pct.toFixed(1)}%). Monitorea tus ingresos para no exceder $3,500,000 MXN anuales.`;
     }
-
     return { status, pct: Math.round(pct * 10) / 10, alert, remaining: RESICO_INCOME_LIMIT - incomeYTD };
   }
 
-  // =============================================
-  // RESPONSE TEMPLATES
-  // =============================================
+  /* ── Plantillas de respuesta ── */
   const RESPONSE_TEMPLATES = {
     CONSULTA_FISCAL: [
-      "¡Buena pregunta! 📘 En RESICO, el ISR se calcula sobre tus **ingresos brutos facturados**, con tasas del 1% al 2.5% según Art. 113-E LISR:\n\n📊 **Tabla ISR RESICO (mensual):**\n• Hasta $25,000 → **1.00%**\n• $25,001 - $50,000 → **1.10%**\n• $50,001 - $83,333 → **1.50%**\n• $83,334 - $208,333 → **2.00%**\n• Más de $208,333 → **2.50%**\n\n⚠️ **Diferencia CRÍTICA:**\n• **ISR** = sobre ingresos brutos — **NO hay deducciones**\n• **IVA** = SÍ permite acreditamiento — la gestión de gastos es **INDISPENSABLE**\n\n📌 El límite anual es de **$3,500,000 MXN**. Si lo superas, el SAT te expulsa automáticamente.\n\n¿Necesitas que calculemos tu tasa actual?",
-      "Sobre tu consulta fiscal: 📘\n\nEl RESICO aplica para personas físicas con actividad empresarial, servicios profesionales o arrendamiento (Art. 113-E LISR).\n\n⚠️ **Distinción QUIRÚRGICA que debes entender:**\n• **ISR:** Se paga sobre **ingresos brutos** — NO se deducen gastos para ISR\n• **IVA:** SÍ permite **acreditamiento** — necesitas facturas de gastos para reducir tu IVA a pagar\n\nEsto significa que un gasto con factura **NO reduce tu ISR** pero **SÍ reduce tu IVA**.\n\n¿Te gustaría que revisemos tu situación específica?",
+      "📘 En RESICO, el ISR se calcula sobre tus **ingresos brutos facturados**, con tasas del 1% al 2.5% (Art. 113-E LISR):\n\n• Hasta $25,000 → 1.00%\n• $25,001 - $50,000 → 1.10%\n• $50,001 - $83,333 → 1.50%\n• $83,334 - $208,333 → 2.00%\n• Más de $208,333 → 2.50%\n\n**Diferencia crítica ISR vs IVA:**\n• ISR = sobre ingresos brutos, sin deducciones\n• IVA = sí permite acreditamiento con gastos indispensables\n\nLímite anual: **$3,500,000 MXN**. Si lo superas, el SAT te migra a Actividad Empresarial.\n\n⚠️ Sin e.firma vigente (Art. 17-D CFF) no puedes emitir facturas ni presentar declaraciones.\n\n¿Calculamos tu tasa actual?",
     ],
     SOLICITUD_FACTURA: [
-      "¡Perfecto! 📑 Para emitir tu CFDI 4.0, necesito:\n\n1️⃣ **RFC** del receptor\n2️⃣ **Razón social** (exacta como en constancia del SAT)\n3️⃣ **Régimen fiscal** del receptor\n4️⃣ **Código postal** del domicilio fiscal\n5️⃣ **Uso del CFDI** (G01, G03, etc.)\n6️⃣ **Monto y concepto**\n\n📌 **Nota RESICO:** El ISR de esta factura se calcula sobre el monto bruto (Art. 113-E LISR). No hay deducciones.\n\n¿Me proporcionas estos datos?",
+      "📑 Para emitir tu CFDI 4.0 necesito:\n\n1. RFC del receptor\n2. Razón social exacta\n3. Régimen fiscal del receptor\n4. Código postal del domicilio fiscal\n5. Uso del CFDI (G01, G03, etc.)\n6. Monto y concepto\n\n⚠️ El ISR se calcula sobre el monto bruto (Art. 113-E LISR), sin deducciones.\n⚠️ Si tu e.firma está vencida (Art. 17-D CFF), no es posible timbrar el CFDI.\n\n¿Me proporcionas los datos?",
     ],
     REGISTRO_GASTO: [
-      "¡Recibido! 🧾 Voy a registrar tu gasto para **acreditamiento de IVA**.\n\n📌 **Regla RESICO fundamental (Art. 113-E LISR):**\n• Los gastos **NO** reducen tu ISR — se paga sobre ingresos brutos\n• Los gastos **SÍ** reducen tu **IVA a pagar** vía acreditamiento\n\nPor eso es **INDISPENSABLE** que gestiones tus gastos con factura. Verificaré:\n• ✅ Que el comprobante tenga tu RFC\n• ✅ Que sea un gasto estrictamente indispensable\n• ✅ Que el IVA esté desglosado correctamente\n\n¿El ticket incluye factura o necesitas solicitarla al proveedor?",
+      "🧾 Registrando tu gasto para **acreditamiento de IVA**.\n\n**Regla RESICO (Art. 113-E LISR):**\n• Los gastos NO reducen tu ISR — se paga sobre ingresos brutos\n• Los gastos SÍ reducen tu IVA a pagar vía acreditamiento\n\nPor eso gestionar tus facturas de gasto es indispensable. Verificaré:\n• Que el comprobante tenga tu RFC\n• Que sea un gasto estrictamente indispensable\n• Que el IVA esté desglosado correctamente\n\n¿El ticket incluye factura?",
     ],
     REPORTE_PAGO: [
-      "¡Gracias por tu pago! 💳 Lo registro en tu expediente.\n\n📋 Datos recibidos:\n• **Medio:** Transferencia/OXXO\n• **Estado:** Pendiente de verificación\n\nEn cuanto confirme la recepción, te envío tu acuse. ¿Necesitas algo más?",
+      "💳 Pago registrado en tu expediente. Pendiente de verificación. Te envío el acuse al confirmar la recepción.",
     ],
     SALUD_FISCAL: [
-      "🚨 **¡ALERTA CRÍTICA DE RIESGO!** 🚨\n\nDetecto incumplimientos administrativos graves.\n\n⚠️ **Consecuencias según el CFF:**\n1. **Buzón Tributario inactivo (Art. 17-K CFF):** Multas de $3,420 a $10,260 MXN + cancelación de sellos digitales\n2. **e.firma vencida (Art. 17-D CFF):** La e.firma tiene vigencia de **4 años**. Sin ella, NO puedes facturar ni presentar declaraciones\n3. **Expulsión de RESICO:** El SAT puede removerte del régimen sin derecho a regresar\n\n📌 El 40% de las expulsiones de RESICO son por incumplimientos administrativos, NO por exceder ingresos.\n\n¿Te agendo una cita urgente en el portal del SAT?",
+      "🏥 **Alertas de cumplimiento:**\n\n1. **Buzón Tributario inactivo (Art. 17-K CFF):** Multa de hasta **$10,260 MXN** + cancelación de sellos digitales. En caso de reincidencia la multa se duplica (Art. 86-C CFF).\n\n2. **e.firma vencida (Art. 17-D CFF):** Vigencia de 4 años. Sin ella no puedes facturar ni presentar declaraciones.\n\n3. **Expulsión de RESICO:** El SAT puede removerte sin derecho a regresar si acumulas incumplimientos.\n\n¿Agendo revisión urgente en sat.gob.mx?",
     ],
     OTROS: [
-      "¡Hola! 👋 Bienvenido a Aliado RESICO.\n\nSoy tu asistente contable especializado. Puedo ayudarte con:\n\n📘 Consultas fiscales y del SAT\n📑 Emisión de facturas CFDI 4.0\n🧾 Registro de gastos para acreditamiento de IVA\n💳 Reportes de pago\n\n¿En qué te puedo ayudar hoy?",
+      "👋 Bienvenido a Aliado RESICO. Puedo ayudarte con:\n\n📘 Consultas fiscales\n📑 Emisión de CFDI 4.0\n🧾 Registro de gastos para acreditamiento de IVA\n💳 Reportes de pago\n\n¿En qué te ayudo?",
     ],
   };
 
-  // =============================================
-  // AUDITORÍA DE SALUD FISCAL (Art. 17-K CFF)
-  // =============================================
-  const FISCAL_HEALTH_AUDIT_MESSAGE = `🏥 **Auditoría de Salud Fiscal RESICO**
+  /* ── Respuesta para declaración anual ── */
+  const ANNUAL_WIZARD_QUESTION =
+    "📋 **Asistente de Declaración Anual (Art. 113-F LISR)**\n\n¿Tuviste durante el año ingresos distintos a RESICO?\n\n• Salarios superiores a $400,000 MXN\n• Intereses bancarios\n• Dividendos\n\nResponde **sí** o **no** para determinar si debes presentar declaración anual en abril.";
 
-Antes de continuar, necesito verificar 3 puntos críticos:
+  function checkAnnualObligation(hasMixedIncome) {
+    if (hasMixedIncome) {
+      return "📋 **Resultado:** Tienes la **obligación de presentar declaración anual** en abril (Art. 113-F LISR) porque tuviste ingresos mixtos o superiores a $400,000 en otras fuentes.\n\n¿Quieres que revisemos los montos?";
+    }
+    return "📋 **Resultado:** Si tus únicos ingresos fueron por RESICO y cumples las condiciones del Art. 113-F LISR, estás **exento de presentar declaración anual**.\n\nSigue monitoreando tu límite de $3,500,000 MXN anuales.";
+  }
 
-1️⃣ **¿Tu Buzón Tributario está activo? (Art. 17-K CFF)**
-   → Sin él, multas de $3,420 a $10,260 MXN y cancelación de sellos digitales.
-
-2️⃣ **¿Tu e.firma (firma electrónica) está vigente? (Art. 17-D CFF)**
-   → Vigencia: 4 años desde emisión. Sin ella no puedes facturar ni declarar.
-
-3️⃣ **¿Tu Constancia de Situación Fiscal refleja RESICO?**
-   → Verifica que tu régimen fiscal sea correcto.
-
-📌 Responde "sí" o "no" a cada punto, o dime "necesito ayuda".
-
-⚠️ **El 40% de las expulsiones de RESICO** son por incumplimientos administrativos.`;
+  /* ── Auditoría de Salud Fiscal ── */
+  const FISCAL_HEALTH_AUDIT_MESSAGE =
+    "🏥 **Auditoría de Salud Fiscal RESICO**\n\nAntes de continuar verifico 3 puntos críticos:\n\n1️⃣ **¿Tu Buzón Tributario está activo? (Art. 17-K CFF)**\n   Sin él: multas de $3,420 a $10,260 MXN y cancelación de sellos.\n\n2️⃣ **¿Tu e.firma está vigente? (Art. 17-D CFF)**\n   Vigencia: 4 años. Sin ella no puedes facturar ni declarar.\n\n3️⃣ **¿Tu Constancia de Situación Fiscal refleja RESICO?**\n\nResponde sí o no a cada punto.";
 
   function shouldShowAudit() {
     if (auditCompleted) return false;
@@ -136,10 +108,7 @@ Antes de continuar, necesito verificar 3 puntos críticos:
     return daysSince > 30;
   }
 
-  function getAuditMessage() {
-    auditCompleted = true;
-    return FISCAL_HEALTH_AUDIT_MESSAGE;
-  }
+  function getAuditMessage() { auditCompleted = true; return FISCAL_HEALTH_AUDIT_MESSAGE; }
 
   function getAutoResponse(intent) {
     const templates = RESPONSE_TEMPLATES[intent] || RESPONSE_TEMPLATES.OTROS;
@@ -150,55 +119,73 @@ Antes de continuar, necesito verificar 3 puntos críticos:
     return (date || new Date()).toLocaleTimeString('es-MX', { hour: '2-digit', minute: '2-digit' });
   }
 
+  /* ── processMessage — sin declaración doble ── */
   async function processMessage(text) {
-    const classification = await IntentClassifier.classify(text);
+
+    /* Interceptar respuesta al wizard de declaración anual */
+    if (_awaitingAnnualAnswer) {
+      _awaitingAnnualAnswer = false;
+      const lower = text.toLowerCase().trim();
+      const hasMixed = lower.startsWith('s') || lower === 'yes';
+      const annualResponse = checkAnnualObligation(hasMixed);
+
+      const annualConv = {
+        id: `conv-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+        text,
+        sender: 'Usuario',
+        time: formatTimestamp(),
+        intent: 'CONSULTA_FISCAL',
+        confidence: 100,
+        keywords: ['declaración anual', 'art. 113-f'],
+        explanation: 'Respuesta al wizard de obligación anual',
+        response: annualResponse,
+        timestamp: Date.now(),
+        source: 'wizard',
+        is_fiscal_audit_completed: false,
+      };
+
+      try { Store.addConversation(annualConv); } catch (e) { console.warn('[Conv] addConversation:', e.message); }
+      return { conversation: annualConv, response: annualResponse, classification: { intent: 'CONSULTA_FISCAL', confidence: 100 } };
+    }
+
+    /* Clasificación normal */
+    let classification;
+    try {
+      classification = await IntentClassifier.classify(text);
+    } catch (e) {
+      console.warn('[Conv] classify error:', e.message);
+      classification = { intent: 'OTROS', confidence: 50, keywords_matched: [], explanation: 'Clasificación local', source: 'fallback' };
+    }
+
     let response = getAutoResponse(classification.intent);
 
-    // Dentro de processMessage, después de obtener classification
-const conversation = {
-  id: `conv-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
-  text,
-  sender: 'Usuario',
-  time: formatTimestamp(),
-  intent: classification.intent,
-  confidence: classification.confidence,
-  keywords: classification.keywords_matched,
-  explanation: classification.explanation,
-  response,
-  timestamp: Date.now(),
-  source: classification.source || 'unknown',
-  is_fiscal_audit_completed: false,   // ← se actualizará después si el usuario completa auditoría
-};
+    /* Activar wizard de declaración anual */
+    if (classification.annual_obligation === 'ask_mixed_income') {
+      _awaitingAnnualAnswer = true;
+      response = ANNUAL_WIZARD_QUESTION;
+    }
 
-Store.addConversation(conversation);
-
+    /* Complementos contextuales */
     if (classification.salud_fiscal_alerta) {
       response += `\n\n⚠️ **Alerta de Salud Fiscal:** ${classification.salud_fiscal_alerta}`;
     }
     if (classification.resico_context) {
       response += `\n\n📌 **Contexto RESICO:** ${classification.resico_context}`;
     }
-
     if (classification.connection_restored) {
-      response += `\n\n🔄 **Conexión restablecida con el servidor.**\n• Se aplica el **Art. 113-E de la LISR** (Monitor de ingresos con límite anual de 3.5 MDP).\n• ⚠️ **Alerta Fiscal (Art. 17-K CFF):** Evita la multa de **$10,260 MXN** por Buzón Tributario inactivo. ¡Actívalo hoy!\n• 🚨 **Reincidencia (Art. 86-C CFF):** La reincidencia en esta infracción duplicará la multa de forma automática.\n• 📋 **Declaración Anual (Art. 113-F LISR):** Recuerda que tienes la obligación de presentar tu declaración anual en el mes de abril.`;
+      response += `\n\n🔄 **Conexión restablecida.**\n• Monitor activo (Art. 113-E LISR): límite $3.5 MDP\n• Buzón inactivo: multa de $10,260 MXN (Art. 17-K CFF)\n• Reincidencia: duplica la multa (Art. 86-C CFF)\n• Declaración anual: abril (Art. 113-F LISR)`;
+    }
+    if (classification.intent === 'SALUD_FISCAL') {
+      response += "\n\n⚠️ Multa por buzón inactivo: hasta $10,260 MXN (Art. 17-K CFF). Actívalo en sat.gob.mx.";
     }
 
-    // Cuando el clasificador devuelva annual_obligation === "ask_mixed_income"
-if (classification.annual_obligation === 'ask_mixed_income') {
-  // Mostrar mensaje del bot preguntando sobre ingresos mixtos
-  // Guardar en el estado de la conversación que estamos en "modo anual"
-  // Luego, al recibir "sí" o "no", llamar a checkAnnualObligation(bool)
-}
-
-if (classification.intent === 'SALUD_FISCAL') {
-  response += "\n\n⚠️ **Multa por buzón inactivo:** hasta $10,260 MXN (Art. 17-K CFF). Actívalo hoy en sat.gob.mx.";
-}
-    // Evaluar riesgo de ingresos y agregar alerta proactiva si aplica
+    /* Alerta proactiva de ingresos */
     const incomeRisk = evaluateIncomeRisk(Store.getState().incomeYTD || 0);
     if (incomeRisk.alert && classification.intent !== 'OTROS') {
       response += `\n\n${incomeRisk.alert}`;
     }
 
+    /* Una sola declaración de conversation */
     const conversation = {
       id: `conv-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
       text,
@@ -206,26 +193,33 @@ if (classification.intent === 'SALUD_FISCAL') {
       time: formatTimestamp(),
       intent: classification.intent,
       confidence: classification.confidence,
-      keywords: classification.keywords_matched,
-      explanation: classification.explanation,
+      keywords: classification.keywords_matched || [],
+      explanation: classification.explanation || '',
       response,
       timestamp: Date.now(),
       source: classification.source || 'unknown',
+      is_fiscal_audit_completed: false,
     };
 
-    Store.addConversation(conversation);
+    try {
+      Store.addConversation(conversation);
+    } catch (e) {
+      console.warn('[Conv] Store.addConversation falló:', e.message);
+    }
 
-    WebhookBridge.sendToN8N({
-      action: 'message_classified',
-      message: text,
-      classification: {
-        intent: classification.intent,
-        confidence: classification.confidence,
-        keywords: classification.keywords_matched,
-      },
-      response,
-      templateType: WebhookBridge.getResponseTemplateType(classification.intent),
-    }).catch(() => {});
+    try {
+      WebhookBridge.sendToN8N({
+        action: 'message_classified',
+        message: text,
+        classification: {
+          intent: classification.intent,
+          confidence: classification.confidence,
+          keywords: classification.keywords_matched,
+        },
+        response,
+        templateType: WebhookBridge.getResponseTemplateType(classification.intent),
+      }).catch(() => {});
+    } catch { /* webhook opcional */ }
 
     return { conversation, response, classification };
   }
@@ -238,4 +232,5 @@ if (classification.intent === 'SALUD_FISCAL') {
   };
 })();
 
-if (typeof window !== 'undefined') window.ConversationManager = ConversationManager;
+/* Exposición global garantizada */
+window.ConversationManager = ConversationManager;

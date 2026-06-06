@@ -116,6 +116,24 @@ const Chat = (() => {
     }
   }
 
+  async function handleSend(text) {
+  /* Guarda defensiva: verifica que los módulos estén disponibles */
+  if (typeof Store === 'undefined' || typeof ConversationManager === 'undefined') {
+    renderBotBubble('Sincronizando con la Bóveda Fiscal... por favor espera.');
+    console.warn('[Chat] Store o ConversationManager no disponibles aún.');
+    return;
+  }
+
+  try {
+    const result = await ConversationManager.processMessage(text);
+    renderBotBubble(result.response, result.classification);
+    Store.emit?.('chat:message_sent', result.conversation);
+  } catch (e) {
+    console.error('[Chat] Error en processMessage:', e);
+    renderBotBubble('Sincronizando con la Bóveda Fiscal... por favor espera.');
+  }
+}
+
   // --- Send message (now async for Gemini) ---
   async function sendMessage(text) {
     if (!text || !text.trim()) return;
