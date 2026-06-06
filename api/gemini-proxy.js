@@ -1,97 +1,60 @@
 /* ================================================
-   ALIADO RESICO — Proxy Serverless v2.0
+   ALIADO RESICO — Proxy Serverless v3.0
    Archivo: api/gemini-proxy.js
-   Propósito: Blindar GEMINI_API_KEY del frontend
-   Runtime: Node.js 22.x (Vercel) — ESM
+   Runtime: Node.js 22.x — ESM (package.json: "type":"module")
+   Modelo: gemini-2.0-flash (vigente 2026, v1beta)
    ================================================ */
-
-// URL exacta validada contra la documentación de Gemini API v1beta
-// El modelo se especifica en el path, no en el body
-const GEMINI_ENDPOINT =
-  'https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent';
 
 export default async function handler(req, res) {
 
-  // Cabeceras CORS para llamadas desde el mismo dominio de Vercel
+  // CORS — cubre el pre-flight que el browser envía antes del POST
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+  if (req.method === 'OPTIONS') return res.status(204).end();
 
-  // Pre-flight OPTIONS — el browser lo envía antes del POST real
-  if (req.method === 'OPTIONS') {
-    return res.status(204).end();
-  }
-
-  // Solo acepta POST
   if (req.method !== 'POST') {
     return res.status(405).json({ error: 'Method Not Allowed' });
   }
 
-  // API Key inyectada desde las variables de entorno de Vercel
-  // Nunca se expone en el frontend ni en el bundle del cliente
-  const apiKey = process.env.GEMINI_API_KEY;
-  if (!apiKey) {
+  const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
+  if (!GEMINI_API_KEY) {
     console.error('[gemini-proxy] GEMINI_API_KEY no configurada en Vercel Environment Variables');
-    return res.status(500).json({
-      error: 'Configuración del servidor incompleta. Contacta al administrador.',
-    });
+    return res.status(500).json({ error: 'Búnker de llaves no configurado en Vercel.' });
   }
 
-  // Validación del body recibido desde classifier.js
-  const body = req.body;
-  if (!body || !Array.isArray(body.contents) || body.contents.length === 0) {
-    return res.status(400).json({
-      error: 'Body inválido: el campo contents[] es obligatorio y debe ser un array.',
-    });
-  }
+  // gemini-1.5-flash deprecado en v1 y v1beta — modelo vigente: gemini-2.0-flash
+  const API_URL = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${GEMINI_API_KEY}`;
 
-  const { contents, generationConfig } = body;
+  // Validación mínima del body para evitar llamadas vacías a Google
+  if (!req.body?.contents || !Array.isArray(req.body.contents)) {
+    return res.status(400).json({ error: 'Body inválido: contents[] requerido.' });
+  }
 
   try {
-    const geminiRes = await fetch(`${GEMINI_ENDPOINT}?key=${apiKey}`, {
+    const response = await fetch(API_URL, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        contents,
-        // generationConfig desde el clasificador, con fallback seguro
-        generationConfig: generationConfig ?? {
-          temperature: 0.1,
-          maxOutputTokens: 400,
-          topP: 0.8,
-        },
-      }),
+      body: JSON.stringify(req.body),
     });
 
-    const data = await geminiRes.json();
+    const data = await response.json();
 
-    // Propagar errores de la API de Google con su mensaje original
-    if (!geminiRes.ok) {
-      const googleError = data?.error?.message ?? `Gemini API HTTP ${geminiRes.status}`;
-      console.error('[gemini-proxy] Error de Google:', googleError);
-      return res.status(geminiRes.status).json({ error: googleError });
+    if (data.error) {
+      console.error('[gemini-proxy] Error de Google:', data.error.message);
+      return res.status(response.status).json({ error: data.error.message });
     }
 
-    // Validar que la respuesta tenga la estructura esperada
-    const text = data?.candidates?.[0]?.content?.parts?.[0]?.text;
-    if (!text) {
+    // Validar que la respuesta contenga texto antes de devolverla al clasificador
+    if (!data?.candidates?.[0]?.content?.parts?.[0]?.text) {
       console.error('[gemini-proxy] Respuesta sin texto:', JSON.stringify(data));
       return res.status(502).json({ error: 'Gemini no devolvió texto en la respuesta.' });
     }
 
-    // Metadatos de trazabilidad para debugging en producción
-    data._meta = {
-      model: 'gemini-2.0-flash',
-      proxy: 'vercel-serverless',
-      ts: new Date().toISOString(),
-    };
-
     return res.status(200).json(data);
 
   } catch (err) {
-    // Error de red o timeout
     console.error('[gemini-proxy] Error de red:', err.message);
-    return res.status(502).json({
-      error: `Error de conexión con Gemini: ${err.message}`,
-    });
+    return res.status(500).json({ error: 'Fallo en la conexión con la Bóveda de IA.' });
   }
 }
