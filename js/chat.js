@@ -116,86 +116,68 @@ const Chat = (() => {
     }
   }
 
-  async function handleSend(text) {
-  /* Guarda defensiva: verifica que los módulos estén disponibles */
+  // --- Send message (now async for Gemini) ---
+async function sendMessage(text) {
+  /* Guarda defensiva — módulos críticos */
   if (typeof Store === 'undefined' || typeof ConversationManager === 'undefined') {
-    renderBotBubble('Sincronizando con la Bóveda Fiscal... por favor espera.');
+    addBubble('Sincronizando con la Bóveda Fiscal... por favor espera.', 'bot');
     console.warn('[Chat] Store o ConversationManager no disponibles aún.');
     return;
   }
 
+  if (!text || !text.trim()) return;
+
+  const clean = text.trim();
+
+  addBubble(escapeHTML(clean), 'user');
+
+  const inp = inputEl();
+  if (inp) inp.value = '';
+
+  showTyping();
+
   try {
-    const result = await ConversationManager.processMessage(text);
-    renderBotBubble(result.response, result.classification);
-    Store.emit?.('chat:message_sent', result.conversation);
-  } catch (e) {
-    console.error('[Chat] Error en processMessage:', e);
-    renderBotBubble('Sincronizando con la Bóveda Fiscal... por favor espera.');
-  }
-}
+    const result = await ConversationManager.processMessage(clean);
+    const config = window.CATEGORY_CONFIG || {};
+    const cat = config[result.classification.intent] || {};
 
-  // --- Send message (now async for Gemini) ---
-  async function sendMessage(text) {
-    if (!text || !text.trim()) return;
+    removeTyping();
 
-    const clean = text.trim();
-
-    // User bubble
-    addBubble(escapeHTML(clean), 'user');
-
-    // Clear input
-    const inp = inputEl();
-    if (inp) inp.value = '';
-
-    // Show typing while processing
-    showTyping();
-
-    try {
-      // Process (async for Gemini)
-      const result = await ConversationManager.processMessage(clean);
-      const config = window.CATEGORY_CONFIG || {};
-      const cat = config[result.classification.intent] || {};
-
-      removeTyping();
-
-      // Category tag on user bubble
-      const msgs = messagesEl();
-      if (msgs) {
-        const userBubbles = msgs.querySelectorAll('.chat-bubble.user');
-        const lastBubble = userBubbles[userBubbles.length - 1];
-        if (lastBubble) {
-          const tagDiv = document.createElement('div');
-          tagDiv.className = 'bubble-cat-tag';
-          const sourceIcon = result.classification.source?.includes('gemini') ? '🧠' : '⚡';
-          tagDiv.innerHTML = `<span class="cat-badge ${cat.cssClass || 'otros'}" style="font-size:10px">${cat.icon || '💬'} ${cat.label || result.classification.intent} · ${Math.round(result.classification.confidence * 100)}% ${sourceIcon}</span>`;
-          const pEl = lastBubble.querySelector('p');
-          if (pEl) pEl.after(tagDiv);
-        }
+    // Badge de categoría en el burbuja del usuario
+    const msgs = messagesEl();
+    if (msgs) {
+      const userBubbles = msgs.querySelectorAll('.chat-bubble.user');
+      const lastBubble = userBubbles[userBubbles.length - 1];
+      if (lastBubble) {
+        const tagDiv = document.createElement('div');
+        tagDiv.className = 'bubble-cat-tag';
+        const sourceIcon = result.classification.source?.includes('gemini') ? '🧠' : '⚡';
+        tagDiv.innerHTML = `<span class="cat-badge ${cat.cssClass || 'otros'}" style="font-size:10px">${cat.icon || '💬'} ${cat.label || result.classification.intent} · ${Math.round(result.classification.confidence * 100)}% ${sourceIcon}</span>`;
+        const pEl = lastBubble.querySelector('p');
+        if (pEl) pEl.after(tagDiv);
       }
-
-      // Update panel
-      updateClassificationPanel(result.classification);
-
-      // Bot response with typing delay
-      showTyping();
-      const delay = 600 + Math.random() * 800;
-      setTimeout(() => {
-        removeTyping();
-        const formatted = result.response
-          .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
-          .replace(/\n/g, '<br>');
-        addBubble(formatted, 'bot');
-      }, delay);
-
-    } catch (error) {
-      removeTyping();
-      addBubble(`❌ Error al procesar: ${escapeHTML(error.message)}`, 'bot');
-      console.error('[Chat] Processing error:', error);
     }
 
-    // Update badge
-    updateChatBadge();
+    updateClassificationPanel(result.classification);
+
+    showTyping();
+    const delay = 600 + Math.random() * 800;
+    setTimeout(() => {
+      removeTyping();
+      const formatted = result.response
+        .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
+        .replace(/\n/g, '<br>');
+      addBubble(formatted, 'bot');
+    }, delay);
+
+  } catch (error) {
+    removeTyping();
+    addBubble('Sincronizando con la Bóveda Fiscal... por favor espera.', 'bot');
+    console.error('[Chat] Error en sendMessage:', error);
   }
+
+  updateChatBadge();
+}
 
   function updateChatBadge() {
     const badge = document.getElementById('chat-badge');

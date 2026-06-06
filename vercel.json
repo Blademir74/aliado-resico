@@ -1,7 +1,10 @@
 {
   "version": 2,
+  "functions": {
+    "api/*.js": { "runtime": "nodejs24.x" }
+  },
   "rewrites": [
     { "source": "/api/(.*)", "destination": "/api/$1" },
-    { "source": "/((?!api|styles.css|js).*)", "destination": "/index.html" }
+    { "source": "/((?!api|styles.css|js|logo.png).*)", "destination": "/index.html" }
   ]
 }
