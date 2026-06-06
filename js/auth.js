@@ -27,6 +27,69 @@ const AuthManager = (() => {
     return currentUser?.id || null;
   }
 
+  /* ================================================
+   js/auth.js — Fragmento crítico a agregar
+   Resuelve: dashboard salta a login, botón Salir oculto
+   ================================================ */
+
+/* Escucha cambios de sesión en tiempo real (refresco de token incluido) */
+supabase.auth.onAuthStateChange((event, session) => {
+  if (event === 'SIGNED_IN' && session) {
+    /* Mostrar app, ocultar overlay */
+    document.getElementById('auth-overlay').hidden = true;
+    document.getElementById('app').hidden = false;
+
+    /* Mostrar email del usuario y botón Salir */
+    const userChip = document.getElementById('user-chip');
+    const emailDisplay = document.getElementById('user-email-display');
+    const logoutBtn = document.getElementById('logout-btn');
+
+    if (userChip) userChip.hidden = false;
+    if (emailDisplay) emailDisplay.textContent = session.user.email;
+    if (logoutBtn) logoutBtn.hidden = false;  /* ← esto activa el botón Salir */
+
+    /* Inicializar Store con el usuario autenticado */
+    if (window.Store?.initSupabase) window.Store.initSupabase();
+
+  } else if (event === 'SIGNED_OUT' || event === 'TOKEN_REFRESHED' && !session) {
+    /* Regresar al login */
+    document.getElementById('auth-overlay').hidden = false;
+    document.getElementById('app').hidden = true;
+
+    const logoutBtn = document.getElementById('logout-btn');
+    const userChip = document.getElementById('user-chip');
+    if (logoutBtn) logoutBtn.hidden = true;
+    if (userChip) userChip.hidden = true;
+  }
+});
+
+/* Botón Salir */
+const logoutBtn = document.getElementById('logout-btn');
+if (logoutBtn) {
+  logoutBtn.addEventListener('click', async () => {
+    await supabase.auth.signOut();
+    /* onAuthStateChange maneja el resto */
+  });
+}
+
+/* Verificar sesión activa al cargar (usuario que ya estaba logueado) */
+supabase.auth.getSession().then(({ data: { session } }) => {
+  if (session) {
+    /* Disparar manualmente el mismo flujo que SIGNED_IN */
+    document.getElementById('auth-overlay').hidden = true;
+    document.getElementById('app').hidden = false;
+
+    const userChip = document.getElementById('user-chip');
+    const emailDisplay = document.getElementById('user-email-display');
+    const logoutBtn2 = document.getElementById('logout-btn');
+
+    if (userChip) userChip.hidden = false;
+    if (emailDisplay) emailDisplay.textContent = session.user.email;
+    if (logoutBtn2) logoutBtn2.hidden = false;
+
+    if (window.Store?.initSupabase) window.Store.initSupabase();
+  }
+});
   // ──────────────────────────────────────────
   // INYECCIÓN DE user_id EN fiscal_metrics
   // Todas las consultas deben usar este helper
