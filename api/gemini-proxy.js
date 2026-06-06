@@ -1,4 +1,4 @@
-// api/gemini-proxy.js
+// api/gemini-proxy.js — CommonJS puro para Vercel
 const RATE = new Map();
 const MAX = 100;
 const WIN = 3_600_000;
@@ -20,11 +20,10 @@ const ALLOWED = [
   'http://127.0.0.1:3000',
 ];
 
-// ✅ Para extender el tiempo máximo en Vercel (opcional)
-// Vercel lee esta propiedad si existe
-export const maxDuration = 30;
+// En CommonJS, la duración extendida se define así (opcional)
+module.exports.maxDuration = 30;
 
-export default async function handler(req, res) {
+module.exports = async function handler(req, res) {
   const origin = req.headers.origin || '';
   const cors = ALLOWED.includes(origin) ? origin : ALLOWED[0];
 
@@ -67,4 +66,4 @@ export default async function handler(req, res) {
     console.error('Proxy error:', e);
     return res.status(502).json({ error: 'Network error' });
   }
-}
+};
