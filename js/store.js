@@ -1,8 +1,7 @@
 /* ============================================
-   ALIADO RESICO — Store v5.2
-   Fix crítico: initSupabase usa APP_STATE.supabase
-   (cliente instanciado por init-db.js)
-   NO window.supabase — esa es la librería CDN
+   ALIADO RESICO — Store v5.3
+   Fix: columnas correctas message_text (no text)
+   Fix: uso seguro de AuthManager
    ============================================ */
 const Store = (() => {
   const KEY = 'aliado_resico_v5';
@@ -23,12 +22,11 @@ const Store = (() => {
       buzonTributarioActivo: null, eFirmaVigente: null,
       eFirmaExpiry: null, lastAuditDate: null, alertLevel: 'safe',
     },
-
     carpetaFiscal: {
-    efirmaExpiry: null,
-    constanciaStatus: null,
-    opinionStatus: null,
-    lastUpdated: null,
+      efirmaExpiry: null,
+      constanciaStatus: null,
+      opinionStatus: null,
+      lastUpdated: null,
     },
   };
 
@@ -42,6 +40,7 @@ const Store = (() => {
           metrics:     { ...DEF.metrics,     ...(p.metrics     || {}) },
           settings:    { ...DEF.settings,    ...(p.settings    || {}) },
           saludFiscal: { ...DEF.saludFiscal, ...(p.saludFiscal || {}) },
+          carpetaFiscal: { ...DEF.carpetaFiscal, ...(p.carpetaFiscal || {}) },
         };
       }
     } catch(_) {}
@@ -67,23 +66,17 @@ const Store = (() => {
     }
   }
 
-  // Funciones nuevas
-function getCarpetaFiscal() { return state.carpetaFiscal; }
-async function updateCarpetaFiscal(data) {
-  Object.assign(state.carpetaFiscal, data, { lastUpdated: new Date().toISOString() });
-  persist();
-  emit('carpetaFiscal:updated', state.carpetaFiscal);
-  // Opcional: sincronizar con Supabase si se desea (se puede omitir por seguridad)
-}
-function setEfirmaExpiry(dateISO) { updateCarpetaFiscal({ efirmaExpiry: dateISO }); }
-function setConstanciaStatus(status) { updateCarpetaFiscal({ constanciaStatus: status }); }
-function setOpinionStatus(status) { updateCarpetaFiscal({ opinionStatus: status }); }
+  // Funciones de carpeta fiscal
+  function getCarpetaFiscal() { return state.carpetaFiscal; }
+  async function updateCarpetaFiscal(data) {
+    Object.assign(state.carpetaFiscal, data, { lastUpdated: new Date().toISOString() });
+    persist();
+    emit('carpetaFiscal:updated', state.carpetaFiscal);
+  }
+  function setEfirmaExpiry(dateISO) { updateCarpetaFiscal({ efirmaExpiry: dateISO }); }
+  function setConstanciaStatus(status) { updateCarpetaFiscal({ constanciaStatus: status }); }
+  function setOpinionStatus(status) { updateCarpetaFiscal({ opinionStatus: status }); }
 
-
-  // ─────────────────────────────────────────────
-  // FIX: usa window.APP_STATE.supabase (cliente)
-  //      NO window.supabase (librería CDN)
-  // ─────────────────────────────────────────────
   async function initSupabase() {
     const client = window.APP_STATE?.supabase;
     if (!client) {
@@ -126,12 +119,19 @@ function setOpinionStatus(status) { updateCarpetaFiscal({ opinionStatus: status 
     } catch(e) { console.warn('[Store] Realtime:', e.message); }
   }
 
+  // FIX: usar message_text en lugar de text
   function _mapRow(r) {
     return {
-      id: r.id, text: r.text, sender: r.sender||'Usuario', time: r.time||'',
-      intent: r.intent, confidence: r.confidence||0, keywords: r.keywords||[],
-      explanation: r.explanation||'', response: r.response||'',
-      source: r.source||'supabase',
+      id: r.id,
+      text: r.message_text,        // ← columna correcta
+      sender: r.sender || 'Usuario',
+      time: r.time || '',
+      intent: r.intent,
+      confidence: r.confidence || 0,
+      keywords: r.keywords || [],
+      explanation: r.explanation || '',
+      response: r.response || '',
+      source: r.source || 'supabase',
       timestamp: r.created_at ? new Date(r.created_at).getTime() : Date.now(),
     };
   }
@@ -155,26 +155,38 @@ function setOpinionStatus(status) { updateCarpetaFiscal({ opinionStatus: status 
     if (!db || !usr) return;
     try {
       await db.from('conversations').upsert({
-        id: c.id, user_id: usr.id, text: c.text, sender: c.sender,
-        time: c.time, intent: c.intent, confidence: c.confidence,
-        keywords: c.keywords||[], explanation: c.explanation||'',
-        response: c.response||'', source: c.source||'local',
+        id: c.id,
+        user_id: usr.id,
+        message_text: c.text,      // ← columna correcta
+        sender: c.sender,
+        time: c.time,
+        intent: c.intent,
+        confidence: c.confidence,
+        keywords: c.keywords || [],
+        explanation: c.explanation || '',
+        response: c.response || '',
+        source: c.source || 'local',
         created_at: c.timestamp ? new Date(c.timestamp).toISOString() : new Date().toISOString(),
       }, { onConflict: 'id' });
     } catch(e) { console.warn('[Store] upsertConv:', e.message); }
   }
 
   async function _upsertMetrics() {
-  if (!db || !AuthManager?.getUserId) return;
-  const uid = AuthManager.getUserId();
-  if (!uid) return;
-  await db.from('fiscal_metrics').upsert({
-    user_id: uid,
-    income_ytd: state.incomeYTD,
-    total_processed: state.metrics.totalProcessed,
-    avg_confidence: state.metrics.avgConfidence / 100,
-  }, { onConflict: 'user_id' });
-}
+    if (!db) return;
+    // Usar AuthManager si está disponible, si no, usar usr.id
+    let uid = null;
+    if (window.AuthManager && typeof window.AuthManager.getUserId === 'function') {
+      uid = window.AuthManager.getUserId();
+    }
+    if (!uid && usr) uid = usr.id;
+    if (!uid) return;
+    await db.from('fiscal_metrics').upsert({
+      user_id: uid,
+      income_ytd: state.incomeYTD,
+      total_processed: state.metrics.totalProcessed,
+      avg_confidence: state.metrics.avgConfidence / 100,
+    }, { onConflict: 'user_id' });
+  }
 
   function addConversation(c) {
     state.conversations.unshift(c);
@@ -222,7 +234,6 @@ function setOpinionStatus(status) { updateCarpetaFiscal({ opinionStatus: status 
     addConversation, updateSetting, updateIncome, updateSaludFiscal, saveDocument,
     initSupabase, reset, getCarpetaFiscal, updateCarpetaFiscal, setEfirmaExpiry, setConstanciaStatus, setOpinionStatus,
   };
-
 })();
 
 if (typeof window !== 'undefined') window.Store = Store;
