@@ -808,7 +808,8 @@ REGLAS FISCALES:
 
     // 4. Auth guard — después de que Supabase esté listo
     await initAuth();
-
+    AuthManager.bindLogoutButton();
+    
     // 5. Datos demo
     if (window.MockData && window.Store) {
       MockData.load(Store);
