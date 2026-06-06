@@ -51,16 +51,17 @@ REGLAS: Montos SOLO números. Si no es legible, pon null. Confidence refleja cal
       const gem = await processWithGemini(file);
       const conf = Math.max(0, Math.min(1, gem.confidence || 0.5));
       const needsReview = conf < HUMAN_REVIEW_THRESHOLD;
-      
+      const pedagogicMessage = "🔎 **ISR RESICO**: Se paga sobre ingreso bruto (sin deducciones). Este gasto NO reduce tu ISR.\n🟣 **IVA**: Este gasto es INDISPENSABLE para acreditar tu IVA. Asegúrate de tener CFDI 4.0 con tu RFC correcto.";
       return {
-        type: gem.document_type === 'CFDI' ? 'CFDI' : 'TICKET',
-        status: needsReview ? 'needs_review' : 'processed',
-        confidence: conf,
-        needsHumanReview: needsReview,
-        humanReviewReason: needsReview ? `Confianza ${(conf*100).toFixed(0)}% < 85%. ${gem.quality_notes || 'Verificar datos fiscales críticos.'}` : null,
-        source: 'gemini_vision',
-        processingTime: `${((performance.now()-start)/1000).toFixed(1)}s`,
-        data: {
+  type: gem.document_type === 'CFDI' ? 'CFDI' : 'TICKET',
+  status: needsReview ? 'needs_review' : 'processed',
+  confidence: conf,
+  needsHumanReview: needsReview,
+  humanReviewReason: needsReview ? `Confianza ${(conf*100).toFixed(0)}% < 85%. ${gem.quality_notes || 'Verificar datos fiscales críticos.'}` : null,
+  pedagogicMessage: pedagogicMessage,  // <-- Nuevo campo
+  source: 'gemini_vision',
+  processingTime: `${((performance.now()-start)/1000).toFixed(1)}s`,
+  data: {
           emisor_rfc: gem.emisor_rfc || null,
           receptor_rfc: gem.receptor_rfc || null,
           subtotal: gem.subtotal ? Number(gem.subtotal) : null,

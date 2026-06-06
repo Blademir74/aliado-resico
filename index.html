@@ -241,6 +241,44 @@
         </div>
       </div>
 
+<!-- Dentro del <section id="dashboard-tab">, después del monitor de ingresos o antes del health-grid -->
+<!-- NUEVO MÓDULO: MI CARPETA FISCAL -->
+<div class="carpeta-fiscal glass" id="carpeta-fiscal">
+  <div class="carpeta-header">
+    <h2 class="section-title">📁 Mi Carpeta Fiscal</h2>
+    <button id="upload-carpeta-btn" class="btn-sm" aria-label="Subir archivos">+ Agregar</button>
+  </div>
+  <div class="carpeta-grid">
+    <div class="carpeta-card">
+      <span class="carpeta-icon">🔑</span>
+      <div>
+        <p class="carpeta-name">e.firma (CER / KEY)</p>
+        <span id="efirma-vigencia" class="status-pill unknown">No cargada</span>
+      </div>
+      <button class="carpeta-upload" data-type="efirma">📂</button>
+    </div>
+    <div class="carpeta-card">
+      <span class="carpeta-icon">📄</span>
+      <div>
+        <p class="carpeta-name">Constancia de Situación Fiscal</p>
+        <span id="constancia-status" class="status-pill unknown">No disponible</span>
+      </div>
+      <button class="carpeta-upload" data-type="constancia">📂</button>
+    </div>
+    <div class="carpeta-card">
+      <span class="carpeta-icon">⚖️</span>
+      <div>
+        <p class="carpeta-name">Opinión de Cumplimiento</p>
+        <span id="opinion-status" class="status-pill unknown">No consultada</span>
+      </div>
+      <button id="consultar-opinion" class="btn-sm">Consultar</button>
+    </div>
+  </div>
+  <div class="carpeta-note">
+    <small>⚠️ La e.firma es necesaria para trámites ante el SAT. Sube tus archivos cifrados (solo se almacenan localmente).</small>
+  </div>
+</div>
+
       <!-- SALUD FISCAL + ACTIVIDAD -->
       <div class="health-grid">
 

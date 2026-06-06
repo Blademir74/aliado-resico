@@ -23,6 +23,13 @@ const Store = (() => {
       buzonTributarioActivo: null, eFirmaVigente: null,
       eFirmaExpiry: null, lastAuditDate: null, alertLevel: 'safe',
     },
+
+    carpetaFiscal: {
+    efirmaExpiry: null,
+    constanciaStatus: null,
+    opinionStatus: null,
+    lastUpdated: null,
+    },
   };
 
   function load() {
@@ -59,6 +66,19 @@ const Store = (() => {
       );
     }
   }
+
+  // Funciones nuevas
+function getCarpetaFiscal() { return state.carpetaFiscal; }
+async function updateCarpetaFiscal(data) {
+  Object.assign(state.carpetaFiscal, data, { lastUpdated: new Date().toISOString() });
+  persist();
+  emit('carpetaFiscal:updated', state.carpetaFiscal);
+  // Opcional: sincronizar con Supabase si se desea (se puede omitir por seguridad)
+}
+function setEfirmaExpiry(dateISO) { updateCarpetaFiscal({ efirmaExpiry: dateISO }); }
+function setConstanciaStatus(status) { updateCarpetaFiscal({ constanciaStatus: status }); }
+function setOpinionStatus(status) { updateCarpetaFiscal({ opinionStatus: status }); }
+
 
   // ─────────────────────────────────────────────
   // FIX: usa window.APP_STATE.supabase (cliente)
@@ -145,19 +165,16 @@ const Store = (() => {
   }
 
   async function _upsertMetrics() {
-    if (!db || !usr) return;
-    try {
-      const { error } = await db.from('fiscal_metrics')
-        .upsert({
-          user_id:         usr.id,
-          income_ytd:      Number(state.incomeYTD)                     || 0,
-          total_processed: Number(state.metrics.totalProcessed)         || 0,
-          avg_confidence:  (Number(state.metrics.avgConfidence) / 100)  || 0,
-        }, { onConflict: 'user_id' });
-
-      if (error) console.warn('[Store] metrics:', error.message);
-    } catch(e) { console.warn('[Store] metrics:', e.message); }
-  }
+  if (!db || !AuthManager?.getUserId) return;
+  const uid = AuthManager.getUserId();
+  if (!uid) return;
+  await db.from('fiscal_metrics').upsert({
+    user_id: uid,
+    income_ytd: state.incomeYTD,
+    total_processed: state.metrics.totalProcessed,
+    avg_confidence: state.metrics.avgConfidence / 100,
+  }, { onConflict: 'user_id' });
+}
 
   function addConversation(c) {
     state.conversations.unshift(c);
@@ -203,7 +220,9 @@ const Store = (() => {
   return {
     on, getState, getMetrics, getConversations, getSettings, getDocuments, getSaludFiscal,
     addConversation, updateSetting, updateIncome, updateSaludFiscal, saveDocument,
-    initSupabase, reset,
+    initSupabase, reset, getCarpetaFiscal, updateCarpetaFiscal, setEfirmaExpiry, setConstanciaStatus, setOpinionStatus,
   };
+
 })();
+
 if (typeof window !== 'undefined') window.Store = Store;

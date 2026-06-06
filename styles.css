@@ -661,3 +661,26 @@ button { cursor: pointer; border: none; }
 .header-brand .brand-logo-img + .brand-name {
   margin-left: 0;
 }
+
+
+/* ── MÓDULO CARPETA FISCAL ───────────────────── */
+.carpeta-fiscal { padding: var(--sp-lg); border-radius: var(--radius-lg); margin-bottom: var(--sp-md); }
+.carpeta-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: var(--sp-md); }
+.carpeta-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: var(--sp-md); }
+.carpeta-card { display: flex; align-items: center; gap: var(--sp-sm); background: rgba(0,0,0,0.2); padding: var(--sp-sm) var(--sp-md); border-radius: var(--radius-md); border: 1px solid rgba(241,245,249,.05); }
+.carpeta-icon { font-size: 1.4rem; }
+.carpeta-name { font-size: 0.75rem; font-weight: 600; margin-bottom: 4px; color: var(--text-secondary); }
+.carpeta-upload { background: transparent; border: 1px solid rgba(241,245,249,.1); border-radius: var(--radius-sm); padding: 5px 10px; font-size: 0.8rem; cursor: pointer; transition: all var(--t-fast); }
+.carpeta-upload:hover { border-color: var(--accent-safe); }
+.carpeta-note { margin-top: var(--sp-md); font-size: 0.7rem; color: var(--text-muted); text-align: center; }
+
+/* ── CORRECCIONES RESPONSIVAS (móviles) ───────── */
+@media (max-width: 640px) {
+  .carpeta-grid { grid-template-columns: 1fr; }
+  .header-brand .brand-logo-img { max-width: 100px; height: auto; }
+  .header { gap: 0.5rem; }
+  .brand-name { font-size: 0.85rem; }
+  .brand-tag { display: none; }
+  .main { overflow-x: hidden; }
+  .glass, .income-monitor, .monthly-tracker, .health-card, .feed-card, .carpeta-fiscal { width: 100%; overflow-x: auto; }
+}

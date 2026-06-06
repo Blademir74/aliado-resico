@@ -698,6 +698,13 @@ REGLAS FISCALES:
       } catch(err) {
         output.innerHTML = `<p class="error">❌ ${_esc(err.message)}</p>`;
       }
+        if (res.needsHumanReview) {
+  html += `<div class="alert-warning" style="background:rgba(245,158,11,.15); border-left-color:#f59e0b;">
+    ⚠️ <strong>Verificación Humana Requerida para Acreditamiento de IVA</strong><br>
+    La confianza del OCR es <strong>${(res.confidence*100).toFixed(0)}%</strong> (mínimo 85%).
+    Revisa manualmente los datos antes de usarlos en tu declaración. No acredites IVA con datos dudosos.
+  </div>`;
+}
     };
 
     zone.addEventListener('drop', e => handle(e.dataTransfer.files[0]));

@@ -1,119 +1,74 @@
 /* ============================================
-   ALIADO RESICO — Webhook Bridge (n8n + Telegram)
-   v3.0 — Rate Limiting por usuario, Sanitización
+   ALIADO RESICO — Webhook Bridge v4.0
+   - Optimización de costos: Mensajes de Utilidad
+   - Incluye metadatos fiscales (RFC, Art. 17-K)
+   - Rate limiting y retry exponencial
    ============================================ */
 
 const WebhookBridge = (() => {
 
-  // =============================================
-  // RATE LIMITING POR USUARIO (30 msgs/min/usuario)
-  // =============================================
   const RATE_LIMIT = 30;
-  const RATE_WINDOW = 60 * 1000; // 1 minute
-  const userRateLimits = new Map(); // Map<userId, number[]>
-
-  // Cooldown exponencial para abusadores
-  const abuseCooldowns = new Map(); // Map<userId, { count, until }>
-  const ABUSE_THRESHOLD = 3; // Exceder rate limit 3 veces → cooldown
-
-  // Retry config
+  const RATE_WINDOW = 60 * 1000;
+  const userRateLimits = new Map();
+  const abuseCooldowns = new Map();
+  const ABUSE_THRESHOLD = 3;
   const MAX_RETRIES = 3;
   const BASE_DELAY = 1000;
 
   // =============================================
-  // WHATSAPP MESSAGE TEMPLATES
-  // =============================================
-  const WA_TEMPLATES = {
-    cobro_recordatorio: {
-      type: 'utility', name: 'cobro_recordatorio_resico', language: 'es_MX',
-      template: '🔔 Recordatorio de pago\n\nHola {{1}}, tienes un saldo pendiente de ${{2}} MXN.\n\nFecha límite: {{3}}\nReferencia: {{4}}\n\n¿Ya realizaste tu pago? Responde con tu comprobante.',
-    },
-    confirmacion_factura: {
-      type: 'utility', name: 'confirmacion_factura_cfdi', language: 'es_MX',
-      template: '✅ Factura emitida\n\nHola {{1}}, tu CFDI 4.0 ha sido timbrado exitosamente.\n\nFolio: {{2}}\nTotal: ${{3}} MXN\nFecha: {{4}}\n\n📄 Descarga tu factura en el portal.',
-    },
-    confirmacion_pago: {
-      type: 'utility', name: 'confirmacion_pago_recibido', language: 'es_MX',
-      template: '💰 Pago recibido\n\nHola {{1}}, confirmamos la recepción de tu pago.\n\nMonto: ${{2}} MXN\nReferencia: {{3}}\nFecha: {{4}}\n\nGracias por tu puntualidad. 🙌',
-    },
-    alerta_fiscal: {
-      type: 'utility', name: 'alerta_fiscal_resico', language: 'es_MX',
-      template: '⚠️ Alerta Fiscal RESICO\n\nHola {{1}}, detectamos lo siguiente:\n\n{{2}}\n\nTe recomendamos atenderlo a la brevedad para evitar sanciones. ¿Necesitas ayuda?',
-    },
-    declaracion_recordatorio: {
-      type: 'utility', name: 'declaracion_mensual_resico', language: 'es_MX',
-      template: '📅 Recordatorio de Declaración\n\nHola {{1}}, la fecha límite para tu declaración mensual de {{2}} es el {{3}}.\n\nISR estimado: ${{4}} MXN ({{5}}% sobre ingresos)\nIVA: Revisa tu acreditamiento de gastos.\n\n¿Necesitas ayuda para prepararla?',
-    },
-    bienvenida: {
-      type: 'marketing', name: 'bienvenida_aliado_resico', language: 'es_MX',
-      template: '🧠 ¡Bienvenido a Aliado RESICO!\n\nSoy tu asistente contable inteligente. Puedo ayudarte con:\n\n📘 Consultas fiscales\n📑 Facturación CFDI 4.0\n🧾 Registro de gastos\n💳 Reportes de pago\n\n¿En qué te puedo ayudar?',
-    },
-  };
-
-  // =============================================
-  // RATE LIMITING POR USUARIO
+  // RATE LIMITING
   // =============================================
   function checkRateLimit(userId) {
     const key = userId || 'global';
     const now = Date.now();
 
-    // Check cooldown for abusers
     const cooldown = abuseCooldowns.get(key);
     if (cooldown && now < cooldown.until) {
       const waitSec = Math.ceil((cooldown.until - now) / 1000);
-      console.warn(`[Webhook] 🚫 Usuario ${key} en cooldown — ${waitSec}s restantes`);
-      return {
-        allowed: false,
-        reason: 'cooldown',
-        remaining: 0,
-        retryAfter: waitSec,
-      };
+      console.warn(`[Webhook] 🚫 Usuario ${key} en cooldown — ${waitSec}s`);
+      return { allowed: false, reason: 'cooldown', retryAfter: waitSec };
     }
 
-    // Initialize user log if not exists
-    if (!userRateLimits.has(key)) {
-      userRateLimits.set(key, []);
-    }
-
+    if (!userRateLimits.has(key)) userRateLimits.set(key, []);
     const timestamps = userRateLimits.get(key);
-
-    // Clean old entries
-    while (timestamps.length > 0 && now - timestamps[0] > RATE_WINDOW) {
-      timestamps.shift();
-    }
+    while (timestamps.length && now - timestamps[0] > RATE_WINDOW) timestamps.shift();
 
     if (timestamps.length >= RATE_LIMIT) {
-      // Track abuse
       const abuse = abuseCooldowns.get(key) || { count: 0, until: 0 };
       abuse.count++;
-
       if (abuse.count >= ABUSE_THRESHOLD) {
-        // Exponential cooldown: 1min, 2min, 4min, 8min...
         const cooldownMs = Math.min(60000 * Math.pow(2, abuse.count - ABUSE_THRESHOLD), 480000);
         abuse.until = now + cooldownMs;
         abuseCooldowns.set(key, abuse);
-        console.warn(`[Webhook] 🚨 Cooldown exponencial para ${key}: ${cooldownMs / 1000}s (abuso #${abuse.count})`);
-      } else {
-        abuseCooldowns.set(key, abuse);
-      }
-
-      return {
-        allowed: false,
-        reason: 'rate_limited',
-        remaining: 0,
-        retryAfter: Math.ceil((timestamps[0] + RATE_WINDOW - now) / 1000),
-      };
+      } else abuseCooldowns.set(key, abuse);
+      return { allowed: false, reason: 'rate_limited', retryAfter: Math.ceil((timestamps[0] + RATE_WINDOW - now) / 1000) };
     }
 
     timestamps.push(now);
+    return { allowed: true, remaining: RATE_LIMIT - timestamps.length };
+  }
+
+  // =============================================
+  // OBTENER METADATOS FISCALES DEL USUARIO (RFC, estado salud)
+  // =============================================
+  async function getFiscalMetadata(userId) {
+    if (!window.Store) return { rfc: null, saludFiscal: null };
+    const salud = Store.getSaludFiscal();
+    // Intentar obtener RFC desde Store (si se ha registrado)
+    const rfc = Store.getState()?.userRfc || null;
     return {
-      allowed: true,
-      remaining: RATE_LIMIT - timestamps.length,
+      rfc,
+      saludFiscal: {
+        buzonActivo: salud.buzonTributarioActivo,
+        efirmaVigente: salud.eFirmaVigente,
+        alertLevel: salud.alertLevel,
+      },
+      hasCompletedAudit: salud.buzonTributarioActivo === true && salud.eFirmaVigente === true,
     };
   }
 
   // =============================================
-  // SEND TO n8n WEBHOOK
+  // ENVÍO A n8n CON CATEGORIZACIÓN DE COSTO
   // =============================================
   async function sendToN8N(payload, retryCount = 0) {
     const webhookUrl = AppConfig.getWebhookUrl();
@@ -122,50 +77,42 @@ const WebhookBridge = (() => {
       return { sent: false, reason: 'not_configured' };
     }
 
-    // Validate payload size
     const sizeCheck = InputSanitizer.validatePayloadSize(payload);
-    if (!sizeCheck.valid) {
-      console.warn(`[Webhook] Payload too large: ${sizeCheck.error}`);
-      return { sent: false, reason: 'payload_too_large', error: sizeCheck.error };
-    }
+    if (!sizeCheck.valid) return { sent: false, reason: 'payload_too_large' };
 
-    // Rate limit check (global for outbound)
     const rateCheck = checkRateLimit('outbound_global');
-    if (!rateCheck.allowed) {
-      console.warn(`[Webhook] Rate limited — ${rateCheck.reason}`);
-      return { sent: false, reason: rateCheck.reason, retryAfter: rateCheck.retryAfter };
-    }
+    if (!rateCheck.allowed) return { sent: false, reason: rateCheck.reason, retryAfter: rateCheck.retryAfter };
+
+    // Determinar tipo de mensaje para optimizar costo (Utility vs Marketing)
+    const messageType = payload.message_category === 'fiscal_notification' ? 'utility' : 'session';
+    const estimatedCost = messageType === 'utility' ? 0.17 : 0.55;
 
     const fullPayload = {
       source: 'aliado_resico',
-      version: '3.0',
+      version: '4.0',
       timestamp: new Date().toISOString(),
+      message_category: messageType,
+      estimated_cost_mxn: estimatedCost,
       ...payload,
     };
 
     try {
       const response = await fetch(webhookUrl, {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'X-Source': 'aliado-resico',
-          'X-Version': '3.0',
-        },
+        headers: { 'Content-Type': 'application/json', 'X-Source': 'aliado-resico', 'X-Version': '4.0' },
         body: JSON.stringify(fullPayload),
       });
 
       if (response.ok) {
-        console.log('%c[Webhook] ✅ Sent to n8n', 'color:#10b981');
-        return { sent: true, status: response.status };
+        console.log(`%c[Webhook] ✅ Enviado a n8n (${messageType}, $${estimatedCost} MXN)`, 'color:#10b981');
+        return { sent: true, status: response.status, cost: estimatedCost };
       }
 
       if (response.status >= 500 && retryCount < MAX_RETRIES) {
         const delay = BASE_DELAY * Math.pow(2, retryCount);
-        console.warn(`[Webhook] Server error ${response.status}, retrying in ${delay}ms (${retryCount + 1}/${MAX_RETRIES})`);
         await new Promise(r => setTimeout(r, delay));
         return sendToN8N(payload, retryCount + 1);
       }
-
       return { sent: false, status: response.status };
     } catch (error) {
       if (retryCount < MAX_RETRIES) {
@@ -173,13 +120,13 @@ const WebhookBridge = (() => {
         await new Promise(r => setTimeout(r, delay));
         return sendToN8N(payload, retryCount + 1);
       }
-      console.error('[Webhook] Failed after retries:', error.message);
+      console.error('[Webhook] Error tras reintentos:', error.message);
       return { sent: false, error: error.message };
     }
   }
 
   // =============================================
-  // RECEIVE FROM WEBHOOK (Telegram incoming)
+  // RECEPCIÓN Y ENVÍO AUTOMÁTICO DE CADA CONVERSACIÓN
   // =============================================
   async function receiveFromWebhook(data) {
     const msg = data.message || data;
@@ -187,35 +134,25 @@ const WebhookBridge = (() => {
     const chatId = String(msg.chat?.id || msg.from?.id || 'unknown');
     const messageId = msg.message_id || `tg-${Date.now()}`;
 
-    // Per-user rate limiting
     const rateCheck = checkRateLimit(chatId);
-    if (!rateCheck.allowed) {
-      console.warn(`[Webhook] Usuario ${chatId} rate-limited: ${rateCheck.reason}`);
-      return {
-        processed: false,
-        reason: rateCheck.reason,
-        retryAfter: rateCheck.retryAfter,
-        rateLimitRemaining: 0,
-      };
-    }
+    if (!rateCheck.allowed) return { processed: false, reason: rateCheck.reason, retryAfter: rateCheck.retryAfter };
 
-    const hasPhoto = msg.photo && msg.photo.length > 0;
-    const fileId = hasPhoto ? msg.photo[msg.photo.length - 1].file_id : null;
-
-    if (!message && !hasPhoto) return { processed: false, reason: 'empty_message' };
-
-    // Sanitize incoming message
     const sanitizedMessage = InputSanitizer.sanitizeText(message);
-
-    // Classify the message
     const classification = await IntentClassifier.classify(sanitizedMessage);
     const response = ConversationManager.getAutoResponse(classification.intent);
 
+    // Obtener metadatos fiscales del usuario (si está autenticado)
+    let fiscalMetadata = { rfc: null, saludFiscal: null, hasCompletedAudit: false };
+    if (window.APP_STATE?.supabase) {
+      const { data: { user } } = await window.APP_STATE.supabase.auth.getUser();
+      if (user) fiscalMetadata = await getFiscalMetadata(user.id);
+    }
+
     const conversation = {
       id: `webhook-${messageId}`,
-      text: hasPhoto ? (sanitizedMessage || '[IMAGEN ADJUNTA]') : sanitizedMessage,
+      text: sanitizedMessage,
       sender: chatId,
-      time: new Date().toLocaleTimeString('es-MX', { hour: '2-digit', minute: '2-digit' }),
+      time: new Date().toLocaleTimeString('es-MX'),
       intent: classification.intent,
       confidence: classification.confidence,
       keywords: classification.keywords_matched,
@@ -223,13 +160,41 @@ const WebhookBridge = (() => {
       response,
       timestamp: Date.now(),
       source: 'telegram',
-      metadata: { chatId, messageId, fileId },
+      metadata: { chatId, messageId, fiscalMetadata }, // Incluye RFC y salud fiscal
     };
 
     Store.addConversation(conversation);
 
-    const templateType = getResponseTemplateType(classification.intent);
+    // Enviar clasificación a n8n con categoría fiscal_notification → Utility
+    const n8nPayload = {
+      action: 'new_conversation',
+      message_category: 'fiscal_notification', // Clave para que n8n use plantilla Utility
+      conversation: {
+        id: conversation.id,
+        text: conversation.text,
+        intent: conversation.intent,
+        confidence: conversation.confidence,
+        timestamp: conversation.timestamp,
+      },
+      user: {
+        chat_id: chatId,
+        rfc: fiscalMetadata.rfc,
+        salud_fiscal: fiscalMetadata.saludFiscal,
+        auditoria_completada: fiscalMetadata.hasCompletedAudit,
+      },
+      classification: {
+        intent: classification.intent,
+        confidence: classification.confidence,
+        keywords: classification.keywords_matched,
+        explanation: classification.explanation,
+        resico_context: classification.resico_context,
+        salud_fiscal_alerta: classification.salud_fiscal_alerta,
+      },
+    };
 
+    await sendToN8N(n8nPayload); // No bloquea la respuesta
+
+    const templateType = getResponseTemplateType(classification.intent);
     return {
       processed: true,
       conversation,
@@ -237,60 +202,37 @@ const WebhookBridge = (() => {
       templateType,
       classification,
       rateLimitRemaining: rateCheck.remaining,
+      fiscal_metadata_sent: true,
     };
   }
 
   // =============================================
-  // TELEGRAM RESPONSE FORMATTING
+  // FORMATEO PARA TELEGRAM
   // =============================================
   function formatTelegramResponse(classification, response) {
     let tgResponse = response
       .replace(/<strong>(.*?)<\/strong>/g, '**$1**')
       .replace(/<br\s*\/?>/g, '\n');
-
-    if (classification.salud_fiscal_alerta) {
-      tgResponse += `\n\n⚠️ **Alerta de Salud Fiscal:**\n${classification.salud_fiscal_alerta}`;
-    }
-    if (classification.resico_context) {
-      tgResponse += `\n\n📌 *${classification.resico_context}*`;
-    }
+    if (classification.salud_fiscal_alerta) tgResponse += `\n\n⚠️ **Alerta de Salud Fiscal:**\n${classification.salud_fiscal_alerta}`;
+    if (classification.resico_context) tgResponse += `\n\n📌 *${classification.resico_context}*`;
     return tgResponse;
   }
 
   function getResponseTemplateType(intent) {
-    const utilityIntents = {
-      'REPORTE_PAGO': 'confirmacion_pago',
-      'SOLICITUD_FACTURA': 'confirmacion_factura',
-      'CONSULTA_FISCAL': 'alerta_fiscal',
-      'REGISTRO_GASTO': 'alerta_fiscal',
-    };
+    const utilityIntents = ['REPORTE_PAGO', 'SOLICITUD_FACTURA', 'CONSULTA_FISCAL', 'REGISTRO_GASTO', 'SALUD_FISCAL', 'DEVOLUCION_SALDO_A_FAVOR'];
     return {
-      templateName: utilityIntents[intent] || null,
-      type: utilityIntents[intent] ? 'utility' : 'session',
-      estimatedCostMXN: utilityIntents[intent] ? 0.17 : 0,
+      templateName: utilityIntents.includes(intent) ? 'fiscal_response' : null,
+      type: utilityIntents.includes(intent) ? 'utility' : 'session',
+      estimatedCostMXN: utilityIntents.includes(intent) ? 0.17 : 0.55,
     };
-  }
-
-  async function sendProactiveMessage(templateKey, params) {
-    const template = WA_TEMPLATES[templateKey];
-    if (!template) return { sent: false, reason: 'unknown_template' };
-    return sendToN8N({
-      action: 'send_template',
-      template: { name: template.name, language: template.language, type: template.type, parameters: params },
-      cost_category: template.type,
-    });
-  }
-
-  function getTemplates() { return { ...WA_TEMPLATES }; }
-  function getTemplateCosts() {
-    return Object.entries(WA_TEMPLATES).map(([key, t]) => ({
-      key, name: t.name, type: t.type, costMXN: t.type === 'utility' ? 0.17 : 0.55,
-    }));
   }
 
   return {
-    sendToN8N, receiveFromWebhook, formatTelegramResponse,
-    sendProactiveMessage, getTemplates, getTemplateCosts, getResponseTemplateType,
+    sendToN8N,
+    receiveFromWebhook,
+    formatTelegramResponse,
+    getResponseTemplateType,
+    getFiscalMetadata,
   };
 })();
 

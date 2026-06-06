@@ -1,3 +1,6 @@
+// api/gemini-proxy.js
+// Serverless function para Vercel – oculta GEMINI_API_KEY e inyecta contexto RESICO 2026
+
 const RATE = new Map();
 const MAX = 100;
 const WIN = 3_600_000;
@@ -18,6 +21,16 @@ const ALLOWED = [
   'http://localhost:3000',
   'http://127.0.0.1:3000',
 ];
+
+// Contexto fiscal que se inyecta si el prompt no lo contiene
+const RESICO_CONTEXT = `
+CONTEXTO OBLIGATORIO PARA RESICO 2026 (Art. 113-E y 113-F LISR):
+- Límite de ingresos anuales: $3,500,000 MXN. Si se rebasa, expulsión automática al Régimen General (tasa ISR hasta 35%).
+- El ISR se paga sobre ingresos efectivamente cobrados, tasas del 1% al 2.5% mensual. NO se permiten deducciones.
+- El IVA SÍ se puede acreditar con CFDI 4.0 válido. Los gastos son indispensables para acreditar IVA, pero no reducen el ISR.
+- Declaración anual: exenta solo para quienes tengan ingresos exclusivamente por RESICO y cumplan pagos mensuales. Quienes tengan ingresos mixtos (salarios >$400k, intereses, plataformas) SÍ deben presentarla en abril.
+- Buzón Tributario obligatorio (Art. 17-K CFF): multa hasta $10,260 MXN e imposibilidad de realizar trámites.
+`.trim();
 
 // ⬇️ Vercel lee esta propiedad para extender el tiempo máximo
 module.exports.maxDuration = 30;
@@ -43,6 +56,19 @@ module.exports = async function handler(req, res) {
   let body = req.body;
   if (typeof body === 'string') {
     try { body = JSON.parse(body); } catch { return res.status(400).json({ error: 'Invalid JSON' }); }
+  }
+
+  // 🔐 INYECCIÓN DE CONTEXTO RESICO 2026 si no está presente
+  if (body.contents && Array.isArray(body.contents)) {
+    for (const content of body.contents) {
+      if (content.parts && Array.isArray(content.parts)) {
+        for (const part of content.parts) {
+          if (part.text && !part.text.includes('Art. 113-E LISR')) {
+            part.text = `${RESICO_CONTEXT}\n\n${part.text}`;
+          }
+        }
+      }
+    }
   }
 
   const MODEL = 'gemini-1.5-flash';

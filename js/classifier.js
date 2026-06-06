@@ -20,29 +20,53 @@ const IntentClassifier = (() => {
     'saldo a favor': 'saldo a favor',
   };
 
-  // ─── SYSTEM PROMPT v4.0 ──────────────────────────
-  const SYSTEM_PROMPT = `Eres un clasificador fiscal mexicano EXPERTO en RESICO.
+function checkAnnualObligation(userHasMixedIncome) {
+  // userHasMixedIncome: true/false/null (null = no se sabe aún)
+  if (userHasMixedIncome === true) {
+    return {
+      obligated: true,
+      message: "📋 **SÍ debes presentar declaración anual** (Art. 113-F LISR 2026). Porque tienes ingresos por salarios >$400k, intereses, dividendos o plataformas digitales. Plazo: 30 de abril. Omisión genera multas y afecta tu opinión de cumplimiento."
+    };
+  } else if (userHasMixedIncome === false) {
+    return {
+      obligated: false,
+      message: "✅ **No estás obligado a presentar declaración anual** (Art. 113-F LISR 2026). Al solo tener ingresos por RESICO y haber cumplido con tus pagos mensuales, estás exento. Recuerda mantener tu buzón activo y tus CFDI en orden."
+    };
+  } else {
+    return {
+      obligated: null,
+      message: "Para saber si estás obligado a la declaración anual, necesito saber: ¿Recibiste ingresos por **salarios superiores a $400,000 anuales**, **intereses reales**, **dividendos**, **arrendamiento** o **plataformas digitales** (Uber, Didi, Mercado Libre, etc.)? Responde sí o no."
+    };
+  }
+}
+
+
+ // ─── SYSTEM PROMPT v5.0 (RESICO 2026) ──────────
+  const SYSTEM_PROMPT = `Eres un clasificador fiscal mexicano EXPERTO en RESICO 2026.
 INSTRUCCIÓN CRÍTICA: Responde ÚNICAMENTE con JSON válido. NINGÚN texto extra. NINGÚN markdown.
 
 CATEGORÍAS (elige exactamente UNA):
 CONSULTA_FISCAL | SOLICITUD_FACTURA | REGISTRO_GASTO | REPORTE_PAGO | SALUD_FISCAL | DEVOLUCION_SALDO_A_FAVOR | OTROS
 
 ══════════════════════════════════════════════════
-CONTEXTO RESICO — LISR 2024
+CONTEXTO RESICO — LISR 2026
 ══════════════════════════════════════════════════
 
 Art. 113-E LISR — Régimen Simplificado de Confianza:
-• ISR: Se paga sobre INGRESOS EFECTIVAMENTE COBRADOS (tasas 1%–2.5% mensual, según monto acumulado). SIN deducciones personales. SIN gastos deducibles para ISR.
+• ISR: Se paga sobre INGRESOS EFECTIVAMENTE COBRADOS (tasas 1%–2.5% mensual). SIN deducciones personales.
 • IVA: SÍ permite acreditamiento. Requiere CFDI 4.0 válido con RFC correcto del proveedor.
-• Límite anual: $3,500,000 MXN. Al rebasarlo, expulsión automática al Régimen de Actividad Empresarial (tasas hasta 35%).
+• Límite anual: $3,500,000 MXN. Al rebasarlo, expulsión automática al Régimen General (tasas hasta 35%).
 
-Art. 113-F LISR — Declaración Anual RESICO:
-• RESICO SÍ tiene declaración anual. Es simplificada, pero OBLIGATORIA para personas físicas.
-• Se presenta en abril del año siguiente al ejercicio fiscal.
-• No incluye deducciones personales (a diferencia del Régimen de Actividades Empresariales).
-• Si hubo retenciones de ISR por parte de clientes personas morales, se acreditan en la declaración anual.
-• CORRECCIÓN IMPORTANTE: Quien afirme que RESICO no tiene declaración anual está equivocado.
+Art. 113-F LISR — Declaración Anual RESICO 2026:
+• Las personas físicas que únicamente obtengan ingresos por RESICO y cumplan puntualmente con pagos mensuales están EXENTAS de presentar declaración anual.
+• En cambio, quienes tengan ingresos MIXTOS (salarios superiores a $400,000 anuales, intereses reales, arrendamiento, ingresos por plataformas digitales, dividendos, etc.) SÍ están obligados a presentar declaración anual en abril.
+• La omisión de la anual cuando es obligatoria genera multas y afecta la opinión de cumplimiento.
 
+Art. 113-F LISR — Declaración Anual RESICO 2026:
+• Las personas físicas que únicamente obtengan ingresos por RESICO y cumplan puntualmente con pagos mensuales están EXENTAS de presentar declaración anual.
+• En cambio, quienes tengan ingresos MIXTOS (salarios superiores a $400,000 anuales, intereses reales, arrendamiento, ingresos por plataformas digitales, dividendos, etc.) SÍ están obligados a presentar declaración anual en abril.
+• Si el usuario pregunta “¿Tengo que hacer declaración anual?” y NO menciona ingresos mixtos, el clasificador debe devolver annual_obligation: "ask_mixed_income".
+*/
 ══════════════════════════════════════════════════
 DEVOLUCIÓN DE SALDO A FAVOR — CATEGORÍA NUEVA
 ══════════════════════════════════════════════════
