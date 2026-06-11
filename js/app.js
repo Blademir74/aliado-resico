@@ -120,7 +120,9 @@ const App = (() => {
     }
 
     if (!client) {
-      _showApp(overlay, appEl, chip, emailEl, logoutBtn, null);
+      // Sin Supabase: mostrar login de todos modos — demo funciona sin BD
+      _showOverlay(overlay, appEl);
+      _wireAuthForm(null, overlay, appEl, chip, emailEl, logoutBtn);
       return;
     }
 
@@ -185,6 +187,13 @@ const App = (() => {
       const pass  = passInput?.value;
       if (!email || !pass) { _showAuthMsg(msgEl, 'Ingresa tu correo y contraseña.', true); return; }
 
+      // Resolver client en el momento del click — Supabase puede haber cargado tarde
+      const activeClient = client || window.APP_STATE?.supabase;
+      if (!activeClient) {
+        _showAuthMsg(msgEl, 'Sistema de autenticación no disponible. Recarga la página.', true);
+        return;
+      }
+
       submitBtn.disabled = true;
       submitBtn.textContent = '⏳ Procesando…';
       if (msgEl) msgEl.hidden = true;
@@ -192,14 +201,14 @@ const App = (() => {
       try {
         let result;
         if (isRegister) {
-          result = await client.auth.signUp({ email, password: pass });
+          result = await activeClient.auth.signUp({ email, password: pass });
           if (result.error) throw result.error;
           if (result.data?.user && !result.data.session) {
             _showAuthMsg(msgEl, '✅ Cuenta creada. Revisa tu correo para confirmar el acceso.', false);
             submitBtn.disabled = false; submitBtn.textContent = 'Crear Cuenta'; return;
           }
         } else {
-          result = await client.auth.signInWithPassword({ email, password: pass });
+          result = await activeClient.auth.signInWithPassword({ email, password: pass });
           if (result.error) throw result.error;
         }
         const user = result.data.user;
@@ -226,6 +235,8 @@ const App = (() => {
     demoBtn?.addEventListener('click', () => {
       _showApp(overlay, appEl, chip, emailEl, logoutBtn, null);
       if (MockData) MockData.load(window.Store);
+      // Inicializar dashboard en modo demo igual que en login real
+      if (window.Dashboard?.syncAndRender) Dashboard.syncAndRender();
     });
 
     logoutBtn?.addEventListener('click', async () => {
@@ -268,13 +279,16 @@ const App = (() => {
       }
     });
 
-    client.auth.onAuthStateChange((event) => {
-      if (event === 'SIGNED_OUT') {
-        _showOverlay(overlay, appEl);
-        if (chip) chip.hidden = true;
-        if (logoutBtn) logoutBtn.hidden = true;
-      }
-    });
+    const activeClient = client || window.APP_STATE?.supabase;
+    if (activeClient) {
+      activeClient.auth.onAuthStateChange((event) => {
+        if (event === 'SIGNED_OUT') {
+          _showOverlay(overlay, appEl);
+          if (chip) chip.hidden = true;
+          if (logoutBtn) logoutBtn.hidden = true;
+        }
+      });
+    }
   }
 
   // ══════════════════════════════════════════════
@@ -792,7 +806,16 @@ REGLAS FISCALES:
     initChat();
     initDocuments();
 
-    // 2. Supabase CDN ya cargó sin defer — instanciar cliente
+    // 2. Cargar config del servidor ANTES de instanciar Supabase
+    // AppConfig.loadServerConfig() hace fetch('/api/config') para obtener
+    // SUPABASE_URL y SUPABASE_ANON_KEY — sin esto el cliente Supabase
+    // no puede crearse y toda la cadena de auth falla silenciosamente
+    if (typeof AppConfig !== 'undefined' && AppConfig?.loadServerConfig) {
+      try { await AppConfig.loadServerConfig(); }
+      catch(e) { console.warn('[App] AppConfig offline:', e.message); }
+    }
+
+    // 3. Instanciar cliente Supabase (ya tiene la config del servidor)
     if (typeof initDatabase === 'function') {
       try { await initDatabase(); }
       catch(e) { console.warn('[App] BD offline:', e.message); }
@@ -800,15 +823,18 @@ REGLAS FISCALES:
       console.warn('[App] initDatabase no disponible — modo offline');
     }
 
-    // 3. Módulos de negocio
+    // 4. Módulos de negocio
     for (const mod of ['Store','IntentClassifier','DocumentProcessor','Dashboard','Chat','ConversationManager']) {
       try { if (window[mod]?.init) await window[mod].init(); }
       catch(e) { console.warn(`[App] ${mod}:`, e.message); }
     }
 
-    // 4. Auth guard — después de que Supabase esté listo
+    // 5. Auth guard — después de que Supabase esté listo
     await initAuth();
-    AuthManager.bindLogoutButton();
+    // Guard: bindLogoutButton solo existe en auth.js v3+
+    if (typeof AuthManager !== 'undefined' && AuthManager?.bindLogoutButton) {
+      AuthManager.bindLogoutButton();
+    }
     
     // 5. Datos demo
     if (window.MockData && window.Store) {
@@ -828,11 +854,10 @@ REGLAS FISCALES:
   return { init, navigateTo, validateRFC, IS_DEV };
 })();
 
-// Auto-boot: app.js carga sin defer, DOM ya está listo
+// Boot: app.js carga con defer — DOM siempre listo en este punto
 if (document.readyState === 'loading') {
   document.addEventListener('DOMContentLoaded', () => App.init());
 } else {
-  // DOM ya cargado (script al final del body sin defer)
   App.init();
 }
 

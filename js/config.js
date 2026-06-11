@@ -44,7 +44,21 @@ const AppConfig = (() => {
     try {
       const res = await fetch('/api/config', {
         headers: { 'Content-Type': 'application/json' },
+        // Timeout de 5s para no bloquear el boot indefinidamente
+        signal: AbortSignal.timeout ? AbortSignal.timeout(5000) : undefined,
       });
+
+      // Error 500 en api/config = module.exports sin corregir a ESM
+      // Mensaje explícito para facilitar diagnóstico en consola
+      if (res.status === 500) {
+        console.error(
+          '%c[Config] ❌ api/config.js devolvió 500.\n' +
+          'Causa probable: module.exports en lugar de export default.\n' +
+          'Solución: reemplaza module.exports por export default en api/config.js',
+          'color:#ef4444;font-weight:bold'
+        );
+        return false;
+      }
 
       if (!res.ok) {
         console.warn('[Config] Server config endpoint returned:', res.status);
@@ -61,10 +75,19 @@ const AppConfig = (() => {
         emit('config:changed', { service: 'all', source: 'server' });
         return true;
       }
+
+      console.warn('[Config] Respuesta inesperada de /api/config:', data);
+      return false;
+
     } catch (e) {
-      console.warn('[Config] Failed to load server config:', e.message);
+      // AbortError = timeout — no es un error de código
+      if (e.name === 'AbortError') {
+        console.warn('[Config] /api/config tardó más de 5s — continuando en modo offline');
+      } else {
+        console.warn('[Config] Failed to load server config:', e.message);
+      }
+      return false;
     }
-    return false;
   }
 
   // =============================================
