@@ -147,13 +147,20 @@ const AppConfig = (() => {
   }
 
   // --- Supabase ---
+  // Orden de resolución:
+  // 1. window.ENV       — inyectado por Vercel o script inline en index.html
+  // 2. serverConfig     — respuesta de /api/config (fetch async del boot)
+  // 3. localConfig      — localStorage solo en desarrollo
+  // Si ninguno tiene valores, retorna '' y el boot cae a modo Demo sin excepciones
   function getSupabaseUrl() {
-    if (IS_PRODUCTION && serverConfig) return serverConfig.supabaseUrl || '';
+    if (window.ENV?.SUPABASE_URL)                   return window.ENV.SUPABASE_URL;
+    if (IS_PRODUCTION && serverConfig?.supabaseUrl) return serverConfig.supabaseUrl;
     return localConfig.supabaseUrl || '';
   }
 
   function getSupabaseKey() {
-    if (IS_PRODUCTION && serverConfig) return serverConfig.supabaseAnonKey || '';
+    if (window.ENV?.SUPABASE_ANON_KEY)                   return window.ENV.SUPABASE_ANON_KEY;
+    if (IS_PRODUCTION && serverConfig?.supabaseAnonKey)  return serverConfig.supabaseAnonKey;
     return localConfig.supabaseKey || '';
   }
 

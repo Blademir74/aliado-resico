@@ -160,6 +160,13 @@ const App = (() => {
   }
 
   function _wireAuthForm(client, overlay, appEl, chip, emailEl, logoutBtn) {
+    // Guard: evita registrar los listeners dos veces si initAuth()
+    // se llama con client=null (rama 1) y luego con client real (rama 2).
+    // Sin este guard, el submit se dispara doble y el segundo click
+    // llega con client null mostrando "Sistema no disponible".
+    if (_wireAuthForm._wired) return;
+    _wireAuthForm._wired = true;
+
     const emailInput  = document.getElementById('auth-email');
     const passInput   = document.getElementById('auth-password');
     const submitBtn   = document.getElementById('auth-submit');
@@ -233,10 +240,15 @@ const App = (() => {
     );
 
     demoBtn?.addEventListener('click', () => {
-      _showApp(overlay, appEl, chip, emailEl, logoutBtn, null);
-      if (MockData) MockData.load(window.Store);
-      // Inicializar dashboard en modo demo igual que en login real
-      if (window.Dashboard?.syncAndRender) Dashboard.syncAndRender();
+      // Banner ámbar de responsabilidad legal — Art. 17-K CFF
+      if (window.AuthManager?.bypassToDemo) {
+        window.AuthManager.bypassToDemo();
+      } else {
+        // Fallback si AuthManager no está disponible
+        _showApp(overlay, appEl, chip, emailEl, logoutBtn, null);
+        if (MockData) MockData.load(window.Store);
+        if (window.Dashboard?.syncAndRender) Dashboard.syncAndRender();
+      }
     });
 
     logoutBtn?.addEventListener('click', async () => {
@@ -807,20 +819,49 @@ REGLAS FISCALES:
     initDocuments();
 
     // 2. Cargar config del servidor ANTES de instanciar Supabase
-    // AppConfig.loadServerConfig() hace fetch('/api/config') para obtener
-    // SUPABASE_URL y SUPABASE_ANON_KEY — sin esto el cliente Supabase
-    // no puede crearse y toda la cadena de auth falla silenciosamente
+    // Timeout de 4s: si /api/config no responde, el boot continúa
+    // en modo offline y el botón Demo se habilita automáticamente.
     if (typeof AppConfig !== 'undefined' && AppConfig?.loadServerConfig) {
-      try { await AppConfig.loadServerConfig(); }
-      catch(e) { console.warn('[App] AppConfig offline:', e.message); }
+      try {
+        await Promise.race([
+          AppConfig.loadServerConfig(),
+          new Promise((_, rej) =>
+            setTimeout(() => rej(new Error('timeout')), 4000)
+          ),
+        ]);
+      } catch(e) {
+        console.warn('[App] AppConfig:', e.message === 'timeout'
+          ? '/api/config no respondió en 4s — modo offline'
+          : e.message
+        );
+      }
     }
 
     // 3. Instanciar cliente Supabase (ya tiene la config del servidor)
+    // Timeout independiente de 3s para no bloquear el boot si la BD tarda
+    let supabaseReady = false;
     if (typeof initDatabase === 'function') {
-      try { await initDatabase(); }
-      catch(e) { console.warn('[App] BD offline:', e.message); }
-    } else {
-      console.warn('[App] initDatabase no disponible — modo offline');
+      try {
+        await Promise.race([
+          initDatabase(),
+          new Promise((_, rej) =>
+            setTimeout(() => rej(new Error('timeout')), 3000)
+          ),
+        ]);
+        supabaseReady = !!window.APP_STATE?.supabase;
+      } catch(e) {
+        console.warn('[App] BD:', e.message === 'timeout'
+          ? 'Supabase no respondió en 3s — habilitando Demo'
+          : e.message
+        );
+      }
+    }
+
+    // Si Supabase no está listo en 3s, habilitar Demo visualmente
+    // para que el usuario no quede bloqueado en la pantalla de bienvenida
+    if (!supabaseReady && typeof AuthManager !== 'undefined' && AuthManager?.enableDemoButton) {
+      AuthManager.enableDemoButton();
+      console.warn('[App] Demo habilitado — Supabase no disponible');
     }
 
     // 4. Módulos de negocio
@@ -829,14 +870,13 @@ REGLAS FISCALES:
       catch(e) { console.warn(`[App] ${mod}:`, e.message); }
     }
 
-    // 5. Auth guard — después de que Supabase esté listo
+    // 5. Auth guard — después de que Supabase esté listo (o haya fallado)
     await initAuth();
-    // Guard: bindLogoutButton solo existe en auth.js v3+
     if (typeof AuthManager !== 'undefined' && AuthManager?.bindLogoutButton) {
       AuthManager.bindLogoutButton();
     }
-    
-    // 5. Datos demo
+
+    // 6. Datos demo — precargar para que el botón Demo sea instantáneo
     if (window.MockData && window.Store) {
       MockData.load(Store);
     }

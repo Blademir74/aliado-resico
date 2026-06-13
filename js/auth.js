@@ -165,10 +165,12 @@ const AuthManager = (() => {
     );
 
     // ── Botón Demo ──
-    // Oculta el overlay e inyecta mock-data sin requerir Supabase
+    // Oculta el overlay, muestra banner ámbar e inyecta mock-data
+    // No requiere Supabase — funciona en cualquier estado de red
     if (demoBtn) {
       demoBtn.addEventListener('click', () => {
-        _showApp(null); // null = modo demo, sin email
+        _showDemoBanner();
+        _showApp(null);
         _loadDemoData();
       });
     } else {
@@ -418,9 +420,82 @@ const AuthManager = (() => {
   }
 
   // ─────────────────────────────────────────────────
-  // API PÚBLICA
+  // BANNER MODO DEMO
+  // Obligatorio por responsabilidad legal del consultor.
+  // Se inserta una sola vez en el DOM.
   // ─────────────────────────────────────────────────
-  return {
+  function _showDemoBanner() {
+    if (document.getElementById('demo-banner')) return;
+    const banner = document.createElement('div');
+    banner.id = 'demo-banner';
+    banner.style.cssText = [
+      'position:fixed', 'top:0', 'left:0', 'right:0', 'z-index:9999',
+      'background:#f59e0b', 'color:#0a0f1c',
+      'text-align:center', 'padding:10px 16px',
+      'font-weight:700', 'font-size:13px',
+      'letter-spacing:0.3px',
+      'box-shadow:0 2px 8px rgba(0,0,0,0.35)',
+    ].join(';');
+    banner.innerHTML =
+      '⚠️ MODO DEMOSTRACIÓN — Datos de prueba, no sincronizados con el SAT. ' +
+      '<span style="font-weight:400;opacity:0.85">' +
+        'Buzón Tributario inactivo: multa hasta $10,260 MXN (' + FISCAL.ART_17K + ')' +
+      '</span>';
+    document.body.prepend(banner);
+    // Evitar que el banner tape el contenido superior
+    const app = document.getElementById('app');
+    if (app) app.style.paddingTop = '48px';
+  }
+
+  // ─────────────────────────────────────────────────
+  // BYPASS A DEMO — llamado desde app.js si Supabase
+  // no responde en el timeout de 3s
+  // ─────────────────────────────────────────────────
+  function bypassToDemo() {
+    _showDemoBanner();
+    _showApp(null);
+    _loadDemoData();
+  }
+
+  // ─────────────────────────────────────────────────
+  // HABILITAR BOTÓN DEMO VISUALMENTE
+  // Llamado desde app.js después del timeout de 3s.
+  // Pulso ámbar guía al usuario cuando Supabase falla.
+  // ─────────────────────────────────────────────────
+  function enableDemoButton() {
+    const btn = document.getElementById('auth-demo');
+    if (!btn) return;
+    btn.disabled = false;
+    btn.style.opacity = '1';
+    btn.style.cursor = 'pointer';
+    btn.style.border = '2px solid #f59e0b';
+    // Animación de pulso si la API está disponible
+    if (typeof btn.animate === 'function') {
+      btn.animate(
+        [
+          { boxShadow: '0 0 0 0 rgba(245,158,11,0.7)' },
+          { boxShadow: '0 0 0 10px rgba(245,158,11,0)' },
+        ],
+        { duration: 900, iterations: 3 }
+      );
+    }
+    // Mostrar texto de ayuda bajo el botón
+    const msgEl = document.getElementById('auth-msg');
+    if (msgEl) {
+      msgEl.hidden = false;
+      msgEl.className = 'auth-msg';
+      msgEl.style.color = '#f59e0b';
+      msgEl.textContent = 'Servicio de autenticación no disponible. Puedes explorar en Modo Demo.';
+    }
+  }
+
+  // ─────────────────────────────────────────────────
+  // API PÚBLICA
+  // window.AuthManager se asigna DENTRO del IIFE para
+  // que esté disponible aunque ocurra un error async
+  // posterior (no espera al return del IIFE).
+  // ─────────────────────────────────────────────────
+  const _publicAPI = {
     init,
     bindLogoutButton,
     logout,
@@ -431,8 +506,15 @@ const AuthManager = (() => {
     testRLSIsolation,
     isFirstLogin,
     markOnboardingDone,
+    bypassToDemo,
+    enableDemoButton,
     FISCAL,
   };
+
+  // Asignación temprana: disponible antes del return
+  window.AuthManager = _publicAPI;
+  return _publicAPI;
 })();
 
-window.AuthManager = AuthManager;
+// Asignación defensiva: si el IIFE retornó correctamente
+if (typeof AuthManager !== 'undefined') window.AuthManager = AuthManager;
