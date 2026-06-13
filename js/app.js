@@ -122,7 +122,7 @@ const App = (() => {
     if (!client) {
       // Sin Supabase: mostrar login de todos modos — demo funciona sin BD
       _showOverlay(overlay, appEl);
-      _wireAuthForm(null, overlay, appEl, chip, emailEl, logoutBtn);
+      _wireAuthForm(overlay, appEl, chip, emailEl, logoutBtn);
       return;
     }
 
@@ -130,13 +130,13 @@ const App = (() => {
       const { data } = await client.auth.getSession();
       if (data?.session?.user) {
         _showApp(overlay, appEl, chip, emailEl, logoutBtn, data.session.user);
-        _wireAuthForm(client, overlay, appEl, chip, emailEl, logoutBtn);
+        _wireAuthForm(overlay, appEl, chip, emailEl, logoutBtn);
         return;
       }
     } catch(_) {}
 
     _showOverlay(overlay, appEl);
-    _wireAuthForm(client, overlay, appEl, chip, emailEl, logoutBtn);
+    _wireAuthForm(overlay, appEl, chip, emailEl, logoutBtn);
   }
 
   function _showApp(overlay, appEl, chip, emailEl, logoutBtn, user) {
@@ -159,11 +159,18 @@ const App = (() => {
     el.className = isError ? 'auth-msg error' : 'auth-msg success';
   }
 
-  function _wireAuthForm(client, overlay, appEl, chip, emailEl, logoutBtn) {
-    // Guard: evita registrar los listeners dos veces si initAuth()
-    // se llama con client=null (rama 1) y luego con client real (rama 2).
-    // Sin este guard, el submit se dispara doble y el segundo click
-    // llega con client null mostrando "Sistema no disponible".
+  function _wireAuthForm(overlay, appEl, chip, emailEl, logoutBtn) {
+    // FIX RAÍZ v7.0:
+    // El parámetro client fue ELIMINADO del closure.
+    // Capturar client al momento de definir _wireAuthForm era el bug:
+    // si Supabase no estaba listo cuando se llamaba initAuth(),
+    // client quedaba null para siempre en el closure aunque
+    // window.APP_STATE.supabase se llenara después.
+    //
+    // Solución: todos los accesos al cliente resuelven en el momento
+    // del evento desde window.APP_STATE?.supabase — nunca del closure.
+    //
+    // El flag _wired previene doble registro real (dos clicks en submit).
     if (_wireAuthForm._wired) return;
     _wireAuthForm._wired = true;
 
@@ -195,9 +202,22 @@ const App = (() => {
       if (!email || !pass) { _showAuthMsg(msgEl, 'Ingresa tu correo y contraseña.', true); return; }
 
       // Resolver client en el momento del click — Supabase puede haber cargado tarde
-      const activeClient = client || window.APP_STATE?.supabase;
+      // client fue eliminado del closure — siempre resolvemos desde APP_STATE
+      const activeClient = window.APP_STATE?.supabase;
       if (!activeClient) {
-        _showAuthMsg(msgEl, 'Sistema de autenticación no disponible. Recarga la página.', true);
+        // Supabase aún no cargó o /api/config falló.
+        // Diagnóstico: abrir consola y buscar errores de AppConfig o initDatabase.
+        _showAuthMsg(
+          msgEl,
+          'Conectando con el servidor fiscal… espera 3 segundos y vuelve a intentarlo.',
+          true
+        );
+        // Reintentar automáticamente si Supabase carga en los próximos 3s
+        setTimeout(() => {
+          if (window.APP_STATE?.supabase) {
+            _showAuthMsg(msgEl, 'Conexión restaurada. Intenta iniciar sesión.', false);
+          }
+        }, 3000);
         return;
       }
 
@@ -254,7 +274,7 @@ const App = (() => {
     logoutBtn?.addEventListener('click', async () => {
       try {
         // 1. Cerrar sesión en Supabase
-        await client?.auth.signOut();
+        await window.APP_STATE?.supabase?.auth.signOut();
       } catch(e) { console.warn('[Auth] signOut:', e.message); }
 
       // 2. Limpiar estado local
@@ -291,9 +311,12 @@ const App = (() => {
       }
     });
 
-    const activeClient = client || window.APP_STATE?.supabase;
-    if (activeClient) {
-      activeClient.auth.onAuthStateChange((event) => {
+    // onAuthStateChange: suscribir cuando Supabase esté disponible.
+    // Si no está listo aún, el listener de logout del bloque superior
+    // (initAuth) cubre el cierre de sesión manual.
+    const _sbClient = window.APP_STATE?.supabase;
+    if (_sbClient) {
+      _sbClient.auth.onAuthStateChange((event) => {
         if (event === 'SIGNED_OUT') {
           _showOverlay(overlay, appEl);
           if (chip) chip.hidden = true;
