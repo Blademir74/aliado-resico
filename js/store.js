@@ -101,17 +101,21 @@ const Store = (() => {
 
   /* ── Supabase: sincronización bajada ── */
   async function _syncDown() {
-    if (!db || !usr) return;
+    if (!db) return;
+    // Resolver usuario activo (puede no estar en `usr` tras recarga)
+    if (!usr?.id) await _syncUser();
+    const uid = usr?.id || _resolveUserId();
+    if (!uid) return;
     try {
       const [{ data: convs }, { data: met }] = await Promise.all([
         db.from('conversations')
           .select('*')
-          .eq('user_id', usr.id)
+          .eq('user_id', uid)
           .order('created_at', { ascending: false })
           .limit(200),
         db.from('fiscal_metrics')
           .select('income_ytd,total_processed,avg_confidence')
-          .eq('user_id', usr.id)
+          .eq('user_id', uid)
           .maybeSingle(),
       ]);
       if (convs) { state.conversations = convs.map(_mapRow); recalc(); persist(); emit('metrics:updated', state.metrics); }
@@ -119,13 +123,45 @@ const Store = (() => {
     } catch (e) { console.warn('[Store] syncDown:', e.message); }
   }
 
+  /* ── Resolución robusta del user_id ──
+     El RLS exige auth.uid() = user_id en cada INSERT/UPDATE.
+     Si la variable interna `usr` no se seteó (login tardío, recarga de
+     pestaña con sesión persistente, etc.), resolvemos el UID desde
+     otras fuentes antes de abortar la escritura. */
+  function _resolveUserId() {
+    if (usr?.id) return usr.id;
+    if (window.AuthManager?.getUserId) {
+      const uid = window.AuthManager.getUserId();
+      if (uid) return uid;
+    }
+    if (window.APP_STATE?.currentUser?.id) return window.APP_STATE.currentUser.id;
+    return null;
+  }
+
+  // Sincronización síncrona del usuario activo hacia `usr`.
+  // Se llama desde initSupabase y antes de cada upsert defensivamente.
+  async function _syncUser() {
+    if (usr?.id) return usr;
+    const client = window.APP_STATE?.supabase;
+    if (!client?.auth?.getUser) return null;
+    try {
+      const { data: { user } } = await client.auth.getUser();
+      if (user) { usr = user; }
+    } catch (_) { /* sesión inexistente — se maneja abajo */ }
+    return usr;
+  }
+
   /* ── Supabase: upsert conversación ── */
   async function _upsertConv(c) {
-    if (!db || !usr) return;
+    if (!db) return;
+    // Garantizar user_id: clave para que el RLS permita la escritura
+    let uid = usr?.id || _resolveUserId();
+    if (!uid) { await _syncUser(); uid = usr?.id || _resolveUserId(); }
+    if (!uid) { console.warn('[Store] upsertConv omitido: sin user_id (RLS lo bloquearía)'); return; }
     try {
       await db.from('conversations').upsert({
         id: c.id,
-        user_id: usr.id,
+        user_id: uid,
         message_text: c.text,           // columna correcta — nunca "text"
         sender: c.sender,
         time: c.time,
@@ -144,9 +180,8 @@ const Store = (() => {
   /* ── Supabase: upsert métricas ── */
   async function _upsertMetrics() {
     if (!db) return;
-    let uid = null;
-    if (window.AuthManager?.getUserId) uid = window.AuthManager.getUserId();
-    if (!uid && usr) uid = usr.id;
+    let uid = usr?.id || _resolveUserId();
+    if (!uid) { await _syncUser(); uid = usr?.id || _resolveUserId(); }
     if (!uid) return;
     try {
       await db.from('fiscal_metrics').upsert({
@@ -160,9 +195,11 @@ const Store = (() => {
 
   /* ── Supabase: suscripción realtime ── */
   function _subscribeRealtime() {
-    if (!db || !usr) return;
+    if (!db) return;
+    const uid = usr?.id || _resolveUserId();
+    if (!uid) return;
     db.channel('conversations_rt')
-      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'conversations', filter: `user_id=eq.${usr.id}` },
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'conversations', filter: `user_id=eq.${uid}` },
         () => _syncDown())
       .subscribe();
   }

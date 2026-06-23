@@ -115,12 +115,35 @@ const AuthManager = (() => {
         return;
       }
 
-      // Supabase puede tardar en estar disponible en el primer render
+      // Supabase puede tardar en estar disponible en el primer render.
+      // Si no está listo, NO bloqueamos al usuario: ofrecemos Modo Demo.
       const client = supabaseClient || window.APP_STATE?.supabase;
       if (!client) {
-        _showAuthMsg(msgEl, 'El sistema de autenticación no está disponible. Recarga la página.', true);
+        // Reintentar si Supabase carga en los próximos 3s (CDN tardío, etc.)
+        const tryAgain = setTimeout(() => {
+          if (window.APP_STATE?.supabase) {
+            _showAuthMsg(msgEl, '✅ Conexión restaurada. Intenta iniciar sesión de nuevo.', false);
+            submitBtn.disabled    = false;
+            submitBtn.textContent = isRegister ? '✅ Crear Cuenta' : '🔐 Iniciar Sesión';
+          }
+        }, 3000);
+
+        // Mientras tanto, no dejamos al usuario tirado: habilitamos Demo.
+        if (typeof AuthManager?.enableDemoButton === 'function') {
+          AuthManager.enableDemoButton();
+        }
+        _showAuthMsg(
+          msgEl,
+          'El servidor de autenticación tarda en responder. Puedes iniciar el ' +
+          'Modo Demo ahora mismo (botón abajo) o esperar 3s y reintentar.',
+          true
+        );
+        // Guardar referencia para cancelar el reintento si el usuario cambia de vista
+        submitBtn._retryTimer = tryAgain;
         return;
       }
+      // Si ya había un reintento agendado, cancelarlo
+      if (submitBtn._retryTimer) { clearTimeout(submitBtn._retryTimer); submitBtn._retryTimer = null; }
 
       submitBtn.disabled   = true;
       submitBtn.textContent = '⏳ Procesando…';

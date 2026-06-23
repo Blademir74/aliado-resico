@@ -495,6 +495,11 @@
 </div><!-- /app -->
 
 <!-- SCRIPTS — orden crítico -->
+<!-- SDK de Supabase v2 (global window.supabase.createClient).
+     Debe cargarse ANTES de js/init-db.js, que lo invoca al instante.
+     Sin esta etiqueta, init-db.js falla y el login arroja "Sistema no disponible". -->
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
+
 <script src="./js/init-db.js" defer></script>
 <script src="./js/config.js" defer></script>
 <script src="js/auth.js" defer></script>
