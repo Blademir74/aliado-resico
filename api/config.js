@@ -1,16 +1,8 @@
-/* ================================================
-   ALIADO RESICO — Server Config v3.0
-   Archivo: api/config.js
-   Runtime: Node.js 24.x — ESM puro
-
-   FIX CRÍTICO: module.exports → export default
-   Con "type":"module" en package.json, Node rechaza
-   cualquier module.exports con:
-   "ReferenceError: module is not defined in ES module scope"
-
-   Este endpoint entrega SUPABASE_URL y SUPABASE_ANON_KEY
-   al frontend sin exponer la GEMINI_API_KEY.
-   ================================================ */
+/* ============================================
+   ALIADO RESICO — API Config v4.0
+   Solo expone SUPABASE_URL y SUPABASE_ANON_KEY
+   Nunca expone GEMINI_API_KEY
+   ============================================ */
 
 const ALLOWED_ORIGINS = [
   'https://aliado-resico.vercel.app',
@@ -22,29 +14,27 @@ const ALLOWED_ORIGINS = [
 ];
 
 export default async function handler(req, res) {
-  const origin  = req.headers['origin'] || '';
-  const allowed = ALLOWED_ORIGINS.includes(origin);
+  const origin = req.headers.origin || '';
+  const allowOrigin = ALLOWED_ORIGINS.includes(origin) ? origin : ALLOWED_ORIGINS[0];
 
-  res.setHeader('Access-Control-Allow-Origin',  allowed ? origin : ALLOWED_ORIGINS[0]);
+  res.setHeader('Access-Control-Allow-Origin', allowOrigin);
   res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
-  res.setHeader('Vary',                         'Origin');
-  res.setHeader('Cache-Control',                'public, max-age=300');
-  res.setHeader('Content-Type',                 'application/json');
-  res.setHeader('X-Content-Type-Options',       'nosniff');
-  res.setHeader('X-Frame-Options',              'DENY');
+  res.setHeader('Vary', 'Origin');
+  res.setHeader('Content-Type', 'application/json; charset=utf-8');
+  res.setHeader('Cache-Control', 'no-store');
+  res.setHeader('X-Content-Type-Options', 'nosniff');
 
   if (req.method === 'OPTIONS') return res.status(204).end();
-  if (req.method !== 'GET')    return res.status(405).json({ error: 'Method not allowed' });
+  if (req.method !== 'GET') return res.status(405).json({ ok: false, error: 'Method not allowed' });
 
-  const supabaseUrl     = process.env.SUPABASE_URL      || '';
+  const supabaseUrl = process.env.SUPABASE_URL || '';
   const supabaseAnonKey = process.env.SUPABASE_ANON_KEY || '';
 
   if (!supabaseUrl || !supabaseAnonKey) {
-    console.error('[config] Variables de entorno faltantes en Vercel');
     return res.status(503).json({
       ok: false,
-      error: 'Configura SUPABASE_URL y SUPABASE_ANON_KEY en Vercel → Settings → Environment Variables.',
+      error: 'Faltan SUPABASE_URL o SUPABASE_ANON_KEY en Vercel.',
     });
   }
 
