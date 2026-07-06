@@ -31,7 +31,7 @@ const App = (() => {
       btn.classList.toggle('active', match);
       btn.setAttribute('aria-selected', String(match));
     });
-    if (view === 'dashboard') setTimeout(() => Dashboard?.syncAndRender?.(), 80);
+    if (view === 'dashboard') setTimeout(() => window.Dashboard?.syncAndRender?.(), 80);
     window.location.hash = view;
   }
 
@@ -421,8 +421,7 @@ const App = (() => {
     const devPanel = document.getElementById('dev-config');
     if (devPanel) devPanel.hidden = !IS_DEV;
 
-    document.getElementById('refresh-feed')?.addEventListener('click', () =>
-      Dashboard?.syncAndRender?.()
+    document.getElementById('refresh-feed')?.addEventListener('click', () => window.Dashboard?.syncAndRender?.());
     );
     document.getElementById('gemini-test')?.addEventListener('click', async () => {
       try {
@@ -914,7 +913,7 @@ REGLAS FISCALES:
     console.log('%c✅ Aliado RESICO listo', 'color:#10b981;font-weight:bold');
   }
 
-  return { init, navigateTo, validateRFC, IS_DEV };
+  return { init, navigateTo, initMonthlyTracker, validateRFC, IS_DEV };
 })();
 
 // Boot: app.js carga con defer — DOM siempre listo en este punto

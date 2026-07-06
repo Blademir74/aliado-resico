@@ -494,49 +494,66 @@
 
 </div><!-- /app -->
 
-<!-- SCRIPTS — orden crítico -->
-<!-- SDK de Supabase v2 (global window.supabase.createClient).
-     Debe cargarse ANTES de js/init-db.js, que lo invoca al instante.
-     Sin esta etiqueta, init-db.js falla y el login arroja "Sistema no disponible". -->
-<!-- 1. SDK Supabase (CDN) -->
+<!-- ═══ ANTI-FLASH: oculta app hasta sesión validada ═══ -->
+<style>
+  #app { display: none !important; }
+  #auth-overlay { display: flex !important; }
+</style>
+
+<!-- 1. SDK Supabase -->
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
-
-<!-- 2. Configuración (resuelve API keys, detecta entorno) -->
+<!-- 2. Config -->
 <script src="js/config.js"></script>
-
-<!-- 3. Auth Module (único dueño del formulario y sesión) -->
+<!-- 3. Auth -->
 <script src="js/auth.js"></script>
-
-<!-- 4. Store (Supabase queries, RLS) -->
+<!-- 4. Store -->
 <script src="js/store.js"></script>
-
-<!-- 5. Clasificador de intents -->
+<!-- 5. Classifier -->
 <script src="js/classifier.js"></script>
-
-<!-- 6. App Core (navegación, dashboard, chat) — SIN _wireAuthForm -->
+<!-- 6. App Core -->
 <script src="js/app.js"></script>
+<!-- 7. Mock Data (opcional, Auth tiene fallback integrado) -->
+<script src="js/mock-data.js" onerror="console.warn('[Boot] mock-data.js no encontrado — usando fallback integrado')"></script>
 
-<!-- 7. Datos demo (no bloquea el boot) -->
-<script src="js/mock-data.js"></script>
-
-<!-- BOOT: un solo punto de entrada asíncrono -->
+<!-- ═══ BOOT ÚNICO — punto de entrada asíncrono ═══ -->
 <script>
-  document.addEventListener('DOMContentLoaded', async () => {
-    // Inicializar base de datos (Supabase o modo offline)
+(async () => {
+  // Esperar DOM completo
+  if (document.readyState !== 'complete' && document.readyState !== 'interactive') {
+    await new Promise(r => document.addEventListener('DOMContentLoaded', r, { once: true }));
+  }
+
+  try {
+    // 1. Cargar config del servidor (Vercel env vars)
     if (window.AppConfig?.loadServerConfig) {
-      await AppConfig.loadServerConfig();
+      await AppConfig.loadServerConfig().catch(() =>
+        console.warn('[Boot] /api/config no respondió — modo offline')
+      );
     }
+
+    // 2. Inicializar Store / Supabase
     if (window.Store?.initSupabase) {
-      await Store.initSupabase().catch(() => {
-        console.warn('[Boot] Supabase no disponible — modo Demo activo.');
+      await Store.initSupabase().catch(e => {
+        console.warn('[Boot] Store.initSupabase falló:', e?.message);
+        // Sin Supabase → Demo disponible
         AuthManager?.enableDemoButton();
       });
+    } else {
+      // Si store.js no está o no tiene initSupabase, habilitamos demo
+      AuthManager?.enableDemoButton();
     }
-    // Auth Guard: verifica sesión y wirea formularios
-    await AuthManager.init();
-    // App Shell: navegación, tema, tracker fiscal
-    App.init();
-  });
-</script>   <!-- sin defer, se ejecuta al final -->
+
+  } catch (bootErr) {
+    console.warn('[Boot] Error en inicialización:', bootErr?.message);
+    AuthManager?.enableDemoButton();
+  }
+
+  // 3. Auth Guard (verifica sesión, wirea formularios)
+  await AuthManager.init();
+
+  // 4. App Shell (navegación, tema, tracker)
+  if (window.App?.init) App.init();
+})();
+</script>>   <!-- sin defer, se ejecuta al final -->
 
 </body>
