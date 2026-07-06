@@ -170,7 +170,7 @@
       <div class="income-monitor glass" id="income-monitor">
         <div class="income-monitor-header">
           <div>
-            <h2 class="section-title">📊 Monitor de Ingresos RESICO 2024</h2>
+            <h2 class="section-title">📊 Monitor de Ingresos RESICO 2026</h2>
             <p class="section-sub">Art. 113-E, fracción III, LISR — Personas Físicas · Límite: $3,500,000 MXN</p>
           </div>
           <span id="income-alert-badge" class="alert-badge safe">✅ SEGURO</span>
@@ -220,7 +220,7 @@
         <!-- Alerta fiscal contextual -->
         <div id="income-alert-message" class="income-alert safe">
           ✅ Tus ingresos están dentro del límite RESICO. Puedes seguir facturando sin riesgo.
-          <span class="alert-ref">Art. 113-E, fracc. III, LISR 2024</span>
+          <span class="alert-ref">Art. 113-E, fracc. III, LISR 2026</span>
         </div>
 
         <!-- Separación ISR / IVA -->
@@ -244,7 +244,7 @@
         <div class="section-header">
           <div>
             <h2 class="section-title">📅 Estatus de Pagos Mensuales RESICO</h2>
-            <p class="section-sub">Pagos definitivos presentados al SAT · Art. 113-E LISR · Ejercicio 2024</p>
+            <p class="section-sub">Pagos definitivos presentados al SAT · Art. 113-E LISR · Ejercicio 2026</p>
           </div>
           <div class="monthly-legend">
             <span class="legend-item"><span class="leg-dot paid"></span>Presentado</span>
@@ -498,20 +498,45 @@
 <!-- SDK de Supabase v2 (global window.supabase.createClient).
      Debe cargarse ANTES de js/init-db.js, que lo invoca al instante.
      Sin esta etiqueta, init-db.js falla y el login arroja "Sistema no disponible". -->
+<!-- 1. SDK Supabase (CDN) -->
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
 
-<script src="./js/init-db.js" defer></script>
-<script src="./js/config.js" defer></script>
-<script src="js/auth.js" defer></script>
-<script src="./js/sanitizer.js" defer></script>
-<script src="./js/store.js" defer></script>          <!-- ← Store -->
-<script src="./js/mock-data.js" defer></script>
-<script src="./js/classifier.js" defer></script>
-<script src="./js/ocr.js" defer></script>
-<script src="./js/conversation.js" defer></script>   <!-- ← ConversationManager -->
-<script src="./js/webhook.js" defer></script>
-<script src="./js/dashboard.js" defer></script>
-<script src="./js/chat.js" defer></script>           <!-- ← Chat -->
-<script src="./js/app.js" defer></script>    <!-- sin defer, se ejecuta al final -->
+<!-- 2. Configuración (resuelve API keys, detecta entorno) -->
+<script src="js/config.js"></script>
+
+<!-- 3. Auth Module (único dueño del formulario y sesión) -->
+<script src="js/auth.js"></script>
+
+<!-- 4. Store (Supabase queries, RLS) -->
+<script src="js/store.js"></script>
+
+<!-- 5. Clasificador de intents -->
+<script src="js/classifier.js"></script>
+
+<!-- 6. App Core (navegación, dashboard, chat) — SIN _wireAuthForm -->
+<script src="js/app.js"></script>
+
+<!-- 7. Datos demo (no bloquea el boot) -->
+<script src="js/mock-data.js"></script>
+
+<!-- BOOT: un solo punto de entrada asíncrono -->
+<script>
+  document.addEventListener('DOMContentLoaded', async () => {
+    // Inicializar base de datos (Supabase o modo offline)
+    if (window.AppConfig?.loadServerConfig) {
+      await AppConfig.loadServerConfig();
+    }
+    if (window.Store?.initSupabase) {
+      await Store.initSupabase().catch(() => {
+        console.warn('[Boot] Supabase no disponible — modo Demo activo.');
+        AuthManager?.enableDemoButton();
+      });
+    }
+    // Auth Guard: verifica sesión y wirea formularios
+    await AuthManager.init();
+    // App Shell: navegación, tema, tracker fiscal
+    App.init();
+  });
+</script>   <!-- sin defer, se ejecuta al final -->
 
 </body>
