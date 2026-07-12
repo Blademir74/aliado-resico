@@ -1,92 +1,146 @@
-/* ============================================
-ALIADO RESICO — OCR & Document Processor v2.3
-Vision Strict, Human Review >=0.85, RLS Ready
-============================================ */
 const DocumentProcessor = (() => {
-  const HUMAN_REVIEW_THRESHOLD = 0.85;
-
-  const OCR_PROMPT = `Eres un OCR fiscal mexicano con precisión 97%. Responde SOLO JSON válido. Sin markdown.
-Extrae: {"document_type":"CFDI|TICKET|TRANSFERENCIA|NOTA_VENTA|RECIBO|DESCONOCIDO","confidence":0.97,"emisor_rfc":"RFC o null","receptor_rfc":"RFC o null","subtotal":123.45,"iva":19.75,"iva_tasa":16,"total":143.20,"fecha":"DD/MM/AAAA","quality_notes":"notas o null"}
-REGLAS: Montos SOLO números. Si no es legible, pon null. Confidence refleja calidad REAL. Si no es documento fiscal, document_type:"DESCONOCIDO", confidence:0.1`;
-
-  function extractJSON(raw) {
-    if (!raw?.trim()) return null;
-    const c = raw.replace(/`(?:json)?\s*([\s\S]*?)`/gi, '$1').trim();
-    const s = c.indexOf('{'), e = c.lastIndexOf('}');
-    return (s !== -1 && e > s) ? c.slice(s, e + 1) : null;
+  function esc(text) {
+    return String(text || '')
+      .replaceAll('&', '&amp;')
+      .replaceAll('<', '&lt;')
+      .replaceAll('>', '&gt;');
   }
 
-  async function fileToBase64(file) {
-    return new Promise((res, rej) => {
+  function fileToBase64(file) {
+    return new Promise((resolve, reject) => {
       const r = new FileReader();
-      r.onload = () => res(r.result.split(',')[1]);
-      r.onerror = rej;
+      r.onload = () => {
+        const result = String(r.result || '');
+        resolve(result.includes(',') ? result.split(',') : result);[3]
+      };
+      r.onerror = reject;
       r.readAsDataURL(file);
     });
   }
 
-  async function processWithGemini(file) {
-  const base64 = await fileToBase64(file);
-  
-  // ⬇️ FETCH AL PROXY – esta es la línea que necesitas
-  const res = await fetch('/api/gemini-proxy', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      contents: [{
-        parts: [
-          { text: OCR_PROMPT },
-          { inline_data: { mime_type: file.type || 'image/jpeg', data: base64 } }
-        ]
-      }],
-      generationConfig: { temperature: 0.05, maxOutputTokens: 600 }
-    })
-  });
-  // ⬆️
-
-  if (!res.ok) throw new Error(`OCR HTTP ${res.status}`);
-  const data = await res.json();
-  const txt = data.candidates?.[0]?.content?.parts?.[0]?.text;
-  if (!txt) throw new Error('Respuesta OCR vacía');
-  
-  const json = extractJSON(txt);
-  if (!json) throw new Error('OCR no retornó JSON');
-  return JSON.parse(json);
-}
-
   async function processImage(file) {
-    const start = performance.now();
-    try {
-      const gem = await processWithGemini(file);
-      const conf = Math.max(0, Math.min(1, gem.confidence || 0.5));
-      const needsReview = conf < HUMAN_REVIEW_THRESHOLD;
-      const pedagogicMessage = "🔎 **ISR RESICO**: Se paga sobre ingreso bruto (sin deducciones). Este gasto NO reduce tu ISR.\n🟣 **IVA**: Este gasto es INDISPENSABLE para acreditar tu IVA. Asegúrate de tener CFDI 4.0 con tu RFC correcto.";
-      return {
-  type: gem.document_type === 'CFDI' ? 'CFDI' : 'TICKET',
-  status: needsReview ? 'needs_review' : 'processed',
-  confidence: conf,
-  needsHumanReview: needsReview,
-  humanReviewReason: needsReview ? `Confianza ${(conf*100).toFixed(0)}% < 85%. ${gem.quality_notes || 'Verificar datos fiscales críticos.'}` : null,
-  pedagogicMessage: pedagogicMessage,  // <-- Nuevo campo
-  source: 'gemini_vision',
-  processingTime: `${((performance.now()-start)/1000).toFixed(1)}s`,
-  data: {
-          emisor_rfc: gem.emisor_rfc || null,
-          receptor_rfc: gem.receptor_rfc || null,
-          subtotal: gem.subtotal ? Number(gem.subtotal) : null,
-          iva: gem.iva ? Number(gem.iva) : null,
-          total: gem.total ? Number(gem.total) : null,
-          fecha: gem.fecha || null
-        },
-        fileName: file.name,
-        fileSize: `${(file.size/1024).toFixed(1)} KB`
-      };
-    } catch (err) {
-      console.warn('[OCR] Proxy falló:', err.message);
-      throw new Error('Procesamiento OCR no disponible. Intente con imagen más nítida.');
-    }
+    const session = await window.APP_STATE?.supabase?.auth?.getSession?.();
+    const token = session?.data?.session?.access_token;
+    const headers = { 'Content-Type': 'application/json' };
+    if (token) headers.Authorization = `Bearer ${token}`;
+
+    const base64Data = await fileToBase64(file);
+
+    const resp = await fetch('/api/gemini-proxy', {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({
+        contents: [{
+          parts: [
+            {
+              text: [
+                'Eres OCR fiscal mexicano para RESICO 2026.',
+                'Extrae SOLO JSON con estos campos:',
+                '{',
+                '"document_type":"CFDI|TICKET|OTRO",',
+                '"confidence":0.97,',
+                '"rfc_emisor":"string|null",',
+                '"rfc_receptor":"string|null",',
+                '"subtotal":123.45,',
+                '"iva":19.76,',
+                '"total":143.21,',
+                '"folio":"string|null",',
+                '"fecha":"YYYY-MM-DD|null",',
+                '"nota":"ISR: sin deducciones. IVA: indispensable para acreditamiento con CFDI válido."',
+                '}',
+                'El IVA debe salir desglosado cuando exista.'
+              ].join('\n')
+            },
+            {
+              inline_data: {
+                mime_type: file.type || 'image/jpeg',
+                data: base64Data
+              }
+            }
+          ]
+        }],
+        generationConfig: { temperature: 0.05, maxOutputTokens: 500 }
+      })
+    });
+
+    if (!resp.ok) throw new Error(`OCR HTTP ${resp.status}`);
+    const d = await resp.json();
+    const raw = d?.candidates?.[0]?.content?.parts?.[0]?.text || '';
+    const cleaned = raw.replace(/```json/gi, '```').replace(/```/g, '').trim();
+    const start = cleaned.indexOf('{');
+    const end = cleaned.lastIndexOf('}');
+    if (start === -1 || end <= start) throw new Error('OCR sin JSON válido');
+
+    const data = JSON.parse(cleaned.slice(start, end + 1));
+    return {
+      data,
+      needsHumanReview: Number(data.confidence || 0) < 0.85,
+      humanReviewReason: 'Confianza OCR menor a 85%. Verificación Humana obligatoria.'
+    };
   }
 
-  return { processImage, HUMAN_REVIEW_THRESHOLD };
+  function renderResult(result) {
+    const data = result?.data || {};
+    const review = result?.needsHumanReview;
+
+    return `
+      <div class="ocr-card">
+        <p><strong>Tipo:</strong> ${esc(data.document_type || 'OTRO')}</p>
+        <p><strong>Confianza:</strong> ${Math.round(Number(data.confidence || 0) * 100)}%</p>
+        <p><strong>RFC emisor:</strong> ${esc(data.rfc_emisor || '—')}</p>
+        <p><strong>RFC receptor:</strong> ${esc(data.rfc_receptor || '—')}</p>
+        <p><strong>Subtotal:</strong> ${esc(data.subtotal ?? '—')}</p>
+        <p><strong>IVA:</strong> ${esc(data.iva ?? '—')}</p>
+        <p><strong>Total:</strong> ${esc(data.total ?? '—')}</p>
+        <p><strong>Folio:</strong> ${esc(data.folio || '—')}</p>
+        <p><strong>Fecha:</strong> ${esc(data.fecha || '—')}</p>
+        <p><strong>Nota fiscal:</strong> ISR RESICO no deduce este gasto; el IVA requiere CFDI válido y gasto indispensable para acreditamiento.</p>
+        ${review ? '<div class="auth-msg error">Verificación Humana requerida: confianza menor a 85%.</div>' : '<div class="auth-msg success">Documento procesado correctamente.</div>'}
+      </div>
+    `;
+  }
+
+  async function init() {
+    const fileInput = document.getElementById('file-input');
+    const btn = document.getElementById('ocr-process-btn');
+    const output = document.getElementById('ocr-output');
+
+    if (!fileInput || !btn || !output) return;
+
+    btn.addEventListener('click', async () => {
+      const file = fileInput.files?.[0];
+      if (!file) {
+        output.innerHTML = '<div class="auth-msg error">Selecciona un archivo primero.</div>';
+        return;
+      }
+
+      btn.disabled = true;
+      output.innerHTML = '<p class="ocr-placeholder">Extrayendo datos fiscales…</p>';
+
+      try {
+        const res = await processImage(file);
+        output.innerHTML = renderResult(res);
+        window.Store?.saveDocument?.({
+          id: crypto?.randomUUID ? crypto.randomUUID() : String(Date.now()),
+          file_name: file.name,
+          confidence: Number(res.data?.confidence || 0),
+          document_type: res.data?.document_type || 'OTRO',
+          extracted_data: res.data,
+          safety_flag: !!res.needsHumanReview,
+          created_at: new Date().toISOString()
+        });
+      } catch (err) {
+        output.innerHTML = `<div class="auth-msg error">${esc(err.message)}</div>`;
+      } finally {
+        btn.disabled = false;
+      }
+    });
+  }
+
+  return {
+    init,
+    processImage
+  };
 })();
-if (typeof window !== 'undefined') window.DocumentProcessor = DocumentProcessor;
+
+window.DocumentProcessor = DocumentProcessor;

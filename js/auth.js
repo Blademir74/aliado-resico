@@ -1,19 +1,7 @@
-/* ============================================
-   ALIADO RESICO — Auth v5.0
-   Demo robusto, sin dependencia dura de Dashboard/MockData
-   ============================================ */
-
-window.APP_STATE = window.APP_STATE || { supabase: null, currentUser: null, isDemo: false };
-window.Dashboard = window.Dashboard || {
-  syncAndRender() {
-    try {
-      const state = window.Store?.getState?.();
-      const summary = document.getElementById('monthly-summary');
-      if (summary && state) {
-        summary.textContent = `Ingresos acumulados 2026: $${Number(state.incomeYTD || 0).toLocaleString('es-MX')} MXN · Riesgo: ${state.fiscalMetrics?.riskLevel || 'SEGURO'}`;
-      }
-    } catch (_) {}
-  }
+window.APP_STATE = window.APP_STATE || {
+  supabase: null,
+  currentUser: null,
+  isDemo: false
 };
 
 window.MockData = window.MockData || {
@@ -27,49 +15,47 @@ window.MockData = window.MockData || {
           confidence: 0.96,
           timestamp: Date.now(),
           is_fiscal_audit_completed: true,
-          source: 'demo',
+          source: 'demo'
         },
         {
           id: 'demo-2',
-          text: 'Recuerda activar el Buzón Tributario.',
+          text: 'Mi buzón tributario está inactivo',
           intent: 'SALUD_FISCAL',
           confidence: 0.98,
           timestamp: Date.now() - 60000,
           is_fiscal_audit_completed: true,
-          source: 'demo',
-        },
+          source: 'demo'
+        }
       ],
       incomeYTD: 95500,
       fiscalMetrics: {
         annualLimit: 3500000,
-        riskLevel: 'SEGURO',
+        riskLevel: 'SEGURO'
       },
       saludFiscal: {
         buzonTributarioActivo: false,
         eFirmaVigente: true,
-        alertLevel: 'warning',
-      },
+        alertLevel: 'warning'
+      }
     });
   }
 };
 
 const AuthManager = (() => {
   let currentUser = null;
-  let authSubReady = false;
 
   const FISCAL = {
-    YEAR: 2026,
     INCOME_LIMIT: 3500000,
-    ALERT_94: 3290000,
+    ALERT_94: 3300000,
     MULTA_BUZON: 10260,
     ART_113E: 'Art. 113-E LISR',
     ART_113F: 'Art. 113-F LISR',
     ART_17K: 'Art. 17-K CFF',
-    ART_86C: 'Art. 86-C CFF',
+    ART_86C: 'Art. 86-C CFF'
   };
 
   function getAppEl() {
-    return document.getElementById('app') || document.getElementById('app-container');
+    return document.getElementById('app');
   }
 
   function removeGuard() {
@@ -79,7 +65,6 @@ const AuthManager = (() => {
 
   function _showApp(user) {
     removeGuard();
-
     const overlay = document.getElementById('auth-overlay');
     const app = getAppEl();
     const chip = document.getElementById('user-chip');
@@ -90,12 +75,10 @@ const AuthManager = (() => {
       overlay.hidden = true;
       overlay.style.display = 'none';
     }
-
     if (app) {
       app.hidden = false;
       app.style.display = '';
     }
-
     if (chip) chip.hidden = false;
     if (emailEl) emailEl.textContent = user?.email || 'Modo Demo';
     if (logoutEl) logoutEl.hidden = false;
@@ -111,12 +94,10 @@ const AuthManager = (() => {
       overlay.hidden = false;
       overlay.style.display = 'flex';
     }
-
     if (app) {
       app.hidden = true;
       app.style.display = 'none';
     }
-
     if (chip) chip.hidden = true;
     if (logoutEl) logoutEl.hidden = true;
   }
@@ -133,123 +114,53 @@ const AuthManager = (() => {
     if (!btn) return;
     btn.disabled = false;
     btn.hidden = false;
-    btn.style.pointerEvents = 'auto';
-    btn.style.opacity = '1';
-    btn.style.cursor = 'pointer';
   }
 
   function _showDemoBanner() {
     if (document.getElementById('demo-banner')) return;
-
     const banner = document.createElement('div');
     banner.id = 'demo-banner';
-    banner.style.cssText = 'position:fixed;top:0;left:0;right:0;z-index:9999;background:#92400e;color:#fff;padding:10px 16px;text-align:center;font-size:13px;font-weight:600;';
-    banner.innerHTML = '⚠️ MODO DEMO — Datos ficticios · Art. 17-K CFF: multa hasta $10,260 MXN por Buzón Tributario inactivo.';
+    banner.style.cssText =
+      'position:fixed;top:0;left:0;right:0;z-index:9999;background:#92400e;color:#fff;padding:10px 16px;text-align:center;font-size:13px;font-weight:600;';
+    banner.textContent =
+      '⚠️ MODO DEMO — Art. 17-K CFF: multa hasta $10,260 MXN por Buzón Tributario inactivo.';
     document.body.prepend(banner);
   }
 
-  function _injectWelcomeMessage(isDemo) {
+  function _injectWelcomeMessage() {
     const chatEl = document.getElementById('chat-messages');
     if (!chatEl) return;
+    if (chatEl.dataset.welcomeInjected === '1') return;
+    chatEl.dataset.welcomeInjected = '1';
 
     const bubble = document.createElement('div');
     bubble.className = 'chat-bubble bot';
-    bubble.innerHTML = `
-      <div>
-        <strong>Aliado RESICO ${FISCAL.YEAR}</strong>${isDemo ? ' · MODO DEMO' : ''}<br>
-        ${FISCAL.ART_113E}: límite anual $${FISCAL.INCOME_LIMIT.toLocaleString('es-MX')} MXN.<br>
-        Al 94% ($${FISCAL.ALERT_94.toLocaleString('es-MX')} MXN) se activa alerta de expulsión.<br>
-        ${FISCAL.ART_17K}: Buzón inactivo = multa hasta $${FISCAL.MULTA_BUZON.toLocaleString('es-MX')} MXN.<br>
-        Reincidencia duplica el monto (${FISCAL.ART_86C}).<br>
-        ${FISCAL.ART_113F}: antes de confirmar declaración anual, pregunta por ingresos mixtos.
-      </div>
-    `;
+    bubble.textContent =
+      `🛡️ Aliado RESICO activo.
+${FISCAL.ART_113E}: tu límite anual es $${FISCAL.INCOME_LIMIT.toLocaleString('es-MX')} MXN.
+Al 94% ($${FISCAL.ALERT_94.toLocaleString('es-MX')} MXN) debes tratarlo como riesgo de expulsión.
+${FISCAL.ART_17K}: Buzón Tributario inactivo = multa hasta $${FISCAL.MULTA_BUZON.toLocaleString('es-MX')} MXN y pérdida de plazos; la reincidencia escala el riesgo (${FISCAL.ART_86C}).
+${FISCAL.ART_113F}: antes de confirmar anual, se pregunta si hubo ingresos mixtos.
+Alerta operativa: la omisión de obligaciones y notificaciones también puede escalar a bloqueo operativo y riesgo sobre sellos digitales.`;
     chatEl.appendChild(bubble);
-    chatEl.scrollTop = chatEl.scrollHeight;
-  }
-
-  function _activateDemo() {
-    window.APP_STATE.isDemo = true;
-    currentUser = { id: 'demo-user', email: 'demo@aliadoresico.com' };
-    window.APP_STATE.currentUser = currentUser;
-
-    _showDemoBanner();
-    _showApp(null);
-
-    if (window.MockData?.load) {
-      window.MockData.load(window.Store);
-    }
-
-    setTimeout(() => {
-      window.Dashboard?.syncAndRender?.();
-      window.App?.initMonthlyTracker?.();
-    }, 50);
-
-    _injectWelcomeMessage(true);
   }
 
   function bypassToDemo() {
-    _activateDemo();
+    window.APP_STATE.isDemo = true;
+    _showDemoBanner();
+    _showApp(null);
+    window.MockData?.load?.(window.Store);
+    _injectWelcomeMessage();
+    window.Dashboard?.syncAndRender?.();
   }
 
-  function _postLoginInit() {
-    window.APP_STATE.isDemo = false;
-    window.APP_STATE.currentUser = currentUser;
-
-    setTimeout(() => {
-      window.Dashboard?.syncAndRender?.();
-      window.App?.initMonthlyTracker?.();
-    }, 50);
-
-    _injectWelcomeMessage(false);
-  }
-
-  function _wireLogout() {
-    const logoutBtn = document.getElementById('logout-btn');
-    if (!logoutBtn || logoutBtn._wiredLogout) return;
-
-    logoutBtn._wiredLogout = true;
-    logoutBtn.addEventListener('click', async () => {
-      try {
-        await window.APP_STATE?.supabase?.auth?.signOut?.();
-      } catch (_) {}
-
-      document.getElementById('demo-banner')?.remove();
-
-      if (window.Store?.reset) window.Store.reset();
-      window.APP_STATE.currentUser = null;
-      window.APP_STATE.isDemo = false;
-      currentUser = null;
-
-      _showLogin();
-    });
-  }
-
-  function _subscribeAuthChanges(client) {
-    if (!client || authSubReady) return;
-    authSubReady = true;
-
-    client.auth.onAuthStateChange((event, session) => {
-      if (event === 'SIGNED_IN' && session?.user) {
-        currentUser = session.user;
-        _showApp(currentUser);
-        _postLoginInit();
-      }
-      if (event === 'SIGNED_OUT') {
-        _showLogin();
-      }
-    });
-  }
-
-  function _wireAuthForm() {
-    if (_wireAuthForm._wired) return;
-    _wireAuthForm._wired = true;
-
+  async function init() {
+    const submitBtn = document.getElementById('auth-submit');
+    const demoBtn = document.getElementById('auth-demo');
+    const msgEl = document.getElementById('auth-msg');
     const emailInput = document.getElementById('auth-email');
     const passInput = document.getElementById('auth-password');
-    const submitBtn = document.getElementById('auth-submit');
-    const msgEl = document.getElementById('auth-msg');
-    const demoBtn = document.getElementById('auth-demo');
+    const logoutBtn = document.getElementById('logout-btn');
     const tabLogin = document.getElementById('tab-login');
     const tabRegister = document.getElementById('tab-register');
 
@@ -282,103 +193,158 @@ const AuthManager = (() => {
         return;
       }
 
-      let client = window.APP_STATE?.supabase;
-      if (!client && window.Store?.initSupabase) {
-        client = await window.Store.initSupabase();
-      }
-
+      const client = window.APP_STATE?.supabase;
       if (!client) {
         enableDemoButton();
-        _showAuthMsg(msgEl, 'Sin conexión al servidor. Usa el botón "Ver Demo" para continuar.', true);
+        _showAuthMsg(msgEl, 'Supabase no está listo todavía. Puedes entrar a Demo o reintentar.', true);
         return;
       }
 
       submitBtn.disabled = true;
       submitBtn.textContent = '⏳ Procesando…';
+      if (msgEl) msgEl.hidden = true;
 
       try {
         let result;
         if (isRegister) {
           result = await client.auth.signUp({ email, password: pass });
+          if (result.error) throw result.error;
+          if (result.data?.user && !result.data?.session) {
+            _showAuthMsg(msgEl, 'Cuenta creada. Revisa tu correo para confirmar.', false);
+            return;
+          }
         } else {
           result = await client.auth.signInWithPassword({ email, password: pass });
+          if (result.error) throw result.error;
         }
 
-        if (result.error) throw result.error;
-
-        currentUser = result.data?.user || result.data?.session?.user || null;
+        currentUser = result.data.user;
         window.APP_STATE.currentUser = currentUser;
         _showApp(currentUser);
-        _postLoginInit();
+        _injectWelcomeMessage();
+        window.Dashboard?.syncAndRender?.();
       } catch (err) {
-        _showAuthMsg(msgEl, err.message || 'No se pudo autenticar.', true);
+        const map = {
+          'Invalid login credentials': 'Correo o contraseña incorrectos.',
+          'Email not confirmed': 'Confirma tu correo antes de entrar.',
+          'User already registered': 'Ese correo ya tiene cuenta.'
+        };
+        _showAuthMsg(msgEl, map[err.message] || err.message, true);
       } finally {
         submitBtn.disabled = false;
         submitBtn.textContent = isRegister ? '✅ Crear Cuenta' : '🔐 Iniciar Sesión';
       }
     });
 
-    [emailInput, passInput].forEach(el => {
+    [emailInput, passInput].forEach(el =>
       el?.addEventListener('keydown', e => {
         if (e.key === 'Enter') submitBtn.click();
-      });
-    });
+      })
+    );
 
-    demoBtn?.addEventListener('click', e => {
+    demoBtn?.addEventListener('click', bypassToDemo);
+
+    const forgotBtn = document.getElementById('auth-forgot-password');
+    forgotBtn?.addEventListener('click', async (e) => {
       e.preventDefault();
-      e.stopPropagation();
-      _activateDemo();
+      const email = emailInput?.value?.trim();
+      if (!email) {
+        _showAuthMsg(msgEl, 'Ingresa tu correo para restablecer tu contraseña.', true);
+        return;
+      }
+      const client = window.APP_STATE?.supabase;
+      if (!client) {
+        _showAuthMsg(msgEl, 'Supabase no está disponible.', true);
+        return;
+      }
+      forgotBtn.textContent = '⏳ Enviando…';
+      try {
+        const { error } = await client.auth.resetPasswordForEmail(email, {
+          redirectTo: `${window.location.origin}/api/auth-callback?next=/`
+        });
+        if (error) throw error;
+        _showAuthMsg(msgEl, 'Correo de recuperación enviado. Revisa tu bandeja de entrada.', false);
+      } catch (err) {
+        _showAuthMsg(msgEl, err.message, true);
+      } finally {
+        forgotBtn.textContent = '¿Olvidaste tu contraseña?';
+      }
     });
 
-    enableDemoButton();
+    logoutBtn?.addEventListener('click', async () => {
+      try {
+        await window.APP_STATE?.supabase?.auth?.signOut();
+      } catch (_) {}
+      window.Store?.reset?.();
+      window.APP_STATE.currentUser = null;
+      window.APP_STATE.isDemo = false;
+      _showLogin();
+    });
+
+    const session = await window.APP_STATE?.supabase?.auth?.getSession?.().catch(() => null);
+    const user = session?.data?.session?.user || null;
+
+    if (user) {
+      currentUser = user;
+      window.APP_STATE.currentUser = user;
+      _showApp(user);
+      _injectWelcomeMessage();
+      window.Dashboard?.syncAndRender?.();
+    } else {
+      _showLogin();
+      enableDemoButton();
+    }
   }
 
-  async function init() {
-    _wireAuthForm();
-    _wireLogout();
-
-    let client = window.APP_STATE?.supabase;
-    if (!client && window.Store?.initSupabase) {
-      client = await window.Store.initSupabase();
-    }
-
-    if (!client) {
-      console.warn('[Auth] Supabase no disponible — habilitando Demo de emergencia.');
-      enableDemoButton();
-      _showLogin();
-      return;
-    }
-
+  async function isFirstLogin() {
+    const user = window.APP_STATE?.currentUser;
+    if (!user) return false;
+    if (user.user_metadata?.onboarding_completed === true) return false;
+    const client = window.APP_STATE?.supabase;
+    if (!client) return false;
     try {
-      const { data } = await client.auth.getSession();
-      const sessionUser = data?.session?.user || null;
-
-      if (sessionUser) {
-        currentUser = sessionUser;
-        window.APP_STATE.currentUser = currentUser;
-        _showApp(currentUser);
-        _postLoginInit();
-      } else {
-        _showLogin();
-      }
-
-      _subscribeAuthChanges(client);
-    } catch (e) {
-      console.warn('[Auth] getSession:', e.message);
-      enableDemoButton();
-      _showLogin();
+      const { data } = await client.from('fiscal_metrics').select('user_id').eq('user_id', user.id).maybeSingle();
+      return !data;
+    } catch {
+      return true;
     }
   }
 
-  function getUserId() {
-    return currentUser?.id || window.APP_STATE?.currentUser?.id || null;
+  async function upsertFiscalMetrics(metrics) {
+    const client = window.APP_STATE?.supabase;
+    const user = window.APP_STATE?.currentUser;
+    if (!client || !user) return;
+    const payload = {
+      user_id: user.id,
+      income_ytd: Number(metrics.incomeYTD || 0),
+      total_processed: Number(metrics.totalProcessed || 0),
+      avg_confidence: Number(metrics.avgConfidence || 0)
+    };
+    const { error } = await client.from('fiscal_metrics').upsert(payload, { onConflict: 'user_id' });
+    if (error) throw error;
+    window.Store?.setState({
+      incomeYTD: Number(metrics.incomeYTD || 0)
+    });
+  }
+
+  async function markOnboardingDone() {
+    const client = window.APP_STATE?.supabase;
+    const user = window.APP_STATE?.currentUser;
+    if (!client || !user) return;
+    try {
+      await client.auth.updateUser({ data: { onboarding_completed: true } });
+    } catch (e) {
+      console.warn('Error marking onboarding done:', e);
+    }
   }
 
   return {
     init,
     enableDemoButton,
     bypassToDemo,
-    getUserId,
+    isFirstLogin,
+    upsertFiscalMetrics,
+    markOnboardingDone
   };
 })();
 

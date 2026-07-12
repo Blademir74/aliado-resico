@@ -214,13 +214,21 @@ if (vigenciaEl && data.efirmaExpiry) {
       const uid = auth.user.id;
       const [metRes, convsRes] = await Promise.all([
         client.from('fiscal_metrics').select('income_ytd,total_processed,avg_confidence').eq('user_id', uid).maybeSingle(),
-        client.from('conversations').select('id,text,intent,confidence,created_at').eq('user_id', uid).order('created_at', { ascending: false }).limit(10),
+        client.from('conversations').select('id,message_text,intent,confidence,created_at').eq('user_id', uid).order('created_at', { ascending: false }).limit(10),
       ]);
       if (metRes.data) {
         renderIncomeMonitor(Number(metRes.data.income_ytd) || 0);
         renderKPIs({ totalProcessed: Number(metRes.data.total_processed) || 0, avgConfidence: Math.round((Number(metRes.data.avg_confidence) || 0)*100), autoResolutionRate:0, avgResponseTime:2.3 });
       }
-      if (convsRes.data) renderFeed(convsRes.data);
+      if (convsRes.data) {
+        renderFeed(convsRes.data.map(c => ({
+          id: c.id,
+          text: c.message_text || '',
+          intent: c.intent,
+          confidence: c.confidence,
+          created_at: c.created_at
+        })));
+      }
     } catch(err) { console.warn('[Dashboard] sync error:', err.message); }
   }
 

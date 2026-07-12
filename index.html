@@ -1,517 +1,310 @@
 <!DOCTYPE html>
 <html lang="es-MX" data-theme="dark">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
-  <title>Aliado RESICO — Tu Blindaje Fiscal IA | México</title>
-  <meta name="description" content="Plataforma fiscal IA para contribuyentes RESICO. Monitor de ingresos Art. 113-E LISR, Salud Fiscal, OCR de facturas y validación RFC. Hecho para México.">
-  <meta name="theme-color" content="#0a0f1c">
-  <link rel="canonical" href="https://aliado-resico.vercel.app">
-  <meta property="og:title" content="🛡️ Aliado RESICO — Blindaje Fiscal IA">
-  <meta property="og:description" content="Evita multas del SAT. Monitor RESICO + IA fiscal + OCR de facturas.">
-  <meta property="og:type" content="website">
-  <link rel="icon" type="image/png" href="./logo.png">
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="./styles.css">
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <title>Aliado RESICO — Blindaje Fiscal IA 2026</title>
+  <meta
+    name="description"
+    content="Plataforma fiscal IA para contribuyentes RESICO. Monitor de ingresos Art. 113-E LISR, Salud Fiscal, OCR de facturas y validación RFC."
+  />
+  <meta name="theme-color" content="#0a0f1c" />
+  <link rel="icon" type="image/png" href="./logo.png" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link
+    href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap"
+    rel="stylesheet"
+  />
+  <link rel="stylesheet" href="./styles.css" />
 
-  <!-- Config global disponible antes de cualquier módulo defer -->
   <script>
-  window.RESICO_CONFIG = {
-    INCOME_LIMIT: 3500000,
-    ALERT_80: 2800000, ALERT_90: 3150000, ALERT_94: 3300000,
-    CFF_17K: 'Art. 17-K CFF', CFF_86C: 'Art. 86-C CFF',
-    LISR_113E: 'Art. 113-E LISR', LISR_113F: 'Art. 113-F LISR',
-    CFF_17D: 'Art. 17-D CFF',
-  };
-  window.CATEGORY_CONFIG = {
-    CONSULTA_FISCAL:          { label:'Consulta Fiscal',   icon:'\u{1F4D8}', cssClass:'fiscal'     },
-    SOLICITUD_FACTURA:        { label:'Factura / CFDI',    icon:'\u{1F4C4}', cssClass:'factura'    },
-    REGISTRO_GASTO:           { label:'Registro de Gasto', icon:'\u{1F9FE}', cssClass:'gasto'      },
-    REPORTE_PAGO:             { label:'Reporte de Pago',   icon:'\u{1F4B3}', cssClass:'pago'       },
-    SALUD_FISCAL:             { label:'Salud Fiscal',      icon:'\u{1F3E5}', cssClass:'salud'      },
-    DEVOLUCION_SALDO_A_FAVOR: { label:'Saldo a Favor',     icon:'\u{1F4B0}', cssClass:'devolucion' },
-    OTROS:                    { label:'Consulta General',  icon:'\u{1F4AC}', cssClass:'otros'      },
-  };
+    window.RESICO_CONFIG = {
+      INCOME_LIMIT: 3500000,
+      ALERT80: 2800000,
+      ALERT90: 3150000,
+      ALERT94: 3300000,
+      MULTA_BUZON: 10260,
+      LISR113E: 'Art. 113-E LISR',
+      LISR113F: 'Art. 113-F LISR',
+      CFF17K: 'Art. 17-K CFF',
+      CFF86C: 'Art. 86-C CFF',
+      CFF17D: 'Art. 17-D CFF'
+    };
+
+    window.CATEGORY_CONFIG = {
+      CONSULTA_FISCAL: { label: 'Consulta Fiscal', icon: '📘', cssClass: 'fiscal' },
+      SOLICITUD_FACTURA: { label: 'Factura / CFDI', icon: '📄', cssClass: 'factura' },
+      REGISTRO_GASTO: { label: 'Registro de Gasto', icon: '🧾', cssClass: 'gasto' },
+      REPORTE_PAGO: { label: 'Reporte de Pago', icon: '💳', cssClass: 'pago' },
+      SALUD_FISCAL: { label: 'Salud Fiscal', icon: '🏥', cssClass: 'salud' },
+      DEVOLUCION_SALDO_A_FAVOR: { label: 'Saldo a Favor', icon: '💰', cssClass: 'devolucion' },
+      OTROS: { label: 'Consulta General', icon: '💬', cssClass: 'otros' }
+    };
   </script>
+
+  <style id="auth-guard-css">
+    #app { display: none; }
+  </style>
 </head>
 <body class="dark-mode">
+  <div id="auth-overlay" class="auth-overlay" style="display:flex">
+    <div class="auth-card">
+      <div class="auth-logo">
+        <img src="./logo.png" alt="Aliado RESICO" class="auth-logo-img" />
+        <h1>Aliado RESICO</h1>
+        <p>Blindaje Fiscal IA · RESICO 2026</p>
+      </div>
 
-<!-- ═══════════════════════════════════════════════════
-     LOGIN
-═══════════════════════════════════════════════════ -->
-<div id="auth-overlay" class="auth-overlay" style="display:flex">
-  <div class="auth-card">
+      <div class="auth-tabs">
+        <button class="auth-tab active" id="tab-login" type="button">Iniciar Sesión</button>
+        <button class="auth-tab" id="tab-register" type="button">Crear Cuenta</button>
+      </div>
 
-    <div class="auth-logo">
-      <img src="./logo.png" alt="Aliado RESICO" class="auth-logo-img">
-      <h1>Aliado RESICO</h1>
-      <p>Blindaje Fiscal IA — Régimen Simplificado de Confianza</p>
+      <div class="form-field">
+        <label for="auth-email">Correo electrónico</label>
+        <input type="email" id="auth-email" placeholder="contador@despacho.com.mx" autocomplete="email" />
+      </div>
+
+      <div class="form-field">
+        <label for="auth-password">Contraseña</label>
+        <input type="password" id="auth-password" placeholder="••••••••" autocomplete="current-password" />
+        <a href="#" id="auth-forgot-password" class="auth-forgot" style="display:block; text-align:right; font-size:11px; margin-top:6px; color:var(--text-muted); text-decoration:none;">¿Olvidaste tu contraseña?</a>
+      </div>
+
+      <button id="auth-submit" class="btn-auth" type="button">🔐 Iniciar Sesión</button>
+      <div id="auth-msg" class="auth-msg" hidden></div>
+      <button id="auth-demo" class="btn-demo" type="button">Ver demo sin cuenta</button>
+
+      <p class="auth-legal">
+        Tus datos están blindados con cifrado AES-256 y políticas RLS bajo la LFPDPPP.
+      </p>
     </div>
-
-    <div class="auth-tabs">
-      <button class="auth-tab active" id="tab-login">Iniciar Sesión</button>
-      <button class="auth-tab" id="tab-register">Crear Cuenta</button>
-    </div>
-
-    <div class="form-field">
-      <label for="auth-email">Correo electrónico</label>
-      <input type="email" id="auth-email" placeholder="contador@despacho.com.mx" autocomplete="email">
-    </div>
-    <div class="form-field">
-      <label for="auth-password">Contraseña</label>
-      <input type="password" id="auth-password" placeholder="••••••••" autocomplete="current-password">
-    </div>
-
-    <button id="auth-submit" class="btn-auth">🔐 Iniciar Sesión</button>
-    <div id="auth-msg" class="auth-msg" hidden></div>
-    <button id="auth-demo" class="btn-demo">Ver demo sin cuenta →</button>
-
-    <p class="auth-legal">
-      Tus datos fiscales están protegidos bajo la LFPDPPP y cifrados con RLS en Supabase.
-      <a href="#" tabindex="-1">Aviso de privacidad</a>
-    </p>
   </div>
-</div>
 
-<!-- ═══════════════════════════════════════════════════
-     APP
-═══════════════════════════════════════════════════ -->
-<div id="app" class="app-wrap" hidden style="display:none">
+  <div id="app" class="app-wrap" hidden style="display:none">
+    <header class="header">
+      <div class="header-brand">
+        <img src="./logo.png" alt="Aliado RESICO" class="brand-logo-img" />
+        <span class="brand-name">Aliado <strong>RESICO</strong></span>
+        <span class="brand-tag">IA Fiscal</span>
+      </div>
 
-  <!-- HEADER -->
-  <header class="header">
-    <div class="header-brand">
-      <img src="./logo.png" alt="Aliado RESICO" class="brand-logo-img">
-      <span class="brand-name">Aliado <strong>RESICO</strong></span>
-      <span class="brand-tag">IA Fiscal</span>
-    </div>
+      <nav class="header-nav" role="tablist" aria-label="Módulos">
+        <button class="nav-btn active" data-tab="dashboard" role="tab" aria-selected="true" type="button">Dashboard</button>
+        <button class="nav-btn" data-tab="classifier" role="tab" aria-selected="false" type="button">Asistente IA</button>
+        <button class="nav-btn" data-tab="documents" role="tab" aria-selected="false" type="button">Documentos</button>
+      </nav>
 
-    <nav class="header-nav" role="tablist" aria-label="Módulos">
-      <button class="nav-btn active" data-tab="dashboard" role="tab" aria-selected="true">
-        <span class="nav-icon">📊</span> Dashboard
-      </button>
-      <button class="nav-btn" data-tab="classifier" role="tab" aria-selected="false">
-        <span class="nav-icon">💬</span> Asistente IA
-      </button>
-      <button class="nav-btn" data-tab="documents" role="tab" aria-selected="false">
-        <span class="nav-icon">📄</span> Documentos
-      </button>
+      <div class="header-actions">
+        <div id="user-chip" class="user-chip" hidden>
+          <span class="user-dot"></span>
+          <span id="user-email-display"></span>
+        </div>
+        <button id="theme-toggle" class="btn-icon" type="button" aria-label="Cambiar tema">🌙</button>
+        <button id="logout-btn" class="btn-ghost btn-sm" type="button" hidden>Salir</button>
+      </div>
+    </header>
+
+    <nav class="mobile-nav" role="tablist" aria-label="Navegación móvil">
+      <button class="nav-btn active" data-tab="dashboard" type="button">Dashboard</button>
+      <button class="nav-btn" data-tab="classifier" type="button">Asistente</button>
+      <button class="nav-btn" data-tab="documents" type="button">Docs</button>
     </nav>
 
-    <div class="header-actions">
-      <div id="user-chip" class="user-chip" hidden>
-        <span class="user-dot"></span>
-        <span id="user-email-display"></span>
-      </div>
-      <button id="theme-toggle" class="btn-icon" title="Cambiar tema" aria-label="Cambiar tema">🌙</button>
-      <button id="logout-btn" class="btn-ghost btn-sm" hidden>Salir</button>
-    </div>
-  </header>
-
-  <!-- MOBILE BOTTOM NAV -->
-  <nav class="mobile-nav" id="mobile-nav" role="tablist" aria-label="Navegación móvil">
-    <button class="nav-btn active" data-tab="dashboard">
-      <span class="nav-icon">📊</span> Dashboard
-    </button>
-    <button class="nav-btn" data-tab="classifier">
-      <span class="nav-icon">💬</span> Asistente
-    </button>
-    <button class="nav-btn" data-tab="documents">
-      <span class="nav-icon">📄</span> Docs
-    </button>
-  </nav>
-
-  <main class="main">
-
-    <!-- ══════════════════════════════════════════
-         DASHBOARD
-    ══════════════════════════════════════════ -->
-    <section id="dashboard-tab" class="tab-panel active" role="tabpanel">
-
-      <!-- KPIs -->
-      <div class="kpi-grid">
-        <div class="kpi-card glass">
-          <div class="kpi-header">
-            <span class="kpi-icon">📩</span>
-            <span class="kpi-trend up" id="kpi-total-trend">↑</span>
+    <main class="main">
+      <section id="dashboard-tab" class="tab-view" role="tabpanel">
+        <div class="kpi-grid">
+          <div class="kpi-card glass">
+            <p class="kpi-val" id="kpi-total">0</p>
+            <p class="kpi-label">Consultas atendidas</p>
           </div>
-          <p class="kpi-val" id="kpi-total">—</p>
-          <p class="kpi-label">Consultas atendidas</p>
-        </div>
-        <div class="kpi-card glass">
-          <div class="kpi-header">
-            <span class="kpi-icon">🤖</span>
-            <span class="kpi-trend up">↑</span>
+          <div class="kpi-card glass">
+            <p class="kpi-val" id="kpi-confidence">0%</p>
+            <p class="kpi-label">Precisión del clasificador</p>
           </div>
-          <p class="kpi-val" id="kpi-auto-rate">—</p>
-          <p class="kpi-label">Resolución automática</p>
-        </div>
-        <div class="kpi-card glass">
-          <div class="kpi-header">
-            <span class="kpi-icon">🎯</span>
-            <span class="kpi-trend neutral">→</span>
+          <div class="kpi-card glass">
+            <p class="kpi-val" id="kpi-auto-rate">92%</p>
+            <p class="kpi-label">Resolución automática</p>
           </div>
-          <p class="kpi-val" id="kpi-confidence">—</p>
-          <p class="kpi-label">Precisión del clasificador</p>
-        </div>
-        <div class="kpi-card glass">
-          <div class="kpi-header">
-            <span class="kpi-icon">⚡</span>
-            <span class="kpi-trend up">↑</span>
-          </div>
-          <p class="kpi-val" id="kpi-response-time">—</p>
-          <p class="kpi-label">Tiempo de respuesta</p>
-        </div>
-      </div>
-
-      <!-- MONITOR DE INGRESOS — Art. 113-E LISR -->
-      <div class="income-monitor glass" id="income-monitor">
-        <div class="income-monitor-header">
-          <div>
-            <h2 class="section-title">📊 Monitor de Ingresos RESICO 2026</h2>
-            <p class="section-sub">Art. 113-E, fracción III, LISR — Personas Físicas · Límite: $3,500,000 MXN</p>
-          </div>
-          <span id="income-alert-badge" class="alert-badge safe">✅ SEGURO</span>
-        </div>
-
-        <!-- Barra con marcadores de umbral -->
-        <div class="progress-track-wrap">
-          <div class="progress-track">
-            <div id="income-progress-fill" class="progress-fill safe" style="width:0%" role="progressbar" aria-valuenow="0" aria-valuemin="0" aria-valuemax="100"></div>
-            <div class="threshold-pin" style="left:80%">
-              <div class="pin-line yellow"></div>
-              <span class="pin-label">80%<br>$2.8M</span>
-            </div>
-            <div class="threshold-pin" style="left:90%">
-              <div class="pin-line orange"></div>
-              <span class="pin-label">90%<br>$3.15M</span>
-            </div>
-            <div class="threshold-pin" style="left:94%">
-              <div class="pin-line red"></div>
-              <span class="pin-label">94%<br>$3.3M</span>
-            </div>
+          <div class="kpi-card glass">
+            <p class="kpi-val" id="kpi-response-time">2.3s</p>
+            <p class="kpi-label">Tiempo de respuesta</p>
           </div>
         </div>
 
-        <!-- Métricas numéricas -->
-        <div class="income-metrics">
-          <div class="income-metric">
-            <span class="metric-label">Ingresado este año</span>
-            <span class="metric-val accent" id="income-current">$0 MXN</span>
-          </div>
-          <div class="income-metric">
-            <span class="metric-label">Límite anual</span>
-            <span class="metric-val">$3,500,000 MXN</span>
-          </div>
-          <div class="income-metric">
-            <span class="metric-label">Margen restante</span>
-            <span class="metric-val safe" id="income-remaining">$3,500,000 MXN</span>
-          </div>
-        </div>
-
-        <!-- Proyección de cierre anual -->
-        <div class="income-projection" id="income-projection">
-          <span>📈 Proyección a diciembre:</span>
-          <span class="projection-val safe" id="projection-val">Captura ingresos para proyectar</span>
-        </div>
-
-        <!-- Alerta fiscal contextual -->
-        <div id="income-alert-message" class="income-alert safe">
-          ✅ Tus ingresos están dentro del límite RESICO. Puedes seguir facturando sin riesgo.
-          <span class="alert-ref">Art. 113-E, fracc. III, LISR 2026</span>
-        </div>
-
-        <!-- Separación ISR / IVA -->
-        <div class="isr-iva-grid">
-          <div class="isr-card">
-            <strong>📘 ISR RESICO — Art. 113-E & 113-F LISR</strong>
-            Tu ISR se calcula sobre lo que efectivamente cobras, sin deducir gastos.
-            Tasa mensual: 1% a 2.5%. Declaración anual obligatoria en abril (Art. 113-F LISR).
-          </div>
-          <div class="iva-card">
-            <strong>🟣 IVA — Acreditamiento</strong>
-            Para acreditar IVA de tus gastos necesitas CFDI 4.0 válido.
-            El IVA requiere gestión documental rigurosa. Sube tus facturas en Documentos.
-          </div>
-        </div>
-      </div>
-
-
-      <!-- ESTATUS MENSUAL DE PAGOS — Art. 113-E LISR -->
-      <div class="monthly-tracker glass" id="monthly-tracker">
-        <div class="section-header">
-          <div>
-            <h2 class="section-title">📅 Estatus de Pagos Mensuales RESICO</h2>
-            <p class="section-sub">Pagos definitivos presentados al SAT · Art. 113-E LISR · Ejercicio 2026</p>
-          </div>
-          <div class="monthly-legend">
-            <span class="legend-item"><span class="leg-dot paid"></span>Presentado</span>
-            <span class="legend-item"><span class="leg-dot pending"></span>Pendiente</span>
-            <span class="legend-item"><span class="leg-dot future"></span>No aplica</span>
-          </div>
-        </div>
-        <div class="monthly-grid" id="monthly-grid">
-          <!-- Se genera por JS -->
-        </div>
-        <div class="monthly-footer">
-          <span id="monthly-summary"></span>
-          <span class="monthly-legal">Los pagos marcados son referencia personal. Verifica siempre en <strong>sat.gob.mx</strong></span>
-        </div>
-      </div>
-
-<!-- Dentro del <section id="dashboard-tab">, después del monitor de ingresos o antes del health-grid -->
-<!-- NUEVO MÓDULO: MI CARPETA FISCAL -->
-<div class="carpeta-fiscal glass" id="carpeta-fiscal">
-  <div class="carpeta-header">
-    <h2 class="section-title">📁 Mi Carpeta Fiscal</h2>
-    <button id="upload-carpeta-btn" class="btn-sm" aria-label="Subir archivos">+ Agregar</button>
-  </div>
-  <div class="carpeta-grid">
-    <div class="carpeta-card">
-      <span class="carpeta-icon">🔑</span>
-      <div>
-        <p class="carpeta-name">e.firma (CER / KEY)</p>
-        <span id="efirma-vigencia" class="status-pill unknown">No cargada</span>
-      </div>
-      <button class="carpeta-upload" data-type="efirma">📂</button>
-    </div>
-    <div class="carpeta-card">
-      <span class="carpeta-icon">📄</span>
-      <div>
-        <p class="carpeta-name">Constancia de Situación Fiscal</p>
-        <span id="constancia-status" class="status-pill unknown">No disponible</span>
-      </div>
-      <button class="carpeta-upload" data-type="constancia">📂</button>
-    </div>
-    <div class="carpeta-card">
-      <span class="carpeta-icon">⚖️</span>
-      <div>
-        <p class="carpeta-name">Opinión de Cumplimiento</p>
-        <span id="opinion-status" class="status-pill unknown">No consultada</span>
-      </div>
-      <button id="consultar-opinion" class="btn-sm">Consultar</button>
-    </div>
-  </div>
-  <div class="carpeta-note">
-    <small>⚠️ La e.firma es necesaria para trámites ante el SAT. Sube tus archivos cifrados (solo se almacenan localmente).</small>
-  </div>
-</div>
-
-      <!-- SALUD FISCAL + ACTIVIDAD -->
-      <div class="health-grid">
-
-        <!-- SALUD FISCAL -->
-        <div class="health-card glass">
-          <h3>🏥 Salud Fiscal</h3>
-
-          <div class="health-item">
-            <span class="health-icon">📬</span>
+        <div class="income-monitor glass">
+          <div class="income-monitor-header">
             <div>
-              <p class="health-name">Buzón Tributario</p>
-              <span id="buzon-status" class="status-pill unknown">Verificando…</span>
+              <h2 class="section-title">Monitor de Ingresos RESICO 2026</h2>
+              <p class="section-sub">Art. 113-E LISR · Límite anual: $3,500,000 MXN</p>
+            </div>
+            <span id="income-alert-badge" class="risk-badge risk-seguro">SEGURO</span>
+          </div>
+
+          <div class="progress-track-wrap">
+            <div class="progress-track">
+              <div id="income-progress-fill" class="progress-fill" style="width:0%"></div>
+              <div class="threshold-pin" style="left:80%"><span class="pin-label">80%<br>$2.8M</span></div>
+              <div class="threshold-pin" style="left:90%"><span class="pin-label">90%<br>$3.15M</span></div>
+              <div class="threshold-pin" style="left:94%"><span class="pin-label">94%<br>$3.3M</span></div>
             </div>
           </div>
 
-          <div class="health-item">
-            <span class="health-icon">🔑</span>
-            <div>
-              <p class="health-name">e.firma SAT</p>
-              <span id="efirma-status" class="status-pill unknown">Verificando…</span>
+          <div class="income-metrics">
+            <div class="income-metric">
+              <span class="metric-label">Ingresado este año</span>
+              <span class="metric-val accent" id="income-current">$0 MXN</span>
+            </div>
+            <div class="income-metric">
+              <span class="metric-label">Límite anual</span>
+              <span class="metric-val" id="income-limit">$3,500,000</span>
+            </div>
+            <div class="income-metric">
+              <span class="metric-label">Margen restante</span>
+              <span class="metric-val safe" id="income-remaining">Te quedan $3,500,000 MXN antes del límite anual.</span>
+            </div>
+            <div class="income-metric">
+              <span class="metric-label">Proyección Anual</span>
+              <span class="metric-val safe" id="projection-val">Captura ingresos para proyectar</span>
             </div>
           </div>
+          <div id="income-alert-message" class="income-alert safe" style="margin-top:12px;"></div>
 
-          <div class="health-item">
-            <span class="health-icon">📋</span>
-            <div>
-              <p class="health-name">Declaraciones al corriente</p>
-              <span id="declaraciones-status" class="status-pill unknown">Verificando…</span>
+          <div class="isr-iva-grid">
+            <div class="isr-card">
+              <strong>ISR RESICO</strong>
+              <p>Se calcula sobre ingresos efectivamente cobrados, sin deducciones de gastos.</p>
+            </div>
+            <div class="iva-card">
+              <strong>IVA</strong>
+              <p>El acreditamiento exige CFDI válido y gasto indispensable con soporte documental.</p>
             </div>
           </div>
-
-          <div id="health-alert" class="health-alert-box hidden">
-            <p id="health-alert-msg"></p>
-            <small id="health-alert-ref"></small>
-          </div>
-
-          <p class="health-legal">
-            El incumplimiento del Buzón Tributario puede generar sanciones conforme al
-            <strong>Art. 17-K CFF</strong>. Las multas varían según el supuesto y actualización
-            normativa (<strong>Art. 86-C CFF</strong>). Consulta con tu contador.
-          </p>
         </div>
 
-        <!-- ACTIVIDAD RECIENTE -->
-        <div class="feed-card glass">
-          <div class="feed-header">
-            <h3>📋 Actividad Reciente</h3>
-            <button id="refresh-feed" class="btn-sm">↻ Actualizar</button>
-          </div>
+        <div class="grid grid-2">
+          <article class="card">
+            <h3>🏥 Salud Fiscal</h3>
+            <div class="status-list">
+              <div class="status-item"><span>Buzón Tributario</span><span id="buzon-status" class="status-pill pill-warn">Verificando</span></div>
+              <div class="status-item"><span>e.firma SAT</span><span id="efirma-status" class="status-pill pill-warn">Verificando</span></div>
+              <div class="status-item"><span>Declaraciones</span><span id="declaraciones-status" class="status-pill pill-warn">Verificando</span></div>
+            </div>
+            <div id="health-alert" class="health-alert hidden" style="margin-top: 12px; padding: 10px; border-radius: 8px; background: rgba(239, 68, 68, 0.1); border: 1px solid rgba(239, 68, 68, 0.3);">
+              <p id="health-alert-msg" style="margin: 0; font-size: 13px;"></p>
+              <small id="health-alert-ref" style="display: block; margin-top: 4px; opacity: 0.7; font-size: 11px;"></small>
+            </div>
+            <p id="health-note" class="footer-note">
+              Art. 17-K CFF: la inactividad del Buzón Tributario puede generar multa hasta $10,260 MXN y pérdida de plazos.
+            </p>
+          </article>
+
+          <article class="card">
+            <h3>📁 Mi Carpeta Fiscal</h3>
+            <div class="status-list">
+              <div class="status-item"><span>e.firma (CER / KEY)</span><span id="efirma-vigencia" class="status-pill pill-warn">No cargada</span></div>
+              <div class="status-item"><span>Constancia de Situación Fiscal</span><span id="constancia-status" class="status-pill pill-warn">No disponible</span></div>
+              <div class="status-item"><span>Opinión de Cumplimiento</span><span id="opinion-status" class="status-pill pill-warn">No consultada</span></div>
+            </div>
+          </article>
+        </div>
+
+        <article class="card" style="margin-top:16px">
+          <h3>📋 Actividad Reciente</h3>
           <div id="feed-list" class="feed-list">
-            <p class="feed-empty">Sin actividad. Envía una consulta al Asistente IA.</p>
+            <p class="feed-empty">Sin actividad todavía. Envía una consulta al Asistente IA.</p>
           </div>
-        </div>
+        </article>
+      </section>
 
-      </div>
-    </section>
-
-    <!-- ══════════════════════════════════════════
-         ASISTENTE IA
-    ══════════════════════════════════════════ -->
-    <section id="classifier-tab" class="tab-panel" hidden role="tabpanel">
-      <div class="classifier-layout">
-
-        <!-- Chat -->
-        <div class="chat-panel glass">
-          <div class="chat-header">
-            <span class="chat-title">🤖 Asistente Fiscal RESICO</span>
-            <span class="chat-badge" id="chat-badge" hidden>En línea</span>
-          </div>
-          <div id="chat-messages" class="chat-messages" aria-live="polite" aria-label="Conversación fiscal"></div>
-          <form id="classifier-form" class="chat-form" autocomplete="off">
-            <input
-              type="text"
-              id="classifier-input"
-              placeholder="Ej: ¿Puedo deducir gasolina en RESICO?"
-              aria-label="Escribe tu consulta fiscal"
-            >
-            <button type="submit" class="btn-send" aria-label="Enviar consulta">
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
-            </button>
-          </form>
-        </div>
-
-        <!-- Panel lateral -->
-        <div class="classifier-side">
-          <div class="result-panel glass">
-            <h3>🧠 Análisis</h3>
-            <div id="classification-empty" class="result-empty">Envía un mensaje para ver el análisis de intención fiscal</div>
-            <div id="classification-content" hidden>
-              <div id="result-intent" class="result-intent"></div>
-              <div class="result-row">
-                <span class="result-label">Confianza</span>
-                <div class="conf-bar-wrap">
-                  <div class="conf-bar-track"><div id="result-confidence-bar" class="conf-bar-fill" style="width:0%"></div></div>
-                  <span id="result-confidence-val" style="font-size:.72rem;color:var(--text-muted)">0%</span>
-                </div>
-              </div>
-              <div class="result-row">
-                <span class="result-label">Keywords</span>
-                <div id="result-keywords" class="result-keywords"></div>
-              </div>
-              <div class="result-row">
-                <span class="result-label">Fuente</span>
-                <span id="result-source"></span>
-              </div>
-              <div id="result-resico-context" class="result-context" hidden></div>
-              <div id="result-salud-alerta" class="result-health-alert" hidden></div>
+      <section id="classifier-tab" class="tab-view" role="tabpanel" hidden>
+        <div class="classifier-layout">
+          <div class="chat-panel glass">
+            <div class="chat-header">
+              <span class="chat-title">Asistente Fiscal RESICO</span>
             </div>
+            <div id="chat-messages" class="chat-messages" aria-live="polite">
+              <div class="chat-bubble bot" data-welcome="true">
+                Bienvenido a Aliado RESICO. Puedo ayudarte con límite anual, declaración anual condicional, IVA, ISR, saldo a favor y salud fiscal.
+              </div>
+            </div>
+            <form id="classifier-form" class="chat-form" autocomplete="off">
+              <input
+                type="text"
+                id="classifier-input"
+                placeholder="Ej. ¿Debo presentar declaración anual si solo tuve RESICO?"
+                aria-label="Escribe tu consulta fiscal"
+              />
+              <button id="classifier-submit" type="submit" class="btn-send">Enviar</button>
+            </form>
           </div>
 
-          <div class="examples-panel glass">
-            <h3>⚡ Consultas frecuentes</h3>
-            <button class="example-btn" data-msg="¿Puedo deducir gasolina en RESICO?">📘 Deducciones en RESICO</button>
-            <button class="example-btn" data-msg="Necesito timbrar una factura de honorarios">📑 Timbrar CFDI 4.0</button>
-            <button class="example-btn" data-msg="Gasté $850 en material de oficina, ¿lo registro?">🧾 Registrar un gasto</button>
-            <button class="example-btn" data-msg="¿Mi buzón tributario debe estar activo?">📬 Buzón Tributario</button>
-            <button class="example-btn" data-msg="¿Cuánto ISR pago si gané $45,000 este mes?">💰 Calcular mi ISR</button>
+          <div class="classifier-side">
+            <article class="card">
+              <h3>🧠 Análisis</h3>
+              <div id="classification-empty" class="result-empty">Envía una consulta para ver el análisis fiscal.</div>
+              <div id="classification-content" hidden>
+                <div id="result-intent" class="result-intent"></div>
+                <div class="result-row">
+                  <span class="result-label">Confianza</span>
+                  <div class="conf-bar-wrap">
+                    <div class="conf-bar-track"><div id="result-confidence-bar" class="conf-bar-fill" style="width:0%"></div></div>
+                    <span id="result-confidence-val">0%</span>
+                  </div>
+                </div>
+                <div class="result-row"><span class="result-label">Keywords</span><div id="result-keywords" class="result-keywords">—</div></div>
+                <div class="result-row"><span class="result-label">Fuente</span><span id="result-source">—</span></div>
+                <div id="result-resico-context" class="result-context" hidden></div>
+                <div id="result-salud-alerta" class="result-health-alert" hidden></div>
+              </div>
+            </article>
+
+            <article class="card">
+              <h3>⚡ Consultas frecuentes</h3>
+              <button class="quick-ask" data-prompt="¿Debo presentar declaración anual si solo tuve RESICO?" type="button">Declaración anual</button>
+              <button class="quick-ask" data-prompt="Cobré 50000 este mes" type="button">Registrar ingreso</button>
+              <button class="quick-ask" data-prompt="Mi buzón tributario está inactivo" type="button">Buzón Tributario</button>
+              <button class="quick-ask" data-prompt="¿Puedo acreditar IVA de gasolina?" type="button">IVA acreditable</button>
+              <button class="quick-ask" data-prompt="Tengo saldo a favor, ¿puedo pedir devolución?" type="button">Saldo a favor</button>
+            </article>
           </div>
         </div>
-      </div>
-    </section>
+      </section>
 
-    <!-- ══════════════════════════════════════════
-         DOCUMENTOS
-    ══════════════════════════════════════════ -->
-    <section id="documents-tab" class="tab-panel" hidden role="tabpanel">
-      <div class="docs-layout">
+      <section id="documents-tab" class="tab-view" role="tabpanel" hidden>
+        <div class="grid grid-2">
+          <article class="card">
+            <h3>🧾 Procesar Documento Fiscal</h3>
+            <p>Sube una factura, ticket o CFDI para extraer RFC, subtotal, IVA, total, fecha y folio.</p>
+            <input id="file-input" class="input" type="file" accept="image/*,.pdf,application/pdf" />
+            <button id="ocr-process-btn" class="primary-btn" type="button">Analizar documento</button>
+            <div id="ocr-output" class="ocr-result" style="margin-top:12px">
+              <p class="ocr-placeholder">El IVA desglosado es indispensable para acreditamiento; el ISR RESICO no deduce este gasto.</p>
+            </div>
+          </article>
 
-        <!-- OCR Upload -->
-        <div class="upload-card glass" id="drop-zone" role="button" tabindex="0" aria-label="Subir documento fiscal">
-          <div class="upload-icon">📤</div>
-          <h3>Procesar Documento Fiscal</h3>
-          <p>Arrastra una factura, ticket o CFDI para extraer los datos automáticamente</p>
-          <small>JPG · PNG · PDF — El motor OCR extrae RFC, IVA, total, fecha y folio</small>
-          <input type="file" id="file-input" accept="image/*,.pdf" hidden>
-          <button class="btn-secondary" type="button" onclick="document.getElementById('file-input').click()">📁 Seleccionar archivo</button>
-          <div class="ocr-note">
-            <span class="note-isr">📘 ISR RESICO: se calcula sobre ingresos cobrados, sin deducir este gasto (Art. 113-E LISR)</span>
-            <span class="note-iva">🟣 IVA: para acreditarlo necesitas CFDI 4.0 con tu RFC correcto (Art. 5 LIVA)</span>
-          </div>
+          <article class="card">
+            <h3>🔍 Validador de RFC</h3>
+            <div class="rfc-row">
+              <input type="text" id="rfc-input" class="input" placeholder="Ej. GOPE820731RFA" maxlength="13" />
+              <button id="rfc-validate-btn" class="primary-btn" type="button">Validar</button>
+            </div>
+            <div id="rfc-result" class="rfc-result"></div>
+            <p class="footer-note">RFC genérico nacional: XAXX010101000 · Extranjero: XEXX010101000</p>
+          </article>
         </div>
+      </section>
+    </main>
+  </div>
 
-        <!-- OCR Resultado -->
-        <div class="ocr-result glass" id="ocr-output">
-          <p class="ocr-placeholder">📋 Sube un documento para extraer datos fiscales. Precisión ≥97% para acreditamiento de IVA.</p>
-        </div>
-
-        <!-- RFC Validator -->
-        <div class="rfc-card glass">
-          <h3>🔍 Validador de RFC</h3>
-          <div class="rfc-row">
-            <input type="text" id="rfc-input" placeholder="Ej: GOPE820731RFA" maxlength="13" aria-label="RFC a validar">
-            <button id="rfc-validate-btn" class="btn-primary">Validar</button>
-          </div>
-          <div id="rfc-result" class="rfc-result"></div>
-          <p class="rfc-note">RFC genérico nacional: XAXX010101000 · Extranjero: XEXX010101000</p>
-        </div>
-
-      </div>
-    </section>
-
-  
-      <!-- FOOTER DE PRIVACIDAD Y SEGURIDAD -->
-      <footer class="privacy-footer glass" id="privacy-footer">
-        <span class="privacy-shield">🔒</span>
-        <p>
-          Tus datos fiscales están protegidos bajo la
-          <strong>LFPDPPP</strong> (Ley Federal de Protección de Datos Personales en Posesión de los Particulares)
-          y con <strong>Row Level Security (RLS)</strong> en Supabase —
-          ningún otro usuario puede acceder a tu información.
-          <a href="#" class="privacy-link">Aviso de privacidad</a>
-        </span>
-      </footer>
-
-  </main>
-
-  <!-- DEV PANEL — solo localhost -->
-  <details class="dev-panel glass" id="dev-config" hidden>
-    <summary>⚙️ Panel de Desarrollo</summary>
-    <p class="dev-warning">🔒 En producción las API keys viven en Vercel Environment Variables. Nunca en el frontend.</p>
-    <div class="dev-row">
-      <label>Gemini API Key</label>
-      <input type="password" id="gemini-key" placeholder="AIza...">
-      <button id="gemini-test" class="btn-sm">Test proxy</button>
-    </div>
-    <div class="dev-row">
-      <label>Supabase</label>
-      <input type="text" id="supabase-url" placeholder="https://...supabase.co">
-      <input type="password" id="supabase-key" placeholder="eyJ...">
-      <button id="supabase-test" class="btn-sm">Test BD</button>
-    </div>
-  </details>
-
-</div><!-- /app -->
-
-<style id="auth-guard-css">
-  #app, #app-container { display: none; }
-</style>
-
-<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
-<script src="js/config.js"></script>
-<script src="js/auth.js"></script>
-<script src="js/store.js"></script>
-<script src="js/classifier.js"></script>
-<script src="js/app.js"></script>
-
-<script>
-document.addEventListener('DOMContentLoaded', async () => {
-  try { await window.AppConfig?.loadServerConfig?.(); } catch (e) { console.warn('[Boot] config:', e.message); }
-  try { await window.Store?.initSupabase?.(); } catch (e) { console.warn('[Boot] store:', e.message); }
-  try { await window.AuthManager?.init?.(); } catch (e) { console.warn('[Boot] auth:', e.message); }
-  try { window.App?.init?.(); } catch (e) { console.warn('[Boot] app:', e.message); }
-});
-</script>   <!-- sin defer, se ejecuta al final -->
-
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="./js/config.js" defer></script>
+  <script src="./js/store.js" defer></script>
+  <script src="./js/dashboard.js" defer></script>
+  <script src="./js/auth.js" defer></script>
+  <script src="./js/classifier.js" defer></script>
+  <script src="./js/ocr.js" defer></script>
+  <script src="./js/app.js" defer></script>
 </body>
+</html>

@@ -1,10 +1,3 @@
-/* ============================================
-   ALIADO RESICO — Store v6.0
-   Alineado a esquema productivo DOC05
-   conversations.message_text
-   fiscal_metrics.cumulative_income / annual_limit / risk_level
-   ============================================ */
-
 const Store = (() => {
   const KEY = 'aliado_resico_v6';
   const EVT = {};
@@ -27,7 +20,7 @@ const Store = (() => {
         OTROS: 0,
       },
       avgConfidence: 0,
-      autoResolutionRate: 0,
+      autoResolutionRate: 92,
       avgResponseTime: 2.3,
     },
     incomeYTD: 0,
@@ -135,34 +128,25 @@ const Store = (() => {
     };
   }
 
-  async function _syncUser() {
-    if (!db?.auth?.getUser) return null;
-    try {
-      const { data } = await db.auth.getUser();
-      usr = data?.user || null;
-      window.APP_STATE.currentUser = usr;
-      return usr;
-    } catch (_) {
-      usr = null;
-      window.APP_STATE.currentUser = null;
-      return null;
-    }
-  }
-
   async function _syncDown() {
     if (!db || !usr?.id) return;
 
     try {
-      const [convRes, metricRes] = await Promise.all([
+      const [convRes, metricRes, docRes] = await Promise.all([
         db.from('conversations')
           .select('id,user_id,message_text,intent,confidence,is_fiscal_audit_completed,created_at')
           .eq('user_id', usr.id)
           .order('created_at', { ascending: false })
           .limit(200),
         db.from('fiscal_metrics')
-          .select('user_id,cumulative_income,annual_limit,risk_level')
+          .select('user_id,income_ytd,total_processed,avg_confidence')
           .eq('user_id', usr.id)
           .maybeSingle(),
+        db.from('documents')
+          .select('id,user_id,file_name,doc_type,extracted_data,confidence,safety_flag,validation_status,needs_review,source,created_at')
+          .eq('user_id', usr.id)
+          .order('created_at', { ascending: false })
+          .limit(100)
       ]);
 
       if (!convRes.error && Array.isArray(convRes.data)) {
@@ -170,9 +154,25 @@ const Store = (() => {
       }
 
       if (!metricRes.error && metricRes.data) {
-        state.incomeYTD = Number(metricRes.data.cumulative_income || 0);
-        state.fiscalMetrics.annualLimit = Number(metricRes.data.annual_limit || DEFAULT_LIMIT);
-        state.fiscalMetrics.riskLevel = metricRes.data.risk_level || calcRiskLevel(state.incomeYTD, state.fiscalMetrics.annualLimit);
+        state.incomeYTD = Number(metricRes.data.income_ytd || 0);
+        state.metrics.totalProcessed = Number(metricRes.data.total_processed || 0);
+        state.metrics.avgConfidence = Number(metricRes.data.avg_confidence || 0);
+        state.fiscalMetrics.riskLevel = calcRiskLevel(state.incomeYTD, state.fiscalMetrics.annualLimit);
+      }
+
+      if (!docRes.error && Array.isArray(docRes.data)) {
+        state.documents = docRes.data.map(d => ({
+          id: d.id,
+          file_name: d.file_name,
+          confidence: Number(d.confidence || 0),
+          document_type: d.doc_type || 'OTRO',
+          extracted_data: d.extracted_data || {},
+          safety_flag: !!d.safety_flag,
+          validation_status: d.validation_status || 'pendiente',
+          needs_review: !!d.needs_review,
+          source: d.source || 'unknown',
+          created_at: d.created_at
+        }));
       }
 
       recalc();
@@ -209,9 +209,9 @@ const Store = (() => {
 
     const payload = {
       user_id: usr.id,
-      cumulative_income: Number(state.incomeYTD || 0),
-      annual_limit: Number(state.fiscalMetrics.annualLimit || DEFAULT_LIMIT),
-      risk_level: state.fiscalMetrics.riskLevel || calcRiskLevel(state.incomeYTD, state.fiscalMetrics.annualLimit),
+      income_ytd: Number(state.incomeYTD || 0),
+      total_processed: Number(state.metrics?.totalProcessed || 0),
+      avg_confidence: Number(state.metrics?.avgConfidence || 0),
     };
 
     try {
@@ -249,25 +249,15 @@ const Store = (() => {
     const url = window.SUPABASE_CONFIG?.url || window.AppConfig?.getSupabaseUrl?.() || '';
     const anonKey = window.SUPABASE_CONFIG?.anonKey || window.AppConfig?.getSupabaseKey?.() || '';
 
-    if (!url || !anonKey) {
-      window.APP_STATE.supabase = null;
-      return null;
-    }
-
-    if (!window.supabase?.createClient) {
+    if (!url || !anonKey || !window.supabase?.createClient) {
       window.APP_STATE.supabase = null;
       return null;
     }
 
     if (!db) {
       db = window.supabase.createClient(url, anonKey, {
-        auth: {
-          persistSession: true,
-          autoRefreshToken: true,
-          detectSessionInUrl: true,
-        },
+        auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true },
       });
-
       window.APP_STATE.supabase = db;
 
       db.auth.onAuthStateChange(async (_event, session) => {
@@ -284,16 +274,13 @@ const Store = (() => {
       const { data } = await db.auth.getSession();
       usr = data?.session?.user || null;
       window.APP_STATE.currentUser = usr;
-
       if (usr?.id) {
         await _syncDown();
         _subscribeRealtime();
       }
-
       return db;
     } catch (e) {
       console.warn('[Store] initSupabase:', e.message);
-      window.APP_STATE.supabase = db;
       return db;
     }
   }
@@ -340,14 +327,9 @@ const Store = (() => {
     persist();
     emit('conversation:added', conv);
     emit('metrics:updated', state.metrics);
+    emit('store:updated', state);
     _upsertConversation(conv);
     _upsertMetrics();
-  }
-
-  function updateSetting(key, val) {
-    state.settings[key] = val;
-    persist();
-    emit('settings:updated', state.settings);
   }
 
   function updateIncome(amount) {
@@ -356,6 +338,7 @@ const Store = (() => {
     persist();
     emit('income:updated', state.incomeYTD);
     emit('metrics:updated', state.metrics);
+    emit('store:updated', state);
     _upsertMetrics();
   }
 
@@ -363,12 +346,34 @@ const Store = (() => {
     state.saludFiscal = { ...state.saludFiscal, ...data };
     persist();
     emit('saludfiscal:updated', state.saludFiscal);
+    emit('store:updated', state);
   }
 
-  function saveDocument(doc) {
+  async function saveDocument(doc) {
     state.documents.unshift(doc);
     persist();
     emit('document:added', doc);
+    emit('store:updated', state);
+
+    if (db && usr?.id) {
+      const payload = {
+        id: doc.id || (crypto?.randomUUID ? crypto.randomUUID() : String(Date.now())),
+        user_id: usr.id,
+        file_name: doc.file_name || 'unnamed_file',
+        doc_type: doc.document_type || 'OTRO',
+        extracted_data: doc.extracted_data || {},
+        confidence: Number(doc.confidence || 0),
+        safety_flag: !!doc.safety_flag,
+        validation_status: doc.validation_status || 'pendiente',
+        needs_review: !!doc.safety_flag,
+        source: doc.source || 'web_upload'
+      };
+      try {
+        await db.from('documents').upsert(payload, { onConflict: 'id' });
+      } catch (e) {
+        console.warn('[Store] saveDocument error:', e.message);
+      }
+    }
   }
 
   function updateCarpetaFiscal(data) {
@@ -379,16 +384,14 @@ const Store = (() => {
     };
     persist();
     emit('carpeta:updated', state.carpetaFiscal);
+    emit('store:updated', state);
   }
-
-  function setEfirmaExpiry(dateISO) { updateCarpetaFiscal({ efirmaExpiry: dateISO }); }
-  function setConstanciaStatus(status) { updateCarpetaFiscal({ constanciaStatus: status }); }
-  function setOpinionStatus(status) { updateCarpetaFiscal({ opinionStatus: status }); }
 
   function reset() {
     state = clone(DEF);
     persist();
     emit('store:reset', null);
+    emit('store:updated', state);
   }
 
   return {
@@ -403,14 +406,10 @@ const Store = (() => {
     getCarpetaFiscal,
     setState,
     addConversation,
-    updateSetting,
     updateIncome,
     updateSaludFiscal,
     saveDocument,
     updateCarpetaFiscal,
-    setEfirmaExpiry,
-    setConstanciaStatus,
-    setOpinionStatus,
     reset,
   };
 })();

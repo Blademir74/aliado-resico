@@ -1,7 +1,23 @@
 {
   "version": 2,
+  "functions": {
+    "api/config.js": {
+      "runtime": "nodejs24.x"
+    },
+    "api/gemini-proxy.js": {
+      "runtime": "nodejs24.x"
+    },
+    "api/auth-callback.js": {
+      "runtime": "nodejs24.x"
+    },
+    "api/telegram-diagnostics.js": {
+      "runtime": "nodejs24.x"
+    }
+  },
   "rewrites": [
-    { "source": "/api/(.*)", "destination": "/api/$1.js" },
-    { "source": "/((?!api|styles\\.css|js|logo\\.png|favicon).*)", "destination": "/index.html" }
+    {
+      "source": "/((?!api/|js/|styles\\.css|logo\\.png|favicon\\.ico|foto\\.png).*)",
+      "destination": "/index.html"
+    }
   ]
 }

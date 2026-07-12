@@ -1,32 +1,20 @@
-/* ============================================
-   ALIADO RESICO — Configuration Manager
-   Producción: Variables de entorno vía Vercel
-   Desarrollo: Configuración manual en UI
-   ============================================ */
-
 const AppConfig = (() => {
-  const STORAGE_KEY = 'aliado_resico_config';
-
-  // =============================================
-  // ENVIRONMENT DETECTION
-  // En producción (Vercel), las keys vienen del servidor
-  // En desarrollo (localhost), se permite configuración manual
-  // =============================================
-  const IS_PRODUCTION = window.location.hostname !== 'localhost'
-    && window.location.hostname !== '127.0.0.1'
-    && !window.location.hostname.includes('192.168.');
-
-  // Config inyectada por el endpoint /api/config (producción)
-  let serverConfig = null;
-
-  // Config local (solo desarrollo)
-  let localConfig = {};
-
+  const STORAGE_KEY = 'aliado_resico_config_v1';
   const listeners = {};
+  const host = window.location.hostname || '';
+  const IS_PRODUCTION =
+    host !== 'localhost' &&
+    host !== '127.0.0.1' &&
+    !host.startsWith('192.168.') &&
+    !host.endsWith('.local');
 
-  // --- Event system ---
+  let serverConfig = null;
+  let localConfig = loadLocalConfig();
+
   function emit(event, data) {
-    (listeners[event] || []).forEach(fn => fn(data));
+    (listeners[event] || []).forEach(fn => {
+      try { fn(data); } catch (_) {}
+    });
   }
 
   function on(event, fn) {
@@ -34,293 +22,185 @@ const AppConfig = (() => {
     listeners[event].push(fn);
   }
 
-  // =============================================
-  // PRODUCTION: Fetch config from server
-  // Las API keys NUNCA llegan al frontend en producción
-  // =============================================
+  function loadLocalConfig() {
+    try {
+      const raw = localStorage.getItem(STORAGE_KEY);
+      return raw ? JSON.parse(raw) : {};
+    } catch {
+      return {};
+    }
+  }
+
+  function saveLocalConfig() {
+    if (IS_PRODUCTION) return;
+    try {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(localConfig));
+    } catch (_) {}
+  }
+
   async function loadServerConfig() {
     if (!IS_PRODUCTION) return false;
 
-    try {
-      const res = await fetch('/api/config', {
-        headers: { 'Content-Type': 'application/json' },
-        // Timeout de 5s para no bloquear el boot indefinidamente
-        signal: AbortSignal.timeout ? AbortSignal.timeout(5000) : undefined,
-      });
+    let controller = null;
+    let timeoutId = null;
 
-      // Error 500 en api/config = module.exports sin corregir a ESM
-      // Mensaje explícito para facilitar diagnóstico en consola
-      if (res.status === 500) {
-        console.error(
-          '%c[Config] ❌ api/config.js devolvió 500.\n' +
-          'Causa probable: module.exports en lugar de export default.\n' +
-          'Solución: reemplaza module.exports por export default en api/config.js',
-          'color:#ef4444;font-weight:bold'
-        );
-        return false;
+    try {
+      if (typeof AbortController !== 'undefined') {
+        controller = new AbortController();
+        timeoutId = window.setTimeout(() => controller.abort(), 5000);
       }
 
+      const res = await fetch('/api/config', {
+        method: 'GET',
+        headers: { 'Content-Type': 'application/json' },
+        signal: controller?.signal
+      });
+
       if (!res.ok) {
-        console.warn('[Config] Server config endpoint returned:', res.status);
+        console.warn('[Config] /api/config respondió con', res.status);
         return false;
       }
 
       const data = await res.json();
-      if (data.ok && data.config) {
-        serverConfig = data.config;
-        console.log(
-          '%c🔒 Modo Producción: Config cargada desde servidor — API keys seguras',
-          'color:#10b981;font-weight:bold'
-        );
-        emit('config:changed', { service: 'all', source: 'server' });
-        return true;
+      if (!data?.ok || !data?.config) {
+        console.warn('[Config] Respuesta inesperada de /api/config');
+        return false;
       }
 
-      console.warn('[Config] Respuesta inesperada de /api/config:', data);
-      return false;
+      serverConfig = data.config;
+      window.SUPABASE_CONFIG = {
+        url: serverConfig.supabaseUrl || '',
+        anonKey: serverConfig.supabaseAnonKey || ''
+      };
 
+      console.log(
+        '%c🔒 PRODUCCIÓN: Config cargada desde servidor. Gemini solo vía /api/gemini-proxy.',
+        'color:#10b981;font-weight:700'
+      );
+
+      emit('config:changed', getStatus());
+      return true;
     } catch (e) {
-      // AbortError = timeout — no es un error de código
-      if (e.name === 'AbortError') {
-        console.warn('[Config] /api/config tardó más de 5s — continuando en modo offline');
+      if (e?.name === 'AbortError') {
+        console.warn('[Config] /api/config tardó más de 5s; continuando en modo degradado');
       } else {
-        console.warn('[Config] Failed to load server config:', e.message);
+        console.warn('[Config] No se pudo cargar /api/config:', e?.message || e);
       }
       return false;
+    } finally {
+      if (timeoutId) clearTimeout(timeoutId);
     }
   }
 
-  // =============================================
-  // DEVELOPMENT: localStorage (solo local)
-  // =============================================
-  function loadLocalConfig() {
-    if (IS_PRODUCTION) return {};
-    try {
-      const raw = localStorage.getItem(STORAGE_KEY);
-      return raw ? JSON.parse(raw) : {};
-    } catch { return {}; }
-  }
-
-  function saveLocalConfig(config) {
-    if (IS_PRODUCTION) return; // Nunca guardar en localStorage en producción
-    try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(config));
-    } catch (e) {
-      console.warn('Config: save failed', e);
-    }
-  }
-
-  localConfig = loadLocalConfig();
-
-  // =============================================
-  // GETTERS — Resuelven según entorno
-  // Producción: servidor / Desarrollo: localStorage
-  // =============================================
-
-  // --- Gemini API ---
-  function getGeminiKey() {
-    // En producción, Gemini se accede vía proxy — NO se necesita la key en el frontend
-    if (IS_PRODUCTION) return null;
-    return localConfig.geminiKey || '';
-  }
-
-  function isGeminiConfigured() {
-    if (IS_PRODUCTION) {
-      return serverConfig?.geminiConfigured || false;
-    }
-    return !!localConfig.geminiKey;
-  }
-
-  function setGeminiKey(key) {
-    if (IS_PRODUCTION) {
-      console.warn('[Config] ⚠️ No se puede setear Gemini key en producción — use variables de entorno en Vercel');
-      return;
-    }
-    localConfig.geminiKey = key.trim();
-    saveLocalConfig(localConfig);
-    emit('config:changed', { service: 'gemini' });
-  }
-
-  // --- Gemini API — SIEMPRE via proxy (nunca directo desde browser) ---
-  function getGeminiEndpoint(model) {
-    return '/api/gemini-proxy';
-  }
-
-  // --- Supabase ---
-  // Orden de resolución:
-  // 1. window.ENV       — inyectado por Vercel o script inline en index.html
-  // 2. serverConfig     — respuesta de /api/config (fetch async del boot)
-  // 3. localConfig      — localStorage solo en desarrollo
-  // Si ninguno tiene valores, retorna '' y el boot cae a modo Demo sin excepciones
   function getSupabaseUrl() {
-    if (window.ENV?.SUPABASE_URL)                   return window.ENV.SUPABASE_URL;
-    if (IS_PRODUCTION && serverConfig?.supabaseUrl) return serverConfig.supabaseUrl;
+    if (window.ENV?.SUPABASE_URL) return window.ENV.SUPABASE_URL;
+    if (serverConfig?.supabaseUrl) return serverConfig.supabaseUrl;
     return localConfig.supabaseUrl || '';
   }
 
   function getSupabaseKey() {
-    if (window.ENV?.SUPABASE_ANON_KEY)                   return window.ENV.SUPABASE_ANON_KEY;
-    if (IS_PRODUCTION && serverConfig?.supabaseAnonKey)  return serverConfig.supabaseAnonKey;
+    if (window.ENV?.SUPABASE_ANON_KEY) return window.ENV.SUPABASE_ANON_KEY;
+    if (serverConfig?.supabaseAnonKey) return serverConfig.supabaseAnonKey;
     return localConfig.supabaseKey || '';
+  }
+
+  function setSupabaseConfig(url, key) {
+    if (IS_PRODUCTION) {
+      console.warn('[Config] Supabase no se configura desde frontend en producción');
+      return;
+    }
+    localConfig.supabaseUrl = String(url || '').trim();
+    localConfig.supabaseKey = String(key || '').trim();
+    saveLocalConfig();
+    emit('config:changed', getStatus());
+  }
+
+  function getWebhookUrl() {
+    if (serverConfig?.webhookUrl) return serverConfig.webhookUrl;
+    return localConfig.webhookUrl || '';
+  }
+
+  function setWebhookUrl(url) {
+    if (IS_PRODUCTION) {
+      console.warn('[Config] Webhook no se configura desde frontend en producción');
+      return;
+    }
+    localConfig.webhookUrl = String(url || '').trim();
+    saveLocalConfig();
+    emit('config:changed', getStatus());
+  }
+
+  function getGeminiEndpoint() {
+    return '/api/gemini-proxy';
   }
 
   function isSupabaseConfigured() {
     return !!getSupabaseUrl() && !!getSupabaseKey();
   }
 
-  function setSupabaseConfig(url, key) {
-    if (IS_PRODUCTION) {
-      console.warn('[Config] ⚠️ No se puede setear Supabase en producción — use variables de entorno en Vercel');
-      return;
-    }
-    localConfig.supabaseUrl = url.trim();
-    localConfig.supabaseKey = key.trim();
-    saveLocalConfig(localConfig);
-    emit('config:changed', { service: 'supabase' });
+  function isGeminiConfigured() {
+    if (IS_PRODUCTION) return !!serverConfig?.geminiConfigured;
+    return true;
   }
 
-  // --- n8n Webhook ---
-  function getWebhookUrl() {
-    if (IS_PRODUCTION && serverConfig) return serverConfig.webhookUrl || '';
-    return localConfig.webhookUrl || '';
-  }
-
-  function isWebhookConfigured() {
-    return !!getWebhookUrl();
-  }
-
-  function setWebhookUrl(url) {
-    if (IS_PRODUCTION) {
-      console.warn('[Config] ⚠️ No se puede setear Webhook en producción — use variables de entorno en Vercel');
-      return;
-    }
-    localConfig.webhookUrl = url.trim();
-    saveLocalConfig(localConfig);
-    emit('config:changed', { service: 'webhook' });
-  }
-
-  // --- Mode Detection ---
   function getMode() {
-    if (IS_PRODUCTION) return 'production';
-    return isGeminiConfigured() ? 'production' : 'demo';
+    if (window.APP_STATE?.isDemo) return 'demo';
+    if (isSupabaseConfigured()) return 'production';
+    return 'degraded';
   }
 
   function getStatus() {
     return {
-      gemini: isGeminiConfigured(),
-      supabase: isSupabaseConfigured(),
-      webhook: isWebhookConfigured(),
+      environment: IS_PRODUCTION ? 'production' : 'local',
       mode: getMode(),
-      environment: IS_PRODUCTION ? 'vercel' : 'local',
+      supabase: isSupabaseConfigured(),
+      gemini: isGeminiConfigured(),
+      webhook: !!getWebhookUrl()
     };
-  }
-
-  // =============================================
-  // CONNECTION TESTS
-  // =============================================
-  async function testGemini() {
-    if (IS_PRODUCTION) {
-      // Test through proxy
-      try {
-        const res = await fetch('/api/gemini-proxy', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            contents: [{ parts: [{ text: 'Responde solo "OK"' }] }],
-            generationConfig: { maxOutputTokens: 5 },
-          }),
-        });
-        if (res.ok) return { ok: true };
-        const err = await res.json();
-        return { ok: false, error: err.error || `HTTP ${res.status}` };
-      } catch (e) {
-        return { ok: false, error: e.message };
-      }
-    }
-
-    // Test via proxy — NUNCA directo a Gemini desde el browser
-    try {
-      const res = await fetch('/api/gemini-proxy', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          contents: [{ parts: [{ text: 'Responde solo OK' }] }],
-          generationConfig: { maxOutputTokens: 5 },
-        }),
-      });
-      if (res.ok) return { ok: true };
-      const err = await res.json();
-      return { ok: false, error: err.error || `HTTP ${res.status}` };
-    } catch (e) {
-      return { ok: false, error: e.message };
-    }
   }
 
   async function testSupabase() {
     const url = getSupabaseUrl();
     const key = getSupabaseKey();
-    if (!url || !key) return { ok: false, error: 'Supabase not configured' };
+    if (!url || !key) return { ok: false, error: 'Supabase no configurado' };
 
     try {
       const res = await fetch(`${url}/rest/v1/`, {
-        headers: { 'apikey': key, 'Authorization': `Bearer ${key}` },
-      });
-      if (res.ok || res.status === 200) return { ok: true };
-      return { ok: false, error: `HTTP ${res.status}` };
-    } catch (e) {
-      return { ok: false, error: e.message };
-    }
-  }
-
-  async function testWebhook() {
-    const url = getWebhookUrl();
-    if (!url) return { ok: false, error: 'Webhook URL not configured' };
-
-    try {
-      const res = await fetch(url, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ test: true, source: 'aliado_resico', timestamp: new Date().toISOString() }),
+        headers: {
+          apikey: key,
+          Authorization: `Bearer ${key}`
+        }
       });
       return { ok: res.ok, status: res.status };
     } catch (e) {
-      return { ok: false, error: e.message };
+      return { ok: false, error: e?.message || 'Error desconocido' };
     }
   }
 
-  // --- Clear local config (dev only) ---
-  function clearAll() {
+  function clearLocalConfig() {
+    if (IS_PRODUCTION) return;
     localConfig = {};
-    saveLocalConfig(localConfig);
-    emit('config:changed', { service: 'all' });
-  }
-
-  // --- Boot log ---
-  if (IS_PRODUCTION) {
-    console.log(
-      '%c🔒 PRODUCCIÓN: API keys se cargan desde variables de entorno del servidor.\n' +
-      'Gemini se accede exclusivamente vía proxy serverless (/api/gemini-proxy).',
-      'color:#10b981;font-size:11px'
-    );
-  } else {
-    console.log(
-      '%c⚠️ DESARROLLO LOCAL: Configuración manual habilitada.\n' +
-      'Para producción, despliega en Vercel con variables de entorno.',
-      'color:#f59e0b;font-size:11px'
-    );
+    saveLocalConfig();
+    emit('config:changed', getStatus());
   }
 
   return {
-    on,
-    getGeminiKey, setGeminiKey, getGeminiEndpoint,
-    getSupabaseUrl, getSupabaseKey, setSupabaseConfig,
-    getWebhookUrl, setWebhookUrl,
-    isGeminiConfigured, isSupabaseConfigured, isWebhookConfigured,
-    getMode, getStatus,
-    testGemini, testSupabase, testWebhook,
-    clearAll, loadServerConfig,
     IS_PRODUCTION,
+    on,
+    loadServerConfig,
+    getSupabaseUrl,
+    getSupabaseKey,
+    setSupabaseConfig,
+    getWebhookUrl,
+    setWebhookUrl,
+    getGeminiEndpoint,
+    isSupabaseConfigured,
+    isGeminiConfigured,
+    getMode,
+    getStatus,
+    testSupabase,
+    clearLocalConfig
   };
 })();
 
-if (typeof window !== 'undefined') window.AppConfig = AppConfig;
+window.AppConfig = AppConfig;

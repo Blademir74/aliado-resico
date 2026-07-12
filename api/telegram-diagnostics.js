@@ -1,8 +1,7 @@
-// api/telegram-diagnostics.js — INTERNO (CommonJS)
+// api/telegram-diagnostics.js — INTERNO (ESM)
 // Protegido con X-Admin-Token
-'use strict';
 
-module.exports = function handler(req, res) {
+export default function handler(req, res) {
   const token    = req.headers['x-admin-token'] || req.query?.token || '';
   const expected = process.env.ADMIN_DIAGNOSTICS_TOKEN || '';
 
@@ -21,4 +20,4 @@ module.exports = function handler(req, res) {
       n8n:      { configured: !!process.env.ALIADO_N8N_WEBHOOK_URL },
     },
   });
-};
+}
