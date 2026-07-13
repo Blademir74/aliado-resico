@@ -43,6 +43,8 @@ window.MockData = window.MockData || {
 
 const AuthManager = (() => {
   let currentUser = null;
+  let _authInitialized = false;   // Flag para evitar múltiples inicializaciones
+  let _isChecking = false;        // Bloqueo de ejecución concurrente
   let sessionCheckResolve = null;
   let sessionCheckPromise = new Promise(resolve => { sessionCheckResolve = resolve; });
 
@@ -166,28 +168,53 @@ ${FISCAL.ART_113F}: antes de confirmar anual, se pregunta si hubo ingresos mixto
     window.Dashboard?.syncAndRender?.();
   }
 
-  // --- Métodos de sesión mejorados ---
+  // --- Métodos de sesión estabilizados ---
   async function checkSession() {
+    // Si ya está inicializado, no repetir
+    if (_authInitialized) {
+      console.log('[Auth] Sesión ya verificada, omitiendo checkSession');
+      return true;
+    }
+
+    // Evitar ejecuciones concurrentes
+    if (_isChecking) {
+      console.log('[Auth] checkSession ya en ejecución, esperando...');
+      await sessionCheckPromise;
+      return _authInitialized;
+    }
+
+    _isChecking = true;
     const loader = document.getElementById('auth-loader');
     if (loader) loader.style.display = 'block';
 
     try {
       const client = window.APP_STATE?.supabase;
-      if (!client) {
+      // Verificar si Supabase está configurado
+      const url = window.AppConfig?.getSupabaseUrl?.() || '';
+      const key = window.AppConfig?.getSupabaseKey?.() || '';
+
+      if (!url || !key || !client) {
+        console.warn('[Auth] Supabase no configurado, mostrando login con demo');
         _showLogin();
         enableDemoButton();
         if (loader) loader.style.display = 'none';
+        _authInitialized = true;
+        _isChecking = false;
+        sessionCheckResolve(false);
         return false;
       }
 
-      // Usar getUser() que valida el token con el servidor
+      // Validar sesión con getUser() (token validado en servidor)
       const { data, error } = await client.auth.getUser();
       if (error || !data?.user) {
-        // Si hay error (token inválido), limpiar sesión local
-        await client.auth.signOut();
+        // Token inválido o expirado: limpiar sesión local
+        await client.auth.signOut().catch(() => {});
         _showLogin();
         enableDemoButton();
         if (loader) loader.style.display = 'none';
+        _authInitialized = true;
+        _isChecking = false;
+        sessionCheckResolve(false);
         return false;
       }
 
@@ -198,16 +225,20 @@ ${FISCAL.ART_113F}: antes de confirmar anual, se pregunta si hubo ingresos mixto
       _injectWelcomeMessage();
       window.Dashboard?.syncAndRender?.();
       if (loader) loader.style.display = 'none';
+      _authInitialized = true;
+      _isChecking = false;
       sessionCheckResolve(true);
       return true;
     } catch (err) {
       console.warn('[Auth] checkSession error:', err.message);
-      // En caso de error, forzar logout y mostrar login
+      // En caso de error, mostrar login y habilitar demo
       const client = window.APP_STATE?.supabase;
       if (client) await client.auth.signOut().catch(() => {});
       _showLogin();
       enableDemoButton();
       if (loader) loader.style.display = 'none';
+      _authInitialized = true;
+      _isChecking = false;
       sessionCheckResolve(false);
       return false;
     }
@@ -231,8 +262,14 @@ ${FISCAL.ART_113F}: antes de confirmar anual, se pregunta si hubo ingresos mixto
     }
   }
 
-  // --- Inicialización principal ---
+  // --- Inicialización principal (única llamada) ---
   async function init() {
+    // Si ya está inicializado, no hacer nada
+    if (_authInitialized) {
+      console.log('[Auth] Ya inicializado, omitiendo init');
+      return;
+    }
+
     const submitBtn = document.getElementById('auth-submit');
     const demoBtn = document.getElementById('auth-demo');
     const msgEl = document.getElementById('auth-msg');
@@ -242,7 +279,10 @@ ${FISCAL.ART_113F}: antes de confirmar anual, se pregunta si hubo ingresos mixto
     const tabLogin = document.getElementById('tab-login');
     const tabRegister = document.getElementById('tab-register');
 
-    if (!submitBtn) return;
+    if (!submitBtn) {
+      console.warn('[Auth] No se encontró el botón de submit');
+      return;
+    }
 
     let isRegister = false;
 
@@ -276,7 +316,7 @@ ${FISCAL.ART_113F}: antes de confirmar anual, se pregunta si hubo ingresos mixto
       const client = window.APP_STATE?.supabase;
       if (!client) {
         enableDemoButton();
-        _showAuthMsg(msgEl, 'Supabase no está listo todavía. Puedes entrar a Demo o reintentar.', true);
+        _showAuthMsg(msgEl, 'Supabase no está listo. Puedes entrar a Demo.', true);
         return;
       }
 
@@ -303,6 +343,7 @@ ${FISCAL.ART_113F}: antes de confirmar anual, se pregunta si hubo ingresos mixto
         _showApp(currentUser);
         _injectWelcomeMessage();
         window.Dashboard?.syncAndRender?.();
+        _authInitialized = true; // Marcar como inicializado después de login exitoso
       } catch (err) {
         const map = {
           'Invalid login credentials': 'Correo o contraseña incorrectos.',
@@ -362,10 +403,12 @@ ${FISCAL.ART_113F}: antes de confirmar anual, se pregunta si hubo ingresos mixto
       window.Store?.reset?.();
       window.APP_STATE.currentUser = null;
       window.APP_STATE.isDemo = false;
+      _authInitialized = false; // Resetear para permitir nuevo login
       _showLogin();
+      enableDemoButton();
     });
 
-    // Iniciar verificación de sesión
+    // Iniciar verificación de sesión (solo una vez)
     await checkSession();
   }
 
@@ -377,6 +420,8 @@ ${FISCAL.ART_113F}: antes de confirmar anual, se pregunta si hubo ingresos mixto
     enableDemoButton,
     bypassToDemo,
     sessionCheckPromise,
+    // Para depuración (pero sin exponer claves)
+    isInitialized: () => _authInitialized
   };
 })();
 
