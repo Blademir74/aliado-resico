@@ -3,6 +3,7 @@ export default async function handler(_req, res) {
   res.setHeader('Cache-Control', 'no-store, max-age=0');
   res.setHeader('Content-Type', 'application/json; charset=utf-8');
 
+  // Devolver las variables de entorno
   return res.status(200).json({
     ok: true,
     config: {

@@ -168,12 +168,17 @@ ${FISCAL.ART_113F}: antes de confirmar anual, se pregunta si hubo ingresos mixto
     window.Dashboard?.syncAndRender?.();
   }
 
+  // ============================================================
+  // checkSession: se ejecuta UNA SOLA VEZ y decide el estado final
+  // ============================================================
   async function checkSession() {
+    // Si ya está inicializado, no hacer nada
     if (_authInitialized) {
       console.log('[Auth] Sesión ya verificada, omitiendo checkSession');
       return true;
     }
 
+    // Evitar ejecuciones concurrentes
     if (_isChecking) {
       console.log('[Auth] checkSession ya en ejecución, esperando...');
       await sessionCheckPromise;
@@ -201,9 +206,10 @@ ${FISCAL.ART_113F}: antes de confirmar anual, se pregunta si hubo ingresos mixto
         return false;
       }
 
-      // Validar sesión con getUser()
+      // Validar sesión con getUser() (token validado en servidor)
       const { data, error } = await client.auth.getUser();
       if (error || !data?.user) {
+        // Token inválido o expirado: limpiar sesión local
         await client.auth.signOut().catch(() => {});
         _showLogin();
         enableDemoButton();
@@ -214,6 +220,7 @@ ${FISCAL.ART_113F}: antes de confirmar anual, se pregunta si hubo ingresos mixto
         return false;
       }
 
+      // Sesión válida
       const user = data.user;
       currentUser = user;
       window.APP_STATE.currentUser = user;
@@ -239,24 +246,9 @@ ${FISCAL.ART_113F}: antes de confirmar anual, se pregunta si hubo ingresos mixto
     }
   }
 
-  async function refreshSession() {
-    const client = window.APP_STATE?.supabase;
-    if (!client) return null;
-    try {
-      const { data, error } = await client.auth.refreshSession();
-      if (error) throw error;
-      const user = data?.user || null;
-      if (user) {
-        currentUser = user;
-        window.APP_STATE.currentUser = user;
-      }
-      return user;
-    } catch (e) {
-      console.warn('[Auth] refreshSession failed:', e.message);
-      return null;
-    }
-  }
-
+  // ============================================================
+  // Inicialización principal (se llama UNA VEZ desde app.js)
+  // ============================================================
   async function init() {
     if (_authInitialized) {
       console.log('[Auth] Ya inicializado, omitiendo init');
@@ -279,6 +271,7 @@ ${FISCAL.ART_113F}: antes de confirmar anual, se pregunta si hubo ingresos mixto
 
     let isRegister = false;
 
+    // Eventos de pestañas
     tabLogin?.addEventListener('click', () => {
       isRegister = false;
       tabLogin.classList.add('active');
@@ -295,6 +288,7 @@ ${FISCAL.ART_113F}: antes de confirmar anual, se pregunta si hubo ingresos mixto
       if (msgEl) msgEl.hidden = true;
     });
 
+    // Envío del formulario
     submitBtn.addEventListener('click', async () => {
       const email = emailInput?.value?.trim();
       const pass = passInput?.value;
@@ -348,14 +342,17 @@ ${FISCAL.ART_113F}: antes de confirmar anual, se pregunta si hubo ingresos mixto
       }
     });
 
+    // Enter en los campos
     [emailInput, passInput].forEach(el =>
       el?.addEventListener('keydown', e => {
         if (e.key === 'Enter') submitBtn.click();
       })
     );
 
+    // Botón demo
     demoBtn?.addEventListener('click', bypassToDemo);
 
+    // Olvidé contraseña
     const forgotBtn = document.getElementById('auth-forgot-password');
     forgotBtn?.addEventListener('click', async (e) => {
       e.preventDefault();
@@ -383,6 +380,7 @@ ${FISCAL.ART_113F}: antes de confirmar anual, se pregunta si hubo ingresos mixto
       }
     });
 
+    // Logout
     logoutBtn?.addEventListener('click', async () => {
       try {
         await window.APP_STATE?.supabase?.auth?.signOut();
@@ -395,16 +393,15 @@ ${FISCAL.ART_113F}: antes de confirmar anual, se pregunta si hubo ingresos mixto
       enableDemoButton();
     });
 
+    // Verificar sesión
     await checkSession();
   }
 
   return {
     init,
     checkSession,
-    refreshSession,
     enableDemoButton,
     bypassToDemo,
-    sessionCheckPromise,
     isInitialized: () => _authInitialized
   };
 })();

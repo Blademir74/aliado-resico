@@ -124,15 +124,38 @@ const App = (() => {
     initNavigation();
     initRFC();
 
-    // PASO CRÍTICO: Cargar configuración del servidor ANTES de iniciar Supabase y Auth
-    console.log('[App] Cargando configuración del servidor...');
+    // ============================================================
+    // PASO 1: Cargar configuración del servidor
+    // Si falla, mostramos login con demo habilitado y NO continuamos
+    // ============================================================
+    let configOk = false;
     try {
-      await window.AppConfig?.loadServerConfig?.();
+      configOk = await window.AppConfig?.loadServerConfig?.() || false;
     } catch (e) {
-      console.warn('[App] Error al cargar configuración, continuando en modo degradado:', e.message);
+      console.warn('[App] Error al cargar configuración:', e.message);
     }
 
-    // Inicializar Store (Supabase) y Auth
+    // Si la configuración no está disponible, mostrar login y habilitar demo
+    if (!configOk) {
+      console.warn('[App] Configuración no disponible. Mostrando login con demo.');
+      // Asegurar que el overlay esté visible y el botón demo habilitado
+      const overlay = document.getElementById('auth-overlay');
+      if (overlay) {
+        overlay.hidden = false;
+        overlay.style.display = 'flex';
+      }
+      const demoBtn = document.getElementById('auth-demo');
+      if (demoBtn) {
+        demoBtn.hidden = false;
+        demoBtn.disabled = false;
+      }
+      // No continuar con autenticación
+      return;
+    }
+
+    // ============================================================
+    // PASO 2: Inicializar Store (Supabase) y Auth solo si hay config
+    // ============================================================
     try {
       await window.Store?.initSupabase?.();
     } catch (e) {
