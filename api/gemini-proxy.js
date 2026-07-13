@@ -44,7 +44,6 @@ export default async function handler(req, res) {
     return res.status(200).json(fallbackResponse('missing_api_key'));
   }
 
-  // Validación robusta del body
   if (!req.body || typeof req.body !== 'object') {
     return res.status(400).json({ error: 'Body inválido: se espera un objeto JSON.' });
   }
@@ -67,7 +66,6 @@ export default async function handler(req, res) {
 
     const data = await response.json();
 
-    // Manejo de errores específicos de Gemini
     if (data?.error?.code === 429) {
       return res.status(200).json(fallbackResponse('quota_exhausted'));
     }
