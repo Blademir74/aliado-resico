@@ -3,9 +3,14 @@ const App = (() => {
 
   function navigateTo(view) {
     const target = VIEWS.includes(view) ? view : 'dashboard';
+    // Ocultar todas las secciones
     document.querySelectorAll('.tab-view').forEach(el => {
-      el.hidden = el.id !== `${target}-tab`;
+      el.hidden = true;
     });
+    // Mostrar la sección objetivo
+    const targetEl = document.getElementById(`${target}-tab`);
+    if (targetEl) targetEl.hidden = false;
+    // Actualizar botones
     document.querySelectorAll('.nav-btn[data-tab]').forEach(btn => {
       const isActive = btn.getAttribute('data-tab') === target;
       btn.classList.toggle('active', isActive);
@@ -30,8 +35,12 @@ const App = (() => {
 
   function initNavigation() {
     document.querySelectorAll('.nav-btn[data-tab]').forEach(btn => {
-      btn.addEventListener('click', () => navigateTo(btn.getAttribute('data-tab')));
+      btn.addEventListener('click', () => {
+        const tab = btn.getAttribute('data-tab');
+        navigateTo(tab);
+      });
     });
+    // Leer hash inicial
     const initial = (window.location.hash || '').replace('#', '');
     navigateTo(initial || 'dashboard');
   }
@@ -56,12 +65,76 @@ const App = (() => {
     inp.addEventListener('keydown', e => { if (e.key === 'Enter') validate(); });
   }
 
+  // Inicializar el chat
+  function initChat() {
+    const form = document.getElementById('classifier-form');
+    const input = document.getElementById('classifier-input');
+    const chat = document.getElementById('chat-messages');
+    if (!form || !input || !chat) return;
+
+    form.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const text = input.value.trim();
+      if (!text) return;
+      // Añadir burbuja usuario
+      const userBubble = document.createElement('div');
+      userBubble.className = 'chat-bubble user';
+      userBubble.textContent = text;
+      chat.appendChild(userBubble);
+      input.value = '';
+      chat.scrollTop = chat.scrollHeight;
+
+      try {
+        const cls = await window.IntentClassifier.process(text);
+        // Mostrar análisis
+        const empty = document.getElementById('classification-empty');
+        const content = document.getElementById('classification-content');
+        if (empty) empty.hidden = true;
+        if (content) content.hidden = false;
+        const intentEl = document.getElementById('result-intent');
+        if (intentEl) {
+          const cat = window.CATEGORY_CONFIG?.[cls.intent] || { icon: '💬', label: cls.intent };
+          intentEl.textContent = `${cat.icon} ${cat.label}`;
+        }
+        const confVal = document.getElementById('result-confidence-val');
+        if (confVal) confVal.textContent = `${Math.round(cls.confidence * 100)}%`;
+        const kwEl = document.getElementById('result-keywords');
+        if (kwEl) kwEl.textContent = (cls.keywords_matched || []).join(', ') || '—';
+        const srcEl = document.getElementById('result-source');
+        if (srcEl) srcEl.textContent = cls.source === 'gemini_proxy' ? 'Gemini IA' : 'Reglas locales';
+        // Respuesta del bot
+        const botBubble = document.createElement('div');
+        botBubble.className = 'chat-bubble bot';
+        botBubble.textContent = cls.assistant_reply || 'Consulta recibida.';
+        chat.appendChild(botBubble);
+        chat.scrollTop = chat.scrollHeight;
+        // Guardar en store
+        window.Store?.addConversation?.({ text, intent: cls.intent, confidence: cls.confidence, is_fiscal_audit_completed: cls.intent === 'SALUD_FISCAL' });
+        // Actualizar dashboard
+        window.Dashboard?.syncAndRender?.();
+      } catch (err) {
+        const errBubble = document.createElement('div');
+        errBubble.className = 'chat-bubble bot';
+        errBubble.textContent = 'Error: ' + err.message;
+        chat.appendChild(errBubble);
+        chat.scrollTop = chat.scrollHeight;
+      }
+    });
+
+    // Quick asks
+    document.querySelectorAll('.quick-ask').forEach(btn => {
+      btn.addEventListener('click', () => {
+        input.value = btn.getAttribute('data-prompt') || '';
+        form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+      });
+    });
+  }
+
   async function init() {
     initTheme();
     initNavigation();
     initRFC();
 
-    // Inicializar módulos
     try { await window.AppConfig?.loadServerConfig?.(); } catch (_) {}
     try { await window.Store?.initSupabase?.(); } catch (_) {}
     try { await window.AuthManager?.init?.(); } catch (_) {}
@@ -72,62 +145,7 @@ const App = (() => {
     window.Store?.on?.('store:updated', () => window.Dashboard?.syncAndRender?.());
     window.Store?.on?.('store:reset', () => window.Dashboard?.syncAndRender?.());
 
-    // Inicializar el chat (classifier)
-    const classifier = window.IntentClassifier;
-    if (classifier) {
-      const form = document.getElementById('classifier-form');
-      const input = document.getElementById('classifier-input');
-      const chat = document.getElementById('chat-messages');
-      if (form && input && chat) {
-        form.addEventListener('submit', async (e) => {
-          e.preventDefault();
-          const text = input.value.trim();
-          if (!text) return;
-          // Añadir burbuja usuario
-          const userBubble = document.createElement('div');
-          userBubble.className = 'chat-bubble user';
-          userBubble.textContent = text;
-          chat.appendChild(userBubble);
-          input.value = '';
-          chat.scrollTop = chat.scrollHeight;
-          try {
-            const cls = await classifier.process(text);
-            // Mostrar análisis
-            const empty = document.getElementById('classification-empty');
-            const content = document.getElementById('classification-content');
-            if (empty) empty.hidden = true;
-            if (content) content.hidden = false;
-            document.getElementById('result-intent').textContent = `${CATEGORY_CONFIG[cls.intent]?.icon || '💬'} ${CATEGORY_CONFIG[cls.intent]?.label || cls.intent}`;
-            document.getElementById('result-confidence-val').textContent = `${Math.round(cls.confidence*100)}%`;
-            document.getElementById('result-keywords').textContent = (cls.keywords_matched || []).join(', ') || '—';
-            document.getElementById('result-source').textContent = cls.source === 'gemini_proxy' ? 'Gemini IA' : 'Reglas locales';
-            // Respuesta del bot
-            const botBubble = document.createElement('div');
-            botBubble.className = 'chat-bubble bot';
-            botBubble.textContent = cls.assistant_reply || 'Consulta recibida.';
-            chat.appendChild(botBubble);
-            chat.scrollTop = chat.scrollHeight;
-            // Guardar en store
-            window.Store?.addConversation?.({ text, intent: cls.intent, confidence: cls.confidence, is_fiscal_audit_completed: cls.intent === 'SALUD_FISCAL' });
-            // Actualizar dashboard
-            window.Dashboard?.syncAndRender?.();
-          } catch (err) {
-            const errBubble = document.createElement('div');
-            errBubble.className = 'chat-bubble bot';
-            errBubble.textContent = 'Error: ' + err.message;
-            chat.appendChild(errBubble);
-          }
-        });
-        // Quick asks
-        document.querySelectorAll('.quick-ask').forEach(btn => {
-          btn.addEventListener('click', () => {
-            input.value = btn.getAttribute('data-prompt') || '';
-            form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
-          });
-        });
-      }
-    }
-
+    initChat();
     window.Dashboard?.syncAndRender?.();
   }
 
@@ -135,6 +153,7 @@ const App = (() => {
 })();
 
 window.App = App;
+
 if (document.readyState === 'loading') {
   document.addEventListener('DOMContentLoaded', () => App.init());
 } else {

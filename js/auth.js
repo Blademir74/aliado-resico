@@ -1,18 +1,3 @@
-// Variables de rate limiting
-const ATTEMPT_KEY = 'login_attempts';
-const BLOCK_KEY = 'login_blocked_until';
-
-function getAttempts() { return parseInt(localStorage.getItem(ATTEMPT_KEY) || '0'); }
-function incrementAttempts() { localStorage.setItem(ATTEMPT_KEY, String(getAttempts() + 1)); }
-function resetAttempts() { localStorage.removeItem(ATTEMPT_KEY); }
-function isBlocked() {
-  const until = parseInt(localStorage.getItem(BLOCK_KEY) || '0');
-  if (Date.now() < until) return true;
-  if (until > 0) { localStorage.removeItem(BLOCK_KEY); resetAttempts(); }
-  return false;
-}
-function setBlock(seconds) { localStorage.setItem(BLOCK_KEY, String(Date.now() + seconds * 1000)); }
-
 window.APP_STATE = window.APP_STATE || {
   supabase: null,
   currentUser: null,
@@ -181,10 +166,11 @@ ${FISCAL.ART_113F}: antes de confirmar anual, se pregunta si hubo ingresos mixto
     window.Dashboard?.syncAndRender?.();
   }
 
-  // --- Nuevos métodos de sesión ---
+  // --- Métodos de sesión mejorados ---
   async function checkSession() {
     const loader = document.getElementById('auth-loader');
     if (loader) loader.style.display = 'block';
+
     try {
       const client = window.APP_STATE?.supabase;
       if (!client) {
@@ -194,35 +180,38 @@ ${FISCAL.ART_113F}: antes de confirmar anual, se pregunta si hubo ingresos mixto
         return false;
       }
 
-      const { data, error } = await client.auth.getSession();
-      if (error) throw error;
-
-      const user = data?.session?.user || null;
-      if (user) {
-        currentUser = user;
-        window.APP_STATE.currentUser = user;
-        _showApp(user);
-        _injectWelcomeMessage();
-        window.Dashboard?.syncAndRender?.();
-        if (loader) loader.style.display = 'none';
-        sessionCheckResolve(true);
-        return true;
-      } else {
+      // Usar getUser() que valida el token con el servidor
+      const { data, error } = await client.auth.getUser();
+      if (error || !data?.user) {
+        // Si hay error (token inválido), limpiar sesión local
+        await client.auth.signOut();
         _showLogin();
         enableDemoButton();
         if (loader) loader.style.display = 'none';
-        sessionCheckResolve(false);
         return false;
       }
+
+      const user = data.user;
+      currentUser = user;
+      window.APP_STATE.currentUser = user;
+      _showApp(user);
+      _injectWelcomeMessage();
+      window.Dashboard?.syncAndRender?.();
+      if (loader) loader.style.display = 'none';
+      sessionCheckResolve(true);
+      return true;
     } catch (err) {
       console.warn('[Auth] checkSession error:', err.message);
+      // En caso de error, forzar logout y mostrar login
+      const client = window.APP_STATE?.supabase;
+      if (client) await client.auth.signOut().catch(() => {});
       _showLogin();
       enableDemoButton();
       if (loader) loader.style.display = 'none';
       sessionCheckResolve(false);
       return false;
     }
-  } // <-- CIERRE CORRECTO DE checkSession
+  }
 
   async function refreshSession() {
     const client = window.APP_STATE?.supabase;
@@ -296,14 +285,6 @@ ${FISCAL.ART_113F}: antes de confirmar anual, se pregunta si hubo ingresos mixto
       if (msgEl) msgEl.hidden = true;
 
       try {
-        // [INSERTIÓN 1] Verificar bloqueo antes de intentar login
-        if (isBlocked()) {
-          _showAuthMsg(msgEl, 'Demasiados intentos. Espera 5 minutos.', true);
-          submitBtn.disabled = false;
-          submitBtn.textContent = '🔐 Iniciar Sesión';
-          return;
-        }
-
         let result;
         if (isRegister) {
           result = await client.auth.signUp({ email, password: pass });
@@ -322,17 +303,7 @@ ${FISCAL.ART_113F}: antes de confirmar anual, se pregunta si hubo ingresos mixto
         _showApp(currentUser);
         _injectWelcomeMessage();
         window.Dashboard?.syncAndRender?.();
-        
-        // Reiniciar intentos si el login es exitoso
-        resetAttempts();
-
       } catch (err) {
-        // [INSERTIÓN 2] Contar intentos fallidos solo si es error de credenciales
-        if (err.message === 'Invalid login credentials' || err.message === 'Email not confirmed') {
-           incrementAttempts();
-           if (getAttempts() >= 5) setBlock(300);
-        }
-
         const map = {
           'Invalid login credentials': 'Correo o contraseña incorrectos.',
           'Email not confirmed': 'Confirma tu correo antes de entrar.',
@@ -343,7 +314,7 @@ ${FISCAL.ART_113F}: antes de confirmar anual, se pregunta si hubo ingresos mixto
         submitBtn.disabled = false;
         submitBtn.textContent = isRegister ? '✅ Crear Cuenta' : '🔐 Iniciar Sesión';
       }
-    }); // <-- Cierre correcto del evento click
+    });
 
     // Enter en los campos
     [emailInput, passInput].forEach(el =>
@@ -396,7 +367,7 @@ ${FISCAL.ART_113F}: antes de confirmar anual, se pregunta si hubo ingresos mixto
 
     // Iniciar verificación de sesión
     await checkSession();
-  } // <-- Cierre correcto de init
+  }
 
   // Exponer métodos
   return {
@@ -407,6 +378,6 @@ ${FISCAL.ART_113F}: antes de confirmar anual, se pregunta si hubo ingresos mixto
     bypassToDemo,
     sessionCheckPromise,
   };
-})(); // <-- Cierre correcto del IIFE (AuthManager)
+})();
 
 window.AuthManager = AuthManager;
