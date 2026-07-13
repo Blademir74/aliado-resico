@@ -2,16 +2,16 @@
   "version": 2,
   "functions": {
     "api/config.js": {
-      "runtime": "nodejs20.x"
+      "runtime": "now-node@20.x"
     },
     "api/gemini-proxy.js": {
-      "runtime": "nodejs20.x"
+      "runtime": "now-node@20.x"
     },
     "api/auth-callback.js": {
-      "runtime": "nodejs20.x"
+      "runtime": "now-node@20.x"
     },
     "api/telegram-diagnostics.js": {
-      "runtime": "nodejs20.x"
+      "runtime": "now-node@20.x"
     }
   },
   "rewrites": [
