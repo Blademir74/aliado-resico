@@ -1,7 +1,9 @@
 window.APP_STATE = window.APP_STATE || {
   supabase: null,
   currentUser: null,
-  isDemo: false
+  isDemo: false,
+  authInitialized: false,
+  authError: null
 };
 
 window.MockData = window.MockData || {
@@ -72,8 +74,10 @@ const AuthManager = (() => {
     const emailEl = document.getElementById('user-email-display');
     const logoutEl = document.getElementById('logout-btn');
     const loader = document.getElementById('auth-loader');
+    const msg = document.getElementById('auth-msg');
 
     if (loader) loader.style.display = 'none';
+    if (msg) msg.hidden = true;
     if (overlay) {
       overlay.hidden = true;
       overlay.style.display = 'none';
@@ -85,16 +89,24 @@ const AuthManager = (() => {
     if (chip) chip.hidden = false;
     if (emailEl) emailEl.textContent = user?.email || 'Modo Demo';
     if (logoutEl) logoutEl.hidden = false;
+    window.APP_STATE.authError = null;
   }
 
-  function _showLogin() {
+  function _showLoginWithError(message) {
     const overlay = document.getElementById('auth-overlay');
     const app = getAppEl();
     const chip = document.getElementById('user-chip');
     const logoutEl = document.getElementById('logout-btn');
     const loader = document.getElementById('auth-loader');
+    const msg = document.getElementById('auth-msg');
 
     if (loader) loader.style.display = 'none';
+    if (msg) {
+      msg.hidden = false;
+      msg.textContent = message || 'Error de autorización. Contacta a soporte para verificar tu Bóveda Fiscal.';
+      msg.className = 'auth-msg error';
+      msg.style.color = '#ef4444';
+    }
     if (overlay) {
       overlay.hidden = false;
       overlay.style.display = 'flex';
@@ -105,6 +117,30 @@ const AuthManager = (() => {
     }
     if (chip) chip.hidden = true;
     if (logoutEl) logoutEl.hidden = true;
+    window.APP_STATE.authError = message || 'Error de autorización';
+  }
+
+  function _showLogin() {
+    const overlay = document.getElementById('auth-overlay');
+    const app = getAppEl();
+    const chip = document.getElementById('user-chip');
+    const logoutEl = document.getElementById('logout-btn');
+    const loader = document.getElementById('auth-loader');
+    const msg = document.getElementById('auth-msg');
+
+    if (loader) loader.style.display = 'none';
+    if (msg) msg.hidden = true;
+    if (overlay) {
+      overlay.hidden = false;
+      overlay.style.display = 'flex';
+    }
+    if (app) {
+      app.hidden = true;
+      app.style.display = 'none';
+    }
+    if (chip) chip.hidden = true;
+    if (logoutEl) logoutEl.hidden = true;
+    window.APP_STATE.authError = null;
   }
 
   function _showAuthMsg(el, text, isError) {
@@ -112,6 +148,7 @@ const AuthManager = (() => {
     el.hidden = false;
     el.textContent = text;
     el.className = isError ? 'auth-msg error' : 'auth-msg success';
+    el.style.color = isError ? '#ef4444' : '#10b981';
   }
 
   function enableDemoButton() {
@@ -137,7 +174,15 @@ const AuthManager = (() => {
     const bubble = document.createElement('div');
     bubble.className = 'chat-bubble bot';
     bubble.textContent =
-      `🛡️ Aliado RESICO activo.\n\n${FISCAL.ART_113E}: tu límite anual es $${FISCAL.INCOME_LIMIT.toLocaleString('es-MX')} MXN.\nAl 94% ($${FISCAL.ALERT_94.toLocaleString('es-MX')} MXN) debes tratarlo como riesgo de expulsión.\n\n${FISCAL.ART_17K}: Buzón Tributario inactivo = multa hasta $${FISCAL.MULTA_BUZON.toLocaleString('es-MX')} MXN y pérdida de plazos; la reincidencia escala el riesgo (${FISCAL.ART_86C}).\n\n${FISCAL.ART_113F}: antes de confirmar anual, se pregunta si hubo ingresos mixtos.\n\n📘 **Educación fiscal**:\n- El ISR en RESICO se calcula sobre ingresos brutos, sin deducciones de gastos.\n- El IVA solo es acreditable si cuentas con CFDI válido que acredite el gasto indispensable.`;
+      `🛡️ Aliado RESICO activo.\n\n` +
+      `${FISCAL.ART_113E}: tu límite anual es $${FISCAL.INCOME_LIMIT.toLocaleString('es-MX')} MXN.\n` +
+      `Al 94% ($${FISCAL.ALERT_94.toLocaleString('es-MX')} MXN) debes tratarlo como riesgo de expulsión.\n\n` +
+      `⚠️ **ALERTA DE SALUD FISCAL**\n` +
+      `${FISCAL.ART_17K}: Buzón Tributario inactivo = multa hasta $${FISCAL.MULTA_BUZON.toLocaleString('es-MX')} MXN y pérdida de plazos; la reincidencia escala el riesgo (${FISCAL.ART_86C}).\n\n` +
+      `${FISCAL.ART_113F}: antes de confirmar anual, se pregunta si hubo ingresos mixtos.\n\n` +
+      `📘 **Educación fiscal**:\n` +
+      `- El ISR en RESICO se calcula sobre ingresos brutos, sin deducciones de gastos.\n` +
+      `- El IVA solo es acreditable si cuentas con CFDI válido que acredite el gasto indispensable.`;
     chatEl.appendChild(bubble);
   }
 
@@ -167,6 +212,12 @@ const AuthManager = (() => {
     _checkPromise = (async () => {
       const loader = document.getElementById('auth-loader');
       if (loader) loader.style.display = 'block';
+      // Asegurar que overlay esté visible
+      const overlay = document.getElementById('auth-overlay');
+      if (overlay && overlay.hidden) {
+        overlay.hidden = false;
+        overlay.style.display = 'flex';
+      }
 
       try {
         const url = window.AppConfig?.getSupabaseUrl?.() || '';
@@ -182,8 +233,19 @@ const AuthManager = (() => {
           return false;
         }
 
-        const { data, error } = await client.auth.getUser();
-        if (error || !data?.user) {
+        // Obtener sesión
+        const { data: sessionData, error: sessionError } = await client.auth.getSession();
+        if (sessionError || !sessionData?.session) {
+          _showLogin();
+          enableDemoButton();
+          if (loader) loader.style.display = 'none';
+          _authInitialized = true;
+          return false;
+        }
+
+        // Verificar usuario
+        const { data: userData, error: userError } = await client.auth.getUser();
+        if (userError || !userData?.user) {
           await client.auth.signOut().catch(() => {});
           _showLogin();
           enableDemoButton();
@@ -192,7 +254,38 @@ const AuthManager = (() => {
           return false;
         }
 
-        currentUser = data.user;
+        // Verificar acceso a fiscal_metrics (detección de 403)
+        try {
+          const { error: testError } = await client
+            .from('fiscal_metrics')
+            .select('user_id')
+            .eq('user_id', userData.user.id)
+            .limit(1)
+            .maybeSingle();
+
+          if (testError) {
+            if (testError.code === 'PGRST301' || testError.message?.includes('permission denied') || testError.status === 403) {
+              console.warn('[Auth] Error 403 al consultar fiscal_metrics:', testError.message);
+              _showLoginWithError('Error de Autorización: Contacta a soporte para verificar tu Bóveda Fiscal.');
+              enableDemoButton();
+              if (loader) loader.style.display = 'none';
+              _authInitialized = true;
+              return false;
+            }
+            console.warn('[Auth] Error consultando fiscal_metrics (no 403):', testError.message);
+          }
+        } catch (testErr) {
+          if (testErr?.status === 403 || testErr?.message?.includes('403')) {
+            _showLoginWithError('Error de Autorización: Contacta a soporte para verificar tu Bóveda Fiscal.');
+            enableDemoButton();
+            if (loader) loader.style.display = 'none';
+            _authInitialized = true;
+            return false;
+          }
+        }
+
+        // Todo OK
+        currentUser = userData.user;
         window.APP_STATE.currentUser = currentUser;
         _showApp(currentUser);
         _injectWelcomeMessage();
@@ -202,9 +295,11 @@ const AuthManager = (() => {
         return true;
       } catch (err) {
         console.warn('[Auth] checkSession error:', err.message);
-        const client = window.APP_STATE?.supabase;
-        if (client) await client.auth.signOut().catch(() => {});
-        _showLogin();
+        if (err?.status === 403 || err?.message?.includes('403') || err?.message?.includes('permission denied')) {
+          _showLoginWithError('Error de Autorización: Contacta a soporte para verificar tu Bóveda Fiscal.');
+        } else {
+          _showLogin();
+        }
         enableDemoButton();
         if (loader) loader.style.display = 'none';
         _authInitialized = true;
@@ -218,7 +313,7 @@ const AuthManager = (() => {
   }
 
   // ============================================================
-  // Inicialización (se llama UNA VEZ desde app.js)
+  // Inicialización
   // ============================================================
   async function init() {
     if (_authInitialized) {
@@ -286,10 +381,7 @@ const AuthManager = (() => {
         }
         currentUser = result.data.user;
         window.APP_STATE.currentUser = currentUser;
-        _showApp(currentUser);
-        _injectWelcomeMessage();
-        window.Dashboard?.syncAndRender?.();
-        _authInitialized = true;
+        await checkSession();
       } catch (err) {
         const map = {
           'Invalid login credentials': 'Correo o contraseña incorrectos.',
