@@ -18,6 +18,7 @@
   />
   <link rel="stylesheet" href="./styles.css" />
 
+  <!-- Configuración global del sistema -->
   <script>
     window.RESICO_CONFIG = {
       INCOME_LIMIT: 3500000,
@@ -42,12 +43,9 @@
       OTROS: { label: 'Consulta General', icon: '💬', cssClass: 'otros' }
     };
   </script>
-
-  <style id="auth-guard-css">
-    #app { display: none; }
-  </style>
 </head>
 <body class="dark-mode">
+  <!-- Overlay de autenticación -->
   <div id="auth-overlay" class="auth-overlay" style="display:flex">
     <div class="auth-card">
       <div class="auth-logo">
@@ -59,6 +57,10 @@
       <div class="auth-tabs">
         <button class="auth-tab active" id="tab-login" type="button">Iniciar Sesión</button>
         <button class="auth-tab" id="tab-register" type="button">Crear Cuenta</button>
+      </div>
+
+      <div id="auth-loader" style="text-align:center; padding:12px; display:none;">
+        <span>⏳ Verificando sesión...</span>
       </div>
 
       <div class="form-field">
@@ -82,7 +84,8 @@
     </div>
   </div>
 
-  <div id="app" class="app-wrap" hidden style="display:none">
+  <!-- Aplicación principal (oculta por defecto) -->
+  <div id="app" class="app-wrap" hidden>
     <header class="header">
       <div class="header-brand">
         <img src="./logo.png" alt="Aliado RESICO" class="brand-logo-img" />
@@ -113,6 +116,7 @@
     </nav>
 
     <main class="main">
+      <!-- Dashboard -->
       <section id="dashboard-tab" class="tab-view" role="tabpanel">
         <div class="kpi-grid">
           <div class="kpi-card glass">
@@ -218,6 +222,7 @@
         </article>
       </section>
 
+      <!-- Asistente IA -->
       <section id="classifier-tab" class="tab-view" role="tabpanel" hidden>
         <div class="classifier-layout">
           <div class="chat-panel glass">
@@ -272,6 +277,7 @@
         </div>
       </section>
 
+      <!-- Documentos -->
       <section id="documents-tab" class="tab-view" role="tabpanel" hidden>
         <div class="grid grid-2">
           <article class="card">
@@ -298,13 +304,14 @@
     </main>
   </div>
 
+  <!-- SCRIPTS: orden estricto para evitar errores de desincronización -->
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script src="./js/config.js" defer></script>
-  <script src="./js/store.js" defer></script>
-  <script src="./js/dashboard.js" defer></script>
   <script src="./js/auth.js" defer></script>
+  <script src="./js/store.js" defer></script>
   <script src="./js/classifier.js" defer></script>
   <script src="./js/ocr.js" defer></script>
+  <script src="./js/dashboard.js" defer></script>
   <script src="./js/app.js" defer></script>
 </body>
 </html>

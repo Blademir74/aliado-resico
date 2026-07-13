@@ -49,9 +49,7 @@ const Store = (() => {
     },
   };
 
-  function clone(v) {
-    return JSON.parse(JSON.stringify(v));
-  }
+  function clone(v) { return JSON.parse(JSON.stringify(v)); }
 
   function ensureAppState() {
     window.APP_STATE = window.APP_STATE || {};
@@ -116,10 +114,11 @@ const Store = (() => {
     );
   }
 
+  // Mapeo de fila de conversación a objeto local (usa message_text)
   function _mapConversation(row) {
     return {
       id: row.id,
-      text: row.message_text || '',
+      text: row.message_text || '',          // <-- se mapea message_text a text para el frontend
       intent: row.intent || 'OTROS',
       confidence: Number(row.confidence || 0),
       is_fiscal_audit_completed: !!row.is_fiscal_audit_completed,
@@ -191,7 +190,7 @@ const Store = (() => {
     const payload = {
       id: c.id || (crypto?.randomUUID ? crypto.randomUUID() : String(Date.now())),
       user_id: usr.id,
-      message_text: String(c.text || c.message_text || '').slice(0, 10000),
+      message_text: String(c.text || c.message_text || '').slice(0, 10000), // <-- usa message_text
       intent: c.intent || 'OTROS',
       confidence: Number(c.confidence || 0),
       is_fiscal_audit_completed: !!c.is_fiscal_audit_completed,
@@ -209,7 +208,7 @@ const Store = (() => {
 
     const payload = {
       user_id: usr.id,
-      income_ytd: Number(state.incomeYTD || 0),
+      income_ytd: Number(state.incomeYTD || 0),        // <-- coincide con la BD
       total_processed: Number(state.metrics?.totalProcessed || 0),
       avg_confidence: Number(state.metrics?.avgConfidence || 0),
     };
@@ -240,7 +239,12 @@ const Store = (() => {
         },
         () => _syncDown()
       )
-      .subscribe();
+      .subscribe((status) => {
+        if (status === 'CHANNEL_ERROR') {
+          // Reintentar la suscripción después de un breve retraso
+          setTimeout(() => _subscribeRealtime(), 5000);
+        }
+      });
   }
 
   async function initSupabase() {

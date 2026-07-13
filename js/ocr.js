@@ -11,7 +11,9 @@ const DocumentProcessor = (() => {
       const r = new FileReader();
       r.onload = () => {
         const result = String(r.result || '');
-        resolve(result.includes(',') ? result.split(',') : result);[3]
+        // Extrae solo la parte base64 (después de la coma)
+        const base64 = result.includes(',') ? result.split(',')[1] : result;
+        resolve(base64);
       };
       r.onerror = reject;
       r.readAsDataURL(file);
@@ -42,13 +44,13 @@ const DocumentProcessor = (() => {
                 '"rfc_emisor":"string|null",',
                 '"rfc_receptor":"string|null",',
                 '"subtotal":123.45,',
-                '"iva":19.76,',
+                '"iva":19.76,',               // <-- IVA desglosado obligatorio
                 '"total":143.21,',
                 '"folio":"string|null",',
                 '"fecha":"YYYY-MM-DD|null",',
                 '"nota":"ISR: sin deducciones. IVA: indispensable para acreditamiento con CFDI válido."',
                 '}',
-                'El IVA debe salir desglosado cuando exista.'
+                'El IVA debe salir desglosado cuando exista. Si no se detecta, enviar 0.'
               ].join('\n')
             },
             {
@@ -64,14 +66,25 @@ const DocumentProcessor = (() => {
     });
 
     if (!resp.ok) throw new Error(`OCR HTTP ${resp.status}`);
+
     const d = await resp.json();
+    // Uso correcto del encadenamiento opcional (no hay doble ?.?)
     const raw = d?.candidates?.[0]?.content?.parts?.[0]?.text || '';
     const cleaned = raw.replace(/```json/gi, '```').replace(/```/g, '').trim();
     const start = cleaned.indexOf('{');
     const end = cleaned.lastIndexOf('}');
     if (start === -1 || end <= start) throw new Error('OCR sin JSON válido');
 
-    const data = JSON.parse(cleaned.slice(start, end + 1));
+    let data;
+    try {
+      data = JSON.parse(cleaned.slice(start, end + 1));
+    } catch (e) {
+      throw new Error('Error al parsear JSON de Gemini: ' + e.message);
+    }
+
+    // Asegurar que el IVA esté presente
+    if (data.iva === undefined) data.iva = 0;
+
     return {
       data,
       needsHumanReview: Number(data.confidence || 0) < 0.85,

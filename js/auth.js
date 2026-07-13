@@ -43,6 +43,8 @@ window.MockData = window.MockData || {
 
 const AuthManager = (() => {
   let currentUser = null;
+  let sessionCheckResolve = null;
+  let sessionCheckPromise = new Promise(resolve => { sessionCheckResolve = resolve; });
 
   const FISCAL = {
     INCOME_LIMIT: 3500000,
@@ -70,7 +72,9 @@ const AuthManager = (() => {
     const chip = document.getElementById('user-chip');
     const emailEl = document.getElementById('user-email-display');
     const logoutEl = document.getElementById('logout-btn');
+    const loader = document.getElementById('auth-loader');
 
+    if (loader) loader.style.display = 'none';
     if (overlay) {
       overlay.hidden = true;
       overlay.style.display = 'none';
@@ -89,7 +93,9 @@ const AuthManager = (() => {
     const app = getAppEl();
     const chip = document.getElementById('user-chip');
     const logoutEl = document.getElementById('logout-btn');
+    const loader = document.getElementById('auth-loader');
 
+    if (loader) loader.style.display = 'none';
     if (overlay) {
       overlay.hidden = false;
       overlay.style.display = 'flex';
@@ -123,7 +129,7 @@ const AuthManager = (() => {
     banner.style.cssText =
       'position:fixed;top:0;left:0;right:0;z-index:9999;background:#92400e;color:#fff;padding:10px 16px;text-align:center;font-size:13px;font-weight:600;';
     banner.textContent =
-      '⚠️ MODO DEMO — Art. 17-K CFF: multa hasta $10,260 MXN por Buzón Tributario inactivo.';
+      `⚠️ MODO DEMO — ${FISCAL.ART_17K}: multa hasta $${FISCAL.MULTA_BUZON.toLocaleString('es-MX')} MXN por Buzón Tributario inactivo.`;
     document.body.prepend(banner);
   }
 
@@ -137,11 +143,17 @@ const AuthManager = (() => {
     bubble.className = 'chat-bubble bot';
     bubble.textContent =
       `🛡️ Aliado RESICO activo.
+
 ${FISCAL.ART_113E}: tu límite anual es $${FISCAL.INCOME_LIMIT.toLocaleString('es-MX')} MXN.
 Al 94% ($${FISCAL.ALERT_94.toLocaleString('es-MX')} MXN) debes tratarlo como riesgo de expulsión.
+
 ${FISCAL.ART_17K}: Buzón Tributario inactivo = multa hasta $${FISCAL.MULTA_BUZON.toLocaleString('es-MX')} MXN y pérdida de plazos; la reincidencia escala el riesgo (${FISCAL.ART_86C}).
+
 ${FISCAL.ART_113F}: antes de confirmar anual, se pregunta si hubo ingresos mixtos.
-Alerta operativa: la omisión de obligaciones y notificaciones también puede escalar a bloqueo operativo y riesgo sobre sellos digitales.`;
+
+📘 **Educación fiscal**:
+- El ISR en RESICO se calcula sobre ingresos brutos, sin deducciones de gastos.
+- El IVA solo es acreditable si cuentas con CFDI válido que acredite el gasto indispensable.`;
     chatEl.appendChild(bubble);
   }
 
@@ -154,6 +166,69 @@ Alerta operativa: la omisión de obligaciones y notificaciones también puede es
     window.Dashboard?.syncAndRender?.();
   }
 
+  // --- Nuevos métodos de sesión ---
+  async function checkSession() {
+    const loader = document.getElementById('auth-loader');
+    if (loader) loader.style.display = 'block';
+
+    try {
+      const client = window.APP_STATE?.supabase;
+      if (!client) {
+        _showLogin();
+        enableDemoButton();
+        if (loader) loader.style.display = 'none';
+        return false;
+      }
+
+      const { data, error } = await client.auth.getSession();
+      if (error) throw error;
+
+      const user = data?.session?.user || null;
+      if (user) {
+        currentUser = user;
+        window.APP_STATE.currentUser = user;
+        _showApp(user);
+        _injectWelcomeMessage();
+        window.Dashboard?.syncAndRender?.();
+        if (loader) loader.style.display = 'none';
+        sessionCheckResolve(true);
+        return true;
+      } else {
+        _showLogin();
+        enableDemoButton();
+        if (loader) loader.style.display = 'none';
+        sessionCheckResolve(false);
+        return false;
+      }
+    } catch (err) {
+      console.warn('[Auth] checkSession error:', err.message);
+      _showLogin();
+      enableDemoButton();
+      if (loader) loader.style.display = 'none';
+      sessionCheckResolve(false);
+      return false;
+    }
+  }
+
+  async function refreshSession() {
+    const client = window.APP_STATE?.supabase;
+    if (!client) return null;
+    try {
+      const { data, error } = await client.auth.refreshSession();
+      if (error) throw error;
+      const user = data?.user || null;
+      if (user) {
+        currentUser = user;
+        window.APP_STATE.currentUser = user;
+      }
+      return user;
+    } catch (e) {
+      console.warn('[Auth] refreshSession failed:', e.message);
+      return null;
+    }
+  }
+
+  // --- Inicialización principal ---
   async function init() {
     const submitBtn = document.getElementById('auth-submit');
     const demoBtn = document.getElementById('auth-demo');
@@ -168,6 +243,7 @@ Alerta operativa: la omisión de obligaciones y notificaciones también puede es
 
     let isRegister = false;
 
+    // Eventos de pestañas
     tabLogin?.addEventListener('click', () => {
       isRegister = false;
       tabLogin.classList.add('active');
@@ -184,6 +260,7 @@ Alerta operativa: la omisión de obligaciones y notificaciones también puede es
       if (msgEl) msgEl.hidden = true;
     });
 
+    // Envío del formulario
     submitBtn.addEventListener('click', async () => {
       const email = emailInput?.value?.trim();
       const pass = passInput?.value;
@@ -236,14 +313,17 @@ Alerta operativa: la omisión de obligaciones y notificaciones también puede es
       }
     });
 
+    // Enter en los campos
     [emailInput, passInput].forEach(el =>
       el?.addEventListener('keydown', e => {
         if (e.key === 'Enter') submitBtn.click();
       })
     );
 
+    // Botón demo
     demoBtn?.addEventListener('click', bypassToDemo);
 
+    // Olvidé contraseña
     const forgotBtn = document.getElementById('auth-forgot-password');
     forgotBtn?.addEventListener('click', async (e) => {
       e.preventDefault();
@@ -271,6 +351,7 @@ Alerta operativa: la omisión de obligaciones y notificaciones también puede es
       }
     });
 
+    // Logout
     logoutBtn?.addEventListener('click', async () => {
       try {
         await window.APP_STATE?.supabase?.auth?.signOut();
@@ -281,70 +362,18 @@ Alerta operativa: la omisión de obligaciones y notificaciones también puede es
       _showLogin();
     });
 
-    const session = await window.APP_STATE?.supabase?.auth?.getSession?.().catch(() => null);
-    const user = session?.data?.session?.user || null;
-
-    if (user) {
-      currentUser = user;
-      window.APP_STATE.currentUser = user;
-      _showApp(user);
-      _injectWelcomeMessage();
-      window.Dashboard?.syncAndRender?.();
-    } else {
-      _showLogin();
-      enableDemoButton();
-    }
+    // Iniciar verificación de sesión
+    await checkSession();
   }
 
-  async function isFirstLogin() {
-    const user = window.APP_STATE?.currentUser;
-    if (!user) return false;
-    if (user.user_metadata?.onboarding_completed === true) return false;
-    const client = window.APP_STATE?.supabase;
-    if (!client) return false;
-    try {
-      const { data } = await client.from('fiscal_metrics').select('user_id').eq('user_id', user.id).maybeSingle();
-      return !data;
-    } catch {
-      return true;
-    }
-  }
-
-  async function upsertFiscalMetrics(metrics) {
-    const client = window.APP_STATE?.supabase;
-    const user = window.APP_STATE?.currentUser;
-    if (!client || !user) return;
-    const payload = {
-      user_id: user.id,
-      income_ytd: Number(metrics.incomeYTD || 0),
-      total_processed: Number(metrics.totalProcessed || 0),
-      avg_confidence: Number(metrics.avgConfidence || 0)
-    };
-    const { error } = await client.from('fiscal_metrics').upsert(payload, { onConflict: 'user_id' });
-    if (error) throw error;
-    window.Store?.setState({
-      incomeYTD: Number(metrics.incomeYTD || 0)
-    });
-  }
-
-  async function markOnboardingDone() {
-    const client = window.APP_STATE?.supabase;
-    const user = window.APP_STATE?.currentUser;
-    if (!client || !user) return;
-    try {
-      await client.auth.updateUser({ data: { onboarding_completed: true } });
-    } catch (e) {
-      console.warn('Error marking onboarding done:', e);
-    }
-  }
-
+  // Exponer métodos
   return {
     init,
+    checkSession,
+    refreshSession,
     enableDemoButton,
     bypassToDemo,
-    isFirstLogin,
-    upsertFiscalMetrics,
-    markOnboardingDone
+    sessionCheckPromise,
   };
 })();
 
