@@ -3,14 +3,11 @@ const App = (() => {
 
   function navigateTo(view) {
     const target = VIEWS.includes(view) ? view : 'dashboard';
-    // Ocultar todas las secciones
     document.querySelectorAll('.tab-view').forEach(el => {
       el.hidden = true;
     });
-    // Mostrar la sección objetivo
     const targetEl = document.getElementById(`${target}-tab`);
     if (targetEl) targetEl.hidden = false;
-    // Actualizar botones
     document.querySelectorAll('.nav-btn[data-tab]').forEach(btn => {
       const isActive = btn.getAttribute('data-tab') === target;
       btn.classList.toggle('active', isActive);
@@ -40,7 +37,6 @@ const App = (() => {
         navigateTo(tab);
       });
     });
-    // Leer hash inicial
     const initial = (window.location.hash || '').replace('#', '');
     navigateTo(initial || 'dashboard');
   }
@@ -65,7 +61,6 @@ const App = (() => {
     inp.addEventListener('keydown', e => { if (e.key === 'Enter') validate(); });
   }
 
-  // Inicializar el chat
   function initChat() {
     const form = document.getElementById('classifier-form');
     const input = document.getElementById('classifier-input');
@@ -76,7 +71,6 @@ const App = (() => {
       e.preventDefault();
       const text = input.value.trim();
       if (!text) return;
-      // Añadir burbuja usuario
       const userBubble = document.createElement('div');
       userBubble.className = 'chat-bubble user';
       userBubble.textContent = text;
@@ -86,7 +80,6 @@ const App = (() => {
 
       try {
         const cls = await window.IntentClassifier.process(text);
-        // Mostrar análisis
         const empty = document.getElementById('classification-empty');
         const content = document.getElementById('classification-content');
         if (empty) empty.hidden = true;
@@ -102,15 +95,12 @@ const App = (() => {
         if (kwEl) kwEl.textContent = (cls.keywords_matched || []).join(', ') || '—';
         const srcEl = document.getElementById('result-source');
         if (srcEl) srcEl.textContent = cls.source === 'gemini_proxy' ? 'Gemini IA' : 'Reglas locales';
-        // Respuesta del bot
         const botBubble = document.createElement('div');
         botBubble.className = 'chat-bubble bot';
         botBubble.textContent = cls.assistant_reply || 'Consulta recibida.';
         chat.appendChild(botBubble);
         chat.scrollTop = chat.scrollHeight;
-        // Guardar en store
         window.Store?.addConversation?.({ text, intent: cls.intent, confidence: cls.confidence, is_fiscal_audit_completed: cls.intent === 'SALUD_FISCAL' });
-        // Actualizar dashboard
         window.Dashboard?.syncAndRender?.();
       } catch (err) {
         const errBubble = document.createElement('div');
@@ -121,7 +111,6 @@ const App = (() => {
       }
     });
 
-    // Quick asks
     document.querySelectorAll('.quick-ask').forEach(btn => {
       btn.addEventListener('click', () => {
         input.value = btn.getAttribute('data-prompt') || '';
@@ -135,13 +124,39 @@ const App = (() => {
     initNavigation();
     initRFC();
 
-    try { await window.AppConfig?.loadServerConfig?.(); } catch (_) {}
-    try { await window.Store?.initSupabase?.(); } catch (_) {}
-    try { await window.AuthManager?.init?.(); } catch (_) {}
-    try { await window.Dashboard?.init?.(); } catch (_) {}
-    try { await window.DocumentProcessor?.init?.(); } catch (_) {}
+    // PASO CRÍTICO: Cargar configuración del servidor ANTES de iniciar Supabase y Auth
+    console.log('[App] Cargando configuración del servidor...');
+    try {
+      await window.AppConfig?.loadServerConfig?.();
+    } catch (e) {
+      console.warn('[App] Error al cargar configuración, continuando en modo degradado:', e.message);
+    }
 
-    // Sincronizar cuando cambie el store
+    // Inicializar Store (Supabase) y Auth
+    try {
+      await window.Store?.initSupabase?.();
+    } catch (e) {
+      console.warn('[App] Error inicializando Store:', e.message);
+    }
+
+    try {
+      await window.AuthManager?.init?.();
+    } catch (e) {
+      console.warn('[App] Error inicializando Auth:', e.message);
+    }
+
+    try {
+      await window.Dashboard?.init?.();
+    } catch (e) {
+      console.warn('[App] Error inicializando Dashboard:', e.message);
+    }
+
+    try {
+      await window.DocumentProcessor?.init?.();
+    } catch (e) {
+      console.warn('[App] Error inicializando DocumentProcessor:', e.message);
+    }
+
     window.Store?.on?.('store:updated', () => window.Dashboard?.syncAndRender?.());
     window.Store?.on?.('store:reset', () => window.Dashboard?.syncAndRender?.());
 

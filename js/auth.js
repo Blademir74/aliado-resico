@@ -43,8 +43,8 @@ window.MockData = window.MockData || {
 
 const AuthManager = (() => {
   let currentUser = null;
-  let _authInitialized = false;   // Flag para evitar múltiples inicializaciones
-  let _isChecking = false;        // Bloqueo de ejecución concurrente
+  let _authInitialized = false;
+  let _isChecking = false;
   let sessionCheckResolve = null;
   let sessionCheckPromise = new Promise(resolve => { sessionCheckResolve = resolve; });
 
@@ -168,15 +168,12 @@ ${FISCAL.ART_113F}: antes de confirmar anual, se pregunta si hubo ingresos mixto
     window.Dashboard?.syncAndRender?.();
   }
 
-  // --- Métodos de sesión estabilizados ---
   async function checkSession() {
-    // Si ya está inicializado, no repetir
     if (_authInitialized) {
       console.log('[Auth] Sesión ya verificada, omitiendo checkSession');
       return true;
     }
 
-    // Evitar ejecuciones concurrentes
     if (_isChecking) {
       console.log('[Auth] checkSession ya en ejecución, esperando...');
       await sessionCheckPromise;
@@ -188,10 +185,10 @@ ${FISCAL.ART_113F}: antes de confirmar anual, se pregunta si hubo ingresos mixto
     if (loader) loader.style.display = 'block';
 
     try {
-      const client = window.APP_STATE?.supabase;
-      // Verificar si Supabase está configurado
+      // Verificar configuración de Supabase
       const url = window.AppConfig?.getSupabaseUrl?.() || '';
       const key = window.AppConfig?.getSupabaseKey?.() || '';
+      const client = window.APP_STATE?.supabase;
 
       if (!url || !key || !client) {
         console.warn('[Auth] Supabase no configurado, mostrando login con demo');
@@ -204,10 +201,9 @@ ${FISCAL.ART_113F}: antes de confirmar anual, se pregunta si hubo ingresos mixto
         return false;
       }
 
-      // Validar sesión con getUser() (token validado en servidor)
+      // Validar sesión con getUser()
       const { data, error } = await client.auth.getUser();
       if (error || !data?.user) {
-        // Token inválido o expirado: limpiar sesión local
         await client.auth.signOut().catch(() => {});
         _showLogin();
         enableDemoButton();
@@ -231,7 +227,6 @@ ${FISCAL.ART_113F}: antes de confirmar anual, se pregunta si hubo ingresos mixto
       return true;
     } catch (err) {
       console.warn('[Auth] checkSession error:', err.message);
-      // En caso de error, mostrar login y habilitar demo
       const client = window.APP_STATE?.supabase;
       if (client) await client.auth.signOut().catch(() => {});
       _showLogin();
@@ -262,9 +257,7 @@ ${FISCAL.ART_113F}: antes de confirmar anual, se pregunta si hubo ingresos mixto
     }
   }
 
-  // --- Inicialización principal (única llamada) ---
   async function init() {
-    // Si ya está inicializado, no hacer nada
     if (_authInitialized) {
       console.log('[Auth] Ya inicializado, omitiendo init');
       return;
@@ -286,7 +279,6 @@ ${FISCAL.ART_113F}: antes de confirmar anual, se pregunta si hubo ingresos mixto
 
     let isRegister = false;
 
-    // Eventos de pestañas
     tabLogin?.addEventListener('click', () => {
       isRegister = false;
       tabLogin.classList.add('active');
@@ -303,7 +295,6 @@ ${FISCAL.ART_113F}: antes de confirmar anual, se pregunta si hubo ingresos mixto
       if (msgEl) msgEl.hidden = true;
     });
 
-    // Envío del formulario
     submitBtn.addEventListener('click', async () => {
       const email = emailInput?.value?.trim();
       const pass = passInput?.value;
@@ -343,7 +334,7 @@ ${FISCAL.ART_113F}: antes de confirmar anual, se pregunta si hubo ingresos mixto
         _showApp(currentUser);
         _injectWelcomeMessage();
         window.Dashboard?.syncAndRender?.();
-        _authInitialized = true; // Marcar como inicializado después de login exitoso
+        _authInitialized = true;
       } catch (err) {
         const map = {
           'Invalid login credentials': 'Correo o contraseña incorrectos.',
@@ -357,17 +348,14 @@ ${FISCAL.ART_113F}: antes de confirmar anual, se pregunta si hubo ingresos mixto
       }
     });
 
-    // Enter en los campos
     [emailInput, passInput].forEach(el =>
       el?.addEventListener('keydown', e => {
         if (e.key === 'Enter') submitBtn.click();
       })
     );
 
-    // Botón demo
     demoBtn?.addEventListener('click', bypassToDemo);
 
-    // Olvidé contraseña
     const forgotBtn = document.getElementById('auth-forgot-password');
     forgotBtn?.addEventListener('click', async (e) => {
       e.preventDefault();
@@ -395,7 +383,6 @@ ${FISCAL.ART_113F}: antes de confirmar anual, se pregunta si hubo ingresos mixto
       }
     });
 
-    // Logout
     logoutBtn?.addEventListener('click', async () => {
       try {
         await window.APP_STATE?.supabase?.auth?.signOut();
@@ -403,16 +390,14 @@ ${FISCAL.ART_113F}: antes de confirmar anual, se pregunta si hubo ingresos mixto
       window.Store?.reset?.();
       window.APP_STATE.currentUser = null;
       window.APP_STATE.isDemo = false;
-      _authInitialized = false; // Resetear para permitir nuevo login
+      _authInitialized = false;
       _showLogin();
       enableDemoButton();
     });
 
-    // Iniciar verificación de sesión (solo una vez)
     await checkSession();
   }
 
-  // Exponer métodos
   return {
     init,
     checkSession,
@@ -420,7 +405,6 @@ ${FISCAL.ART_113F}: antes de confirmar anual, se pregunta si hubo ingresos mixto
     enableDemoButton,
     bypassToDemo,
     sessionCheckPromise,
-    // Para depuración (pero sin exponer claves)
     isInitialized: () => _authInitialized
   };
 })();
