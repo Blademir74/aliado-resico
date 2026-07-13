@@ -3,9 +3,7 @@ const App = (() => {
 
   function navigateTo(view) {
     const target = VIEWS.includes(view) ? view : 'dashboard';
-    document.querySelectorAll('.tab-view').forEach(el => {
-      el.hidden = true;
-    });
+    document.querySelectorAll('.tab-view').forEach(el => el.hidden = true);
     const targetEl = document.getElementById(`${target}-tab`);
     if (targetEl) targetEl.hidden = false;
     document.querySelectorAll('.nav-btn[data-tab]').forEach(btn => {
@@ -32,10 +30,7 @@ const App = (() => {
 
   function initNavigation() {
     document.querySelectorAll('.nav-btn[data-tab]').forEach(btn => {
-      btn.addEventListener('click', () => {
-        const tab = btn.getAttribute('data-tab');
-        navigateTo(tab);
-      });
+      btn.addEventListener('click', () => navigateTo(btn.getAttribute('data-tab')));
     });
     const initial = (window.location.hash || '').replace('#', '');
     navigateTo(initial || 'dashboard');
@@ -89,12 +84,9 @@ const App = (() => {
           const cat = window.CATEGORY_CONFIG?.[cls.intent] || { icon: '💬', label: cls.intent };
           intentEl.textContent = `${cat.icon} ${cat.label}`;
         }
-        const confVal = document.getElementById('result-confidence-val');
-        if (confVal) confVal.textContent = `${Math.round(cls.confidence * 100)}%`;
-        const kwEl = document.getElementById('result-keywords');
-        if (kwEl) kwEl.textContent = (cls.keywords_matched || []).join(', ') || '—';
-        const srcEl = document.getElementById('result-source');
-        if (srcEl) srcEl.textContent = cls.source === 'gemini_proxy' ? 'Gemini IA' : 'Reglas locales';
+        document.getElementById('result-confidence-val').textContent = `${Math.round(cls.confidence * 100)}%`;
+        document.getElementById('result-keywords').textContent = (cls.keywords_matched || []).join(', ') || '—';
+        document.getElementById('result-source').textContent = cls.source === 'gemini_proxy' ? 'Gemini IA' : 'Reglas locales';
         const botBubble = document.createElement('div');
         botBubble.className = 'chat-bubble bot';
         botBubble.textContent = cls.assistant_reply || 'Consulta recibida.';
@@ -119,15 +111,33 @@ const App = (() => {
     });
   }
 
+  // ============================================================
+  // FLUJO PRINCIPAL: Configuración → Autenticación → Dashboard
+  // ============================================================
   async function init() {
     initTheme();
     initNavigation();
     initRFC();
 
-    // ============================================================
-    // PASO 1: Cargar configuración del servidor
-    // Si falla, mostramos login con demo habilitado y NO continuamos
-    // ============================================================
+    // 1. MOSTRAR OVERLAY DE LOGIN POR DEFECTO (estable)
+    const overlay = document.getElementById('auth-overlay');
+    if (overlay) {
+      overlay.hidden = false;
+      overlay.style.display = 'flex';
+    }
+    const app = document.getElementById('app');
+    if (app) {
+      app.hidden = true;
+      app.style.display = 'none';
+    }
+    // Asegurar que el botón demo esté visible pero deshabilitado inicialmente
+    const demoBtn = document.getElementById('auth-demo');
+    if (demoBtn) {
+      demoBtn.hidden = false;
+      demoBtn.disabled = true; // se habilitará si falla la configuración
+    }
+
+    // 2. CARGAR CONFIGURACIÓN DEL SERVIDOR
     let configOk = false;
     try {
       configOk = await window.AppConfig?.loadServerConfig?.() || false;
@@ -135,27 +145,21 @@ const App = (() => {
       console.warn('[App] Error al cargar configuración:', e.message);
     }
 
-    // Si la configuración no está disponible, mostrar login y habilitar demo
+    // 3. Si la configuración falla, habilitar demo y detener flujo de autenticación
     if (!configOk) {
-      console.warn('[App] Configuración no disponible. Mostrando login con demo.');
-      // Asegurar que el overlay esté visible y el botón demo habilitado
-      const overlay = document.getElementById('auth-overlay');
-      if (overlay) {
-        overlay.hidden = false;
-        overlay.style.display = 'flex';
+      console.warn('[App] Configuración no disponible. Modo Demo habilitado.');
+      if (demoBtn) demoBtn.disabled = false;
+      // Mostrar mensaje en el overlay
+      const msgEl = document.getElementById('auth-msg');
+      if (msgEl) {
+        msgEl.hidden = false;
+        msgEl.textContent = '⚠️ Servicio de autenticación no disponible. Usa "Ver Demo" para explorar.';
+        msgEl.style.color = '#f59e0b';
       }
-      const demoBtn = document.getElementById('auth-demo');
-      if (demoBtn) {
-        demoBtn.hidden = false;
-        demoBtn.disabled = false;
-      }
-      // No continuar con autenticación
-      return;
+      return; // No continuar con autenticación
     }
 
-    // ============================================================
-    // PASO 2: Inicializar Store (Supabase) y Auth solo si hay config
-    // ============================================================
+    // 4. Configuración OK: Inicializar Supabase y Auth
     try {
       await window.Store?.initSupabase?.();
     } catch (e) {
@@ -168,18 +172,19 @@ const App = (() => {
       console.warn('[App] Error inicializando Auth:', e.message);
     }
 
+    // 5. Inicializar módulos del dashboard
     try {
       await window.Dashboard?.init?.();
     } catch (e) {
       console.warn('[App] Error inicializando Dashboard:', e.message);
     }
-
     try {
       await window.DocumentProcessor?.init?.();
     } catch (e) {
       console.warn('[App] Error inicializando DocumentProcessor:', e.message);
     }
 
+    // 6. Sincronizar eventos
     window.Store?.on?.('store:updated', () => window.Dashboard?.syncAndRender?.());
     window.Store?.on?.('store:reset', () => window.Dashboard?.syncAndRender?.());
 

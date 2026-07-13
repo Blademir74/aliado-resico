@@ -45,8 +45,7 @@ const AuthManager = (() => {
   let currentUser = null;
   let _authInitialized = false;
   let _isChecking = false;
-  let sessionCheckResolve = null;
-  let sessionCheckPromise = new Promise(resolve => { sessionCheckResolve = resolve; });
+  let _checkPromise = null;
 
   const FISCAL = {
     INCOME_LIMIT: 3500000,
@@ -58,9 +57,7 @@ const AuthManager = (() => {
     ART_86C: 'Art. 86-C CFF'
   };
 
-  function getAppEl() {
-    return document.getElementById('app');
-  }
+  function getAppEl() { return document.getElementById('app'); }
 
   function removeGuard() {
     const guard = document.getElementById('auth-guard-css');
@@ -128,34 +125,19 @@ const AuthManager = (() => {
     if (document.getElementById('demo-banner')) return;
     const banner = document.createElement('div');
     banner.id = 'demo-banner';
-    banner.style.cssText =
-      'position:fixed;top:0;left:0;right:0;z-index:9999;background:#92400e;color:#fff;padding:10px 16px;text-align:center;font-size:13px;font-weight:600;';
-    banner.textContent =
-      `⚠️ MODO DEMO — ${FISCAL.ART_17K}: multa hasta $${FISCAL.MULTA_BUZON.toLocaleString('es-MX')} MXN por Buzón Tributario inactivo.`;
+    banner.style.cssText = 'position:fixed;top:0;left:0;right:0;z-index:9999;background:#92400e;color:#fff;padding:10px 16px;text-align:center;font-size:13px;font-weight:600;';
+    banner.textContent = `⚠️ MODO DEMO — ${FISCAL.ART_17K}: multa hasta $${FISCAL.MULTA_BUZON.toLocaleString('es-MX')} MXN por Buzón Tributario inactivo.`;
     document.body.prepend(banner);
   }
 
   function _injectWelcomeMessage() {
     const chatEl = document.getElementById('chat-messages');
-    if (!chatEl) return;
-    if (chatEl.dataset.welcomeInjected === '1') return;
+    if (!chatEl || chatEl.dataset.welcomeInjected === '1') return;
     chatEl.dataset.welcomeInjected = '1';
-
     const bubble = document.createElement('div');
     bubble.className = 'chat-bubble bot';
     bubble.textContent =
-      `🛡️ Aliado RESICO activo.
-
-${FISCAL.ART_113E}: tu límite anual es $${FISCAL.INCOME_LIMIT.toLocaleString('es-MX')} MXN.
-Al 94% ($${FISCAL.ALERT_94.toLocaleString('es-MX')} MXN) debes tratarlo como riesgo de expulsión.
-
-${FISCAL.ART_17K}: Buzón Tributario inactivo = multa hasta $${FISCAL.MULTA_BUZON.toLocaleString('es-MX')} MXN y pérdida de plazos; la reincidencia escala el riesgo (${FISCAL.ART_86C}).
-
-${FISCAL.ART_113F}: antes de confirmar anual, se pregunta si hubo ingresos mixtos.
-
-📘 **Educación fiscal**:
-- El ISR en RESICO se calcula sobre ingresos brutos, sin deducciones de gastos.
-- El IVA solo es acreditable si cuentas con CFDI válido que acredite el gasto indispensable.`;
+      `🛡️ Aliado RESICO activo.\n\n${FISCAL.ART_113E}: tu límite anual es $${FISCAL.INCOME_LIMIT.toLocaleString('es-MX')} MXN.\nAl 94% ($${FISCAL.ALERT_94.toLocaleString('es-MX')} MXN) debes tratarlo como riesgo de expulsión.\n\n${FISCAL.ART_17K}: Buzón Tributario inactivo = multa hasta $${FISCAL.MULTA_BUZON.toLocaleString('es-MX')} MXN y pérdida de plazos; la reincidencia escala el riesgo (${FISCAL.ART_86C}).\n\n${FISCAL.ART_113F}: antes de confirmar anual, se pregunta si hubo ingresos mixtos.\n\n📘 **Educación fiscal**:\n- El ISR en RESICO se calcula sobre ingresos brutos, sin deducciones de gastos.\n- El IVA solo es acreditable si cuentas con CFDI válido que acredite el gasto indispensable.`;
     chatEl.appendChild(bubble);
   }
 
@@ -169,89 +151,78 @@ ${FISCAL.ART_113F}: antes de confirmar anual, se pregunta si hubo ingresos mixto
   }
 
   // ============================================================
-  // checkSession: se ejecuta UNA SOLA VEZ y decide el estado final
+  // checkSession: ejecución única y controlada
   // ============================================================
   async function checkSession() {
-    // Si ya está inicializado, no hacer nada
     if (_authInitialized) {
-      console.log('[Auth] Sesión ya verificada, omitiendo checkSession');
+      console.log('[Auth] Sesión ya verificada');
       return true;
     }
-
-    // Evitar ejecuciones concurrentes
     if (_isChecking) {
-      console.log('[Auth] checkSession ya en ejecución, esperando...');
-      await sessionCheckPromise;
-      return _authInitialized;
+      console.log('[Auth] checkSession en ejecución, esperando...');
+      return _checkPromise;
     }
 
     _isChecking = true;
-    const loader = document.getElementById('auth-loader');
-    if (loader) loader.style.display = 'block';
+    _checkPromise = (async () => {
+      const loader = document.getElementById('auth-loader');
+      if (loader) loader.style.display = 'block';
 
-    try {
-      // Verificar configuración de Supabase
-      const url = window.AppConfig?.getSupabaseUrl?.() || '';
-      const key = window.AppConfig?.getSupabaseKey?.() || '';
-      const client = window.APP_STATE?.supabase;
+      try {
+        const url = window.AppConfig?.getSupabaseUrl?.() || '';
+        const key = window.AppConfig?.getSupabaseKey?.() || '';
+        const client = window.APP_STATE?.supabase;
 
-      if (!url || !key || !client) {
-        console.warn('[Auth] Supabase no configurado, mostrando login con demo');
+        if (!url || !key || !client) {
+          console.warn('[Auth] Supabase no configurado');
+          _showLogin();
+          enableDemoButton();
+          if (loader) loader.style.display = 'none';
+          _authInitialized = true;
+          return false;
+        }
+
+        const { data, error } = await client.auth.getUser();
+        if (error || !data?.user) {
+          await client.auth.signOut().catch(() => {});
+          _showLogin();
+          enableDemoButton();
+          if (loader) loader.style.display = 'none';
+          _authInitialized = true;
+          return false;
+        }
+
+        currentUser = data.user;
+        window.APP_STATE.currentUser = currentUser;
+        _showApp(currentUser);
+        _injectWelcomeMessage();
+        window.Dashboard?.syncAndRender?.();
+        if (loader) loader.style.display = 'none';
+        _authInitialized = true;
+        return true;
+      } catch (err) {
+        console.warn('[Auth] checkSession error:', err.message);
+        const client = window.APP_STATE?.supabase;
+        if (client) await client.auth.signOut().catch(() => {});
         _showLogin();
         enableDemoButton();
         if (loader) loader.style.display = 'none';
         _authInitialized = true;
-        _isChecking = false;
-        sessionCheckResolve(false);
         return false;
       }
+    })();
 
-      // Validar sesión con getUser() (token validado en servidor)
-      const { data, error } = await client.auth.getUser();
-      if (error || !data?.user) {
-        // Token inválido o expirado: limpiar sesión local
-        await client.auth.signOut().catch(() => {});
-        _showLogin();
-        enableDemoButton();
-        if (loader) loader.style.display = 'none';
-        _authInitialized = true;
-        _isChecking = false;
-        sessionCheckResolve(false);
-        return false;
-      }
-
-      // Sesión válida
-      const user = data.user;
-      currentUser = user;
-      window.APP_STATE.currentUser = user;
-      _showApp(user);
-      _injectWelcomeMessage();
-      window.Dashboard?.syncAndRender?.();
-      if (loader) loader.style.display = 'none';
-      _authInitialized = true;
-      _isChecking = false;
-      sessionCheckResolve(true);
-      return true;
-    } catch (err) {
-      console.warn('[Auth] checkSession error:', err.message);
-      const client = window.APP_STATE?.supabase;
-      if (client) await client.auth.signOut().catch(() => {});
-      _showLogin();
-      enableDemoButton();
-      if (loader) loader.style.display = 'none';
-      _authInitialized = true;
-      _isChecking = false;
-      sessionCheckResolve(false);
-      return false;
-    }
+    const result = await _checkPromise;
+    _isChecking = false;
+    return result;
   }
 
   // ============================================================
-  // Inicialización principal (se llama UNA VEZ desde app.js)
+  // Inicialización (se llama UNA VEZ desde app.js)
   // ============================================================
   async function init() {
     if (_authInitialized) {
-      console.log('[Auth] Ya inicializado, omitiendo init');
+      console.log('[Auth] Ya inicializado');
       return;
     }
 
@@ -264,14 +235,10 @@ ${FISCAL.ART_113F}: antes de confirmar anual, se pregunta si hubo ingresos mixto
     const tabLogin = document.getElementById('tab-login');
     const tabRegister = document.getElementById('tab-register');
 
-    if (!submitBtn) {
-      console.warn('[Auth] No se encontró el botón de submit');
-      return;
-    }
+    if (!submitBtn) return;
 
     let isRegister = false;
 
-    // Eventos de pestañas
     tabLogin?.addEventListener('click', () => {
       isRegister = false;
       tabLogin.classList.add('active');
@@ -288,27 +255,22 @@ ${FISCAL.ART_113F}: antes de confirmar anual, se pregunta si hubo ingresos mixto
       if (msgEl) msgEl.hidden = true;
     });
 
-    // Envío del formulario
     submitBtn.addEventListener('click', async () => {
       const email = emailInput?.value?.trim();
       const pass = passInput?.value;
-
       if (!email || !pass) {
         _showAuthMsg(msgEl, 'Ingresa tu correo y contraseña.', true);
         return;
       }
-
       const client = window.APP_STATE?.supabase;
       if (!client) {
         enableDemoButton();
-        _showAuthMsg(msgEl, 'Supabase no está listo. Puedes entrar a Demo.', true);
+        _showAuthMsg(msgEl, 'Supabase no está listo. Usa Demo.', true);
         return;
       }
-
       submitBtn.disabled = true;
       submitBtn.textContent = '⏳ Procesando…';
       if (msgEl) msgEl.hidden = true;
-
       try {
         let result;
         if (isRegister) {
@@ -322,7 +284,6 @@ ${FISCAL.ART_113F}: antes de confirmar anual, se pregunta si hubo ingresos mixto
           result = await client.auth.signInWithPassword({ email, password: pass });
           if (result.error) throw result.error;
         }
-
         currentUser = result.data.user;
         window.APP_STATE.currentUser = currentUser;
         _showApp(currentUser);
@@ -342,17 +303,14 @@ ${FISCAL.ART_113F}: antes de confirmar anual, se pregunta si hubo ingresos mixto
       }
     });
 
-    // Enter en los campos
     [emailInput, passInput].forEach(el =>
       el?.addEventListener('keydown', e => {
         if (e.key === 'Enter') submitBtn.click();
       })
     );
 
-    // Botón demo
     demoBtn?.addEventListener('click', bypassToDemo);
 
-    // Olvidé contraseña
     const forgotBtn = document.getElementById('auth-forgot-password');
     forgotBtn?.addEventListener('click', async (e) => {
       e.preventDefault();
@@ -380,7 +338,6 @@ ${FISCAL.ART_113F}: antes de confirmar anual, se pregunta si hubo ingresos mixto
       }
     });
 
-    // Logout
     logoutBtn?.addEventListener('click', async () => {
       try {
         await window.APP_STATE?.supabase?.auth?.signOut();
@@ -393,7 +350,6 @@ ${FISCAL.ART_113F}: antes de confirmar anual, se pregunta si hubo ingresos mixto
       enableDemoButton();
     });
 
-    // Verificar sesión
     await checkSession();
   }
 

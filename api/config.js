@@ -1,9 +1,17 @@
 export default async function handler(_req, res) {
+  // Configurar CORS para que el frontend pueda leer la respuesta
   res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
   res.setHeader('Cache-Control', 'no-store, max-age=0');
   res.setHeader('Content-Type', 'application/json; charset=utf-8');
 
-  // Devolver las variables de entorno
+  // Manejar preflight
+  if (_req.method === 'OPTIONS') {
+    return res.status(204).end();
+  }
+
+  // Devolver configuración desde variables de entorno
   return res.status(200).json({
     ok: true,
     config: {
