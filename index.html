@@ -4,34 +4,48 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
   <title>Aliado RESICO — Blindaje Fiscal IA 2026</title>
-  <meta name="description" content="Dashboard bancario para RESICO 2026. Wizard de diagnóstico, Salud Fiscal, Monitor de ingresos." />
+  <meta name="description" content="Plataforma fiscal IA para contribuyentes RESICO. Monitor de ingresos Art. 113-E LISR, Salud Fiscal, OCR de facturas y validación RFC." />
   <meta name="theme-color" content="#0a1628" />
   <link rel="icon" type="image/png" href="./logo.png" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="./styles.css" />
+
+  <!-- Configuración global -->
+  <script>
+    window.RESICO_CONFIG = {
+      INCOME_LIMIT: 3500000,
+      ALERT80: 2800000,
+      ALERT90: 3150000,
+      ALERT94: 3290000,  // 3,500,000 * 0.94 = 3,290,000
+      MULTA_BUZON: 10260,
+      LISR113E: 'Art. 113-E LISR',
+      LISR113F: 'Art. 113-F LISR',
+      CFF17K: 'Art. 17-K CFF',
+      CFF86C: 'Art. 86-C CFF',
+      CFF17D: 'Art. 17-D CFF'
+    };
+
+    window.CATEGORY_CONFIG = {
+      CONSULTA_FISCAL: { label: 'Consulta Fiscal', icon: '📘', cssClass: 'fiscal' },
+      SOLICITUD_FACTURA: { label: 'Factura / CFDI', icon: '📄', cssClass: 'factura' },
+      REGISTRO_GASTO: { label: 'Registro de Gasto', icon: '🧾', cssClass: 'gasto' },
+      REPORTE_PAGO: { label: 'Reporte de Pago', icon: '💳', cssClass: 'pago' },
+      SALUD_FISCAL: { label: 'Salud Fiscal', icon: '🏥', cssClass: 'salud' },
+      DEVOLUCION_SALDO_A_FAVOR: { label: 'Saldo a Favor', icon: '💰', cssClass: 'devolucion' },
+      OTROS: { label: 'Consulta General', icon: '💬', cssClass: 'otros' }
+    };
+  </script>
+
   <style>
-    /* Dashboard premium - Glassmorphism */
-    body {
-      background: #0a1628;
-      font-family: 'Outfit', sans-serif;
-      color: #e2e8f0;
-    }
-    .glass {
-      background: rgba(255, 255, 255, 0.05);
-      backdrop-filter: blur(12px);
-      -webkit-backdrop-filter: blur(12px);
-      border: 1px solid rgba(255, 255, 255, 0.08);
-      border-radius: 20px;
-      box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
-    }
-    .badge-safe { background: #10b981; color: #fff; }
-    .badge-warning { background: #f59e0b; color: #0a1628; }
-    .badge-danger { background: #ef4444; color: #fff; }
-    .threshold-green { color: #10b981; }
-    .threshold-amber { color: #f59e0b; }
-    .threshold-red { color: #ef4444; }
+    /* Estilos de respaldo para evitar flashes */
+    #app { display: none; }
+    #auth-overlay { display: flex; }
+    .glass { background: rgba(255,255,255,0.05); backdrop-filter: blur(12px); border: 1px solid rgba(255,255,255,0.08); border-radius: 20px; box-shadow: 0 8px 32px rgba(0,0,0,0.4); }
+    .badge-safe { background: #10b981; color: #fff; padding: 4px 12px; border-radius: 40px; font-size: 14px; }
+    .badge-warning { background: #f59e0b; color: #0a1628; padding: 4px 12px; border-radius: 40px; font-size: 14px; }
+    .badge-danger { background: #ef4444; color: #fff; padding: 4px 12px; border-radius: 40px; font-size: 14px; }
     .progress-bar-bg { background: rgba(255,255,255,0.1); height: 12px; border-radius: 20px; overflow: hidden; }
     .progress-fill { height: 100%; transition: width 0.6s ease; }
     .btn-primary { background: #10b981; border: none; color: #fff; padding: 10px 24px; border-radius: 40px; font-weight: 600; cursor: pointer; }
@@ -43,35 +57,73 @@
     .health-item { background: rgba(255,255,255,0.03); border-radius: 12px; padding: 12px; text-align: center; border-left: 4px solid #10b981; }
     .health-item.warning { border-left-color: #f59e0b; }
     .health-item.danger { border-left-color: #ef4444; }
-    .banner-edu { background: rgba(16, 185, 129, 0.15); border: 1px solid rgba(16, 185, 129, 0.3); border-radius: 12px; padding: 12px 20px; margin: 16px 0; font-size: 14px; }
+    .banner-edu { background: rgba(16,185,129,0.15); border: 1px solid rgba(16,185,129,0.3); border-radius: 12px; padding: 12px 20px; margin: 16px 0; font-size: 14px; }
+    .tab-view { display: block; }
+    .tab-view[hidden] { display: none; }
   </style>
 </head>
 <body>
-  <!-- Overlay de autenticación (igual que antes, se omite por brevedad, pero debe incluirse) -->
-  <!-- ... (código de auth-overlay idéntico al original) ... -->
-
-  <!-- Aplicación principal -->
-  <div id="app" class="app-wrap" hidden>
-    <header class="header glass">
-      <div class="header-brand">
-        <img src="./logo.png" alt="Aliado RESICO" class="brand-logo-img" />
-        <span class="brand-name">Aliado <strong>RESICO</strong></span>
-        <span class="brand-tag">IA Fiscal</span>
+  <!-- ============ OVERLAY DE AUTENTICACIÓN ============ -->
+  <div id="auth-overlay" class="auth-overlay" style="display:flex; position:fixed; inset:0; background:rgba(10,22,40,0.95); backdrop-filter:blur(20px); align-items:center; justify-content:center; z-index:9999;">
+    <div class="auth-card" style="background:rgba(255,255,255,0.05); padding:40px; border-radius:24px; max-width:420px; width:100%; border:1px solid rgba(255,255,255,0.08);">
+      <div class="auth-logo" style="text-align:center; margin-bottom:24px;">
+        <img src="./logo.png" alt="Aliado RESICO" style="width:80px; height:auto;" />
+        <h1 style="margin:8px 0 0; color:#e2e8f0;">Aliado RESICO</h1>
+        <p style="color:#94a3b8; font-size:14px;">Blindaje Fiscal IA · RESICO 2026</p>
       </div>
-      <nav class="header-nav">
-        <button class="nav-btn active" data-tab="dashboard">Dashboard</button>
-        <button class="nav-btn" data-tab="wizard">Wizard Diagnóstico</button>
-        <button class="nav-btn" data-tab="classifier">Asistente IA</button>
-        <button class="nav-btn" data-tab="documents">Documentos</button>
+
+      <div class="auth-tabs" style="display:flex; gap:8px; margin-bottom:20px;">
+        <button class="auth-tab active" id="tab-login" style="flex:1; padding:10px; background:rgba(16,185,129,0.2); border:1px solid #10b981; border-radius:40px; color:#e2e8f0; font-weight:600; cursor:pointer;">Iniciar Sesión</button>
+        <button class="auth-tab" id="tab-register" style="flex:1; padding:10px; background:transparent; border:1px solid #475569; border-radius:40px; color:#94a3b8; font-weight:600; cursor:pointer;">Crear Cuenta</button>
+      </div>
+
+      <div id="auth-loader" style="text-align:center; padding:12px; display:none; color:#94a3b8;">⏳ Verificando sesión...</div>
+
+      <div class="form-field" style="margin-bottom:16px;">
+        <label for="auth-email" style="color:#94a3b8; font-size:14px;">Correo electrónico</label>
+        <input type="email" id="auth-email" placeholder="contador@despacho.com.mx" autocomplete="email" style="width:100%; padding:12px; background:rgba(255,255,255,0.05); border:1px solid #334155; border-radius:12px; color:#e2e8f0; font-size:16px;" />
+      </div>
+      <div class="form-field" style="margin-bottom:16px;">
+        <label for="auth-password" style="color:#94a3b8; font-size:14px;">Contraseña</label>
+        <input type="password" id="auth-password" placeholder="••••••••" autocomplete="current-password" style="width:100%; padding:12px; background:rgba(255,255,255,0.05); border:1px solid #334155; border-radius:12px; color:#e2e8f0; font-size:16px;" />
+        <a href="#" id="auth-forgot-password" style="display:block; text-align:right; font-size:12px; margin-top:6px; color:#94a3b8; text-decoration:none;">¿Olvidaste tu contraseña?</a>
+      </div>
+
+      <button id="auth-submit" class="btn-auth" style="width:100%; padding:14px; background:#10b981; border:none; border-radius:40px; color:#fff; font-weight:700; font-size:16px; cursor:pointer;">🔐 Iniciar Sesión</button>
+      <div id="auth-msg" class="auth-msg" hidden style="margin-top:12px; padding:8px; border-radius:8px; font-size:14px;"></div>
+      <button id="auth-demo" class="btn-demo" style="width:100%; margin-top:12px; padding:12px; background:transparent; border:1px solid #475569; border-radius:40px; color:#94a3b8; cursor:pointer;">Ver demo sin cuenta</button>
+
+      <p class="auth-legal" style="font-size:11px; color:#64748b; margin-top:20px; text-align:center;">
+        Tus datos están blindados con cifrado AES-256 y políticas RLS bajo la LFPDPPP.
+      </p>
+    </div>
+  </div>
+
+  <!-- ============ APLICACIÓN PRINCIPAL ============ -->
+  <div id="app" class="app-wrap" hidden style="display:none; min-height:100vh; background:#0a1628; padding:16px;">
+    <header class="header glass" style="display:flex; justify-content:space-between; align-items:center; padding:12px 20px; border-radius:20px; margin-bottom:20px;">
+      <div class="header-brand" style="display:flex; align-items:center; gap:12px;">
+        <img src="./logo.png" alt="Aliado RESICO" style="width:40px; height:auto;" />
+        <span class="brand-name" style="font-weight:600; font-size:18px; color:#e2e8f0;">Aliado <strong style="color:#10b981;">RESICO</strong></span>
+        <span class="brand-tag" style="font-size:12px; background:rgba(16,185,129,0.2); padding:4px 10px; border-radius:40px; color:#10b981;">IA Fiscal</span>
+      </div>
+      <nav class="header-nav" style="display:flex; gap:8px;">
+        <button class="nav-btn active" data-tab="dashboard" style="padding:8px 16px; background:rgba(16,185,129,0.2); border:none; border-radius:40px; color:#e2e8f0; font-weight:500; cursor:pointer;">Dashboard</button>
+        <button class="nav-btn" data-tab="wizard" style="padding:8px 16px; background:transparent; border:none; border-radius:40px; color:#94a3b8; font-weight:500; cursor:pointer;">Wizard</button>
+        <button class="nav-btn" data-tab="classifier" style="padding:8px 16px; background:transparent; border:none; border-radius:40px; color:#94a3b8; font-weight:500; cursor:pointer;">Asistente IA</button>
+        <button class="nav-btn" data-tab="documents" style="padding:8px 16px; background:transparent; border:none; border-radius:40px; color:#94a3b8; font-weight:500; cursor:pointer;">Documentos</button>
       </nav>
-      <div class="header-actions">
-        <div id="user-chip" class="user-chip" hidden><span class="user-dot"></span><span id="user-email-display"></span></div>
-        <button id="theme-toggle" class="btn-icon">🌙</button>
-        <button id="logout-btn" class="btn-ghost btn-sm" hidden>Salir</button>
+      <div class="header-actions" style="display:flex; align-items:center; gap:12px;">
+        <div id="user-chip" class="user-chip" hidden style="display:flex; align-items:center; gap:8px; background:rgba(255,255,255,0.05); padding:6px 14px; border-radius:40px;">
+          <span class="user-dot" style="width:8px; height:8px; background:#10b981; border-radius:50%; display:inline-block;"></span>
+          <span id="user-email-display" style="font-size:14px; color:#e2e8f0;"></span>
+        </div>
+        <button id="theme-toggle" class="btn-icon" style="background:transparent; border:none; font-size:20px; cursor:pointer;">🌙</button>
+        <button id="logout-btn" class="btn-ghost btn-sm" hidden style="padding:6px 14px; background:rgba(239,68,68,0.15); border:1px solid #ef4444; border-radius:40px; color:#ef4444; cursor:pointer;">Salir</button>
       </div>
     </header>
 
-    <main class="main">
+    <main class="main" style="max-width:1400px; margin:0 auto;">
       <!-- ========== DASHBOARD TAB ========== -->
       <section id="dashboard-tab" class="tab-view" role="tabpanel">
         <!-- Banner educativo -->
@@ -80,20 +132,20 @@
           IVA: <strong>solo es acreditable</strong> si cuentas con CFDI válido que acredite el gasto indispensable (Art. 1-A LIVA).
         </div>
 
-        <!-- KPI Grid -->
-        <div class="kpi-grid" style="display:grid; grid-template-columns: repeat(4,1fr); gap:16px;">
-          <div class="kpi-card glass"><p class="kpi-val" id="kpi-total">0</p><p class="kpi-label">Consultas atendidas</p></div>
-          <div class="kpi-card glass"><p class="kpi-val" id="kpi-confidence">0%</p><p class="kpi-label">Precisión IA</p></div>
-          <div class="kpi-card glass"><p class="kpi-val" id="kpi-auto-rate">92%</p><p class="kpi-label">Resolución automática</p></div>
-          <div class="kpi-card glass"><p class="kpi-val" id="kpi-response-time">2.3s</p><p class="kpi-label">Tiempo respuesta</p></div>
+        <!-- KPIs -->
+        <div class="kpi-grid" style="display:grid; grid-template-columns: repeat(4,1fr); gap:16px; margin:16px 0;">
+          <div class="kpi-card glass" style="padding:20px; text-align:center;"><p class="kpi-val" id="kpi-total" style="font-size:28px; font-weight:700; color:#e2e8f0;">0</p><p class="kpi-label" style="color:#94a3b8;">Consultas atendidas</p></div>
+          <div class="kpi-card glass" style="padding:20px; text-align:center;"><p class="kpi-val" id="kpi-confidence" style="font-size:28px; font-weight:700; color:#e2e8f0;">0%</p><p class="kpi-label" style="color:#94a3b8;">Precisión IA</p></div>
+          <div class="kpi-card glass" style="padding:20px; text-align:center;"><p class="kpi-val" id="kpi-auto-rate" style="font-size:28px; font-weight:700; color:#e2e8f0;">92%</p><p class="kpi-label" style="color:#94a3b8;">Resolución automática</p></div>
+          <div class="kpi-card glass" style="padding:20px; text-align:center;"><p class="kpi-val" id="kpi-response-time" style="font-size:28px; font-weight:700; color:#e2e8f0;">2.3s</p><p class="kpi-label" style="color:#94a3b8;">Tiempo respuesta</p></div>
         </div>
 
-        <!-- Monitor de Ingresos con umbrales -->
-        <div class="income-monitor glass" style="padding:24px; margin-top:20px;">
+        <!-- Monitor de Ingresos -->
+        <div class="income-monitor glass" style="padding:24px; margin:16px 0;">
           <div style="display:flex; justify-content:space-between; align-items:center;">
             <div>
-              <h2 class="section-title">Monitor de Ingresos RESICO 2026</h2>
-              <p class="section-sub">Art. 113-E LISR · Límite anual: $3,500,000 MXN</p>
+              <h2 style="color:#e2e8f0; font-size:20px; margin:0;">Monitor de Ingresos RESICO 2026</h2>
+              <p style="color:#94a3b8; font-size:14px; margin:4px 0 0;">Art. 113-E LISR · Límite anual: $3,500,000 MXN</p>
             </div>
             <span id="income-alert-badge" class="badge-safe">SEGURO</span>
           </div>
@@ -106,34 +158,34 @@
             <span>94% <span style="color:#ef4444;">●</span> $3.29M</span>
             <span>100%</span>
           </div>
-          <div class="income-metrics" style="display:grid; grid-template-columns: repeat(4,1fr); gap:12px; margin-top:16px;">
-            <div><span class="metric-label">Ingresado este año</span><span class="metric-val accent" id="income-current">$0 MXN</span></div>
-            <div><span class="metric-label">Límite anual</span><span class="metric-val">$3,500,000</span></div>
-            <div><span class="metric-label">Margen restante</span><span class="metric-val safe" id="income-remaining">$3,500,000</span></div>
-            <div><span class="metric-label">Proyección anual</span><span class="metric-val safe" id="projection-val">--</span></div>
+          <div class="income-metrics" style="display:grid; grid-template-columns: repeat(4,1fr); gap:16px; margin-top:16px;">
+            <div><span style="color:#94a3b8; font-size:13px;">Ingresado este año</span><br><span class="accent" id="income-current" style="font-size:18px; font-weight:600; color:#10b981;">$0 MXN</span></div>
+            <div><span style="color:#94a3b8; font-size:13px;">Límite anual</span><br><span id="income-limit" style="font-size:18px; font-weight:600; color:#e2e8f0;">$3,500,000</span></div>
+            <div><span style="color:#94a3b8; font-size:13px;">Margen restante</span><br><span class="safe" id="income-remaining" style="font-size:18px; font-weight:600; color:#10b981;">$3,500,000</span></div>
+            <div><span style="color:#94a3b8; font-size:13px;">Proyección anual</span><br><span class="safe" id="projection-val" style="font-size:18px; font-weight:600; color:#10b981;">--</span></div>
           </div>
-          <div id="income-alert-message" style="margin-top:12px;"></div>
+          <div id="income-alert-message" style="margin-top:12px; font-size:14px;"></div>
         </div>
 
-        <!-- Salud Fiscal Widget -->
-        <div class="health-widget glass" style="padding:24px; margin-top:20px;">
-          <h3>🏥 Salud Fiscal</h3>
+        <!-- Salud Fiscal -->
+        <div class="health-widget glass" style="padding:24px; margin:16px 0;">
+          <h3 style="color:#e2e8f0; margin:0 0 12px;">🏥 Salud Fiscal</h3>
           <div class="health-grid">
             <div class="health-item" id="health-buzon">
               <div style="font-size:28px;">📬</div>
-              <div><strong>Buzón Tributario</strong></div>
+              <div><strong style="color:#e2e8f0;">Buzón Tributario</strong></div>
               <div id="buzon-status" style="font-size:14px; color:#f59e0b;">Verificando...</div>
               <div style="font-size:12px; color:#94a3b8;">Multa hasta $10,260 MXN (Art. 17-K CFF)</div>
             </div>
             <div class="health-item" id="health-efirma">
               <div style="font-size:28px;">🔐</div>
-              <div><strong>e.firma SAT</strong></div>
+              <div><strong style="color:#e2e8f0;">e.firma SAT</strong></div>
               <div id="efirma-status" style="font-size:14px; color:#f59e0b;">Verificando...</div>
               <div id="efirma-days" style="font-size:12px; color:#94a3b8;">-- días restantes</div>
             </div>
             <div class="health-item" id="health-opinion">
               <div style="font-size:28px;">📊</div>
-              <div><strong>Opinión de Cumplimiento</strong></div>
+              <div><strong style="color:#e2e8f0;">Opinión de Cumplimiento</strong></div>
               <div id="opinion-status" style="font-size:14px; color:#f59e0b;">No consultada</div>
             </div>
           </div>
@@ -142,35 +194,35 @@
         </div>
 
         <!-- Actividad Reciente -->
-        <article class="card glass" style="padding:20px; margin-top:20px;">
-          <h3>📋 Actividad Reciente</h3>
-          <div id="feed-list" class="feed-list"><p class="feed-empty">Sin actividad.</p></div>
+        <article class="card glass" style="padding:20px; margin:16px 0;">
+          <h3 style="color:#e2e8f0; margin:0 0 12px;">📋 Actividad Reciente</h3>
+          <div id="feed-list" class="feed-list"><p class="feed-empty" style="color:#94a3b8;">Sin actividad.</p></div>
         </article>
       </section>
 
       <!-- ========== WIZARD TAB ========== -->
       <section id="wizard-tab" class="tab-view" role="tabpanel" hidden>
         <div class="glass" style="padding:32px; max-width:800px; margin:0 auto;">
-          <h2 style="margin-top:0;">🧭 Diagnóstico Fiscal RESICO 2026</h2>
+          <h2 style="color:#e2e8f0; margin-top:0;">🧭 Diagnóstico Fiscal RESICO 2026</h2>
           <p style="color:#94a3b8;">Responde 4 pasos para conocer tu situación fiscal y obligaciones.</p>
           <div id="wizard-container">
             <!-- Paso 1 -->
             <div class="wizard-step active" data-step="1">
-              <h3>Paso 1: Ingresos estimados</h3>
-              <p>¿Cuánto estimas facturar este año (en MXN)?</p>
-              <input type="number" id="wiz-income" placeholder="Ej. 2500000" style="width:100%; padding:12px; border-radius:8px; background:rgba(255,255,255,0.05); border:1px solid rgba(255,255,255,0.1); color:#fff;" />
+              <h3 style="color:#e2e8f0;">Paso 1: Ingresos estimados</h3>
+              <p style="color:#94a3b8;">¿Cuánto estimas facturar este año (en MXN)?</p>
+              <input type="number" id="wiz-income" placeholder="Ej. 2500000" style="width:100%; padding:12px; border-radius:8px; background:rgba(255,255,255,0.05); border:1px solid #334155; color:#e2e8f0;" />
               <button class="btn-primary" onclick="wizardNext()" style="margin-top:16px;">Siguiente →</button>
             </div>
             <!-- Paso 2 -->
             <div class="wizard-step" data-step="2">
-              <h3>Paso 2: Ingresos mixtos y socios</h3>
-              <p>¿Tienes ingresos adicionales (salarios, intereses, arrendamiento, etc.) que sumen más de $400,000 MXN anuales?</p>
-              <select id="wiz-mixtos" style="width:100%; padding:12px; border-radius:8px; background:rgba(255,255,255,0.05); border:1px solid rgba(255,255,255,0.1); color:#fff;">
+              <h3 style="color:#e2e8f0;">Paso 2: Ingresos mixtos y socios</h3>
+              <p style="color:#94a3b8;">¿Tienes ingresos adicionales (salarios, intereses, arrendamiento, etc.) que sumen más de $400,000 MXN anuales?</p>
+              <select id="wiz-mixtos" style="width:100%; padding:12px; border-radius:8px; background:rgba(255,255,255,0.05); border:1px solid #334155; color:#e2e8f0;">
                 <option value="no">No</option>
                 <option value="si">Sí</option>
               </select>
-              <p style="margin-top:12px;">¿Eres socio de una Persona Moral?</p>
-              <select id="wiz-socio" style="width:100%; padding:12px; border-radius:8px; background:rgba(255,255,255,0.05); border:1px solid rgba(255,255,255,0.1); color:#fff;">
+              <p style="color:#94a3b8; margin-top:12px;">¿Eres socio de una Persona Moral?</p>
+              <select id="wiz-socio" style="width:100%; padding:12px; border-radius:8px; background:rgba(255,255,255,0.05); border:1px solid #334155; color:#e2e8f0;">
                 <option value="no">No</option>
                 <option value="si">Sí</option>
               </select>
@@ -178,9 +230,9 @@
             </div>
             <!-- Paso 3 -->
             <div class="wizard-step" data-step="3">
-              <h3>Paso 3: CFDI Global</h3>
-              <p>¿Has emitido CFDI por todas tus operaciones del mes anterior (CFDI global o individual)?</p>
-              <select id="wiz-cfdi" style="width:100%; padding:12px; border-radius:8px; background:rgba(255,255,255,0.05); border:1px solid rgba(255,255,255,0.1); color:#fff;">
+              <h3 style="color:#e2e8f0;">Paso 3: CFDI Global</h3>
+              <p style="color:#94a3b8;">¿Has emitido CFDI por todas tus operaciones del mes anterior (CFDI global o individual)?</p>
+              <select id="wiz-cfdi" style="width:100%; padding:12px; border-radius:8px; background:rgba(255,255,255,0.05); border:1px solid #334155; color:#e2e8f0;">
                 <option value="si">Sí, he facturado todo</option>
                 <option value="no">No, tengo operaciones sin facturar</option>
               </select>
@@ -188,15 +240,15 @@
             </div>
             <!-- Paso 4: Resumen -->
             <div class="wizard-step" data-step="4">
-              <h3>✅ Diagnóstico completado</h3>
+              <h3 style="color:#e2e8f0;">✅ Diagnóstico completado</h3>
               <div id="wizard-result" style="background:rgba(255,255,255,0.03); border-radius:12px; padding:16px; margin-top:12px;">
-                <p><strong>Ingresos estimados:</strong> <span id="res-income">--</span></p>
-                <p><strong>Declaración Anual:</strong> <span id="res-anual" style="color:#10b981;">No obligatoria</span></p>
-                <p><strong>Riesgo de multa (Art. 17-K):</strong> <span id="res-multa" style="color:#10b981;">Sin riesgo</span></p>
-                <p><strong>Recomendación:</strong> <span id="res-recomendacion">--</span></p>
+                <p style="color:#e2e8f0;"><strong>Ingresos estimados:</strong> <span id="res-income">--</span></p>
+                <p style="color:#e2e8f0;"><strong>Declaración Anual:</strong> <span id="res-anual" style="color:#10b981;">No obligatoria</span></p>
+                <p style="color:#e2e8f0;"><strong>Riesgo de multa (Art. 17-K):</strong> <span id="res-multa" style="color:#10b981;">Sin riesgo</span></p>
+                <p style="color:#e2e8f0;"><strong>Recomendación:</strong> <span id="res-recomendacion">--</span></p>
               </div>
               <button class="btn-primary" onclick="saveDiagnostic()" style="margin-top:16px;">Guardar diagnóstico</button>
-              <button class="btn-ghost" onclick="resetWizard()" style="margin-left:12px; background:transparent; border:1px solid #64748b; padding:10px 20px; border-radius:40px; color:#94a3b8;">Reiniciar</button>
+              <button class="btn-ghost" onclick="resetWizard()" style="margin-left:12px; background:transparent; border:1px solid #64748b; padding:10px 20px; border-radius:40px; color:#94a3b8; cursor:pointer;">Reiniciar</button>
             </div>
           </div>
           <div id="wizard-progress" style="display:flex; justify-content:space-between; margin-top:24px; font-size:13px; color:#64748b;">
@@ -205,17 +257,81 @@
         </div>
       </section>
 
-      <!-- Classifier y Documents tabs (idénticos al original, se omiten por brevedad) -->
-      <!-- ... -->
+      <!-- ========== ASISTENTE IA TAB ========== -->
+      <section id="classifier-tab" class="tab-view" role="tabpanel" hidden>
+        <div class="classifier-layout" style="display:grid; grid-template-columns:2fr 1fr; gap:20px;">
+          <div class="chat-panel glass" style="padding:20px; display:flex; flex-direction:column; min-height:500px;">
+            <div class="chat-header" style="margin-bottom:12px;"><span class="chat-title" style="font-weight:600; color:#e2e8f0;">Asistente Fiscal RESICO</span></div>
+            <div id="chat-messages" class="chat-messages" style="flex:1; overflow-y:auto; margin-bottom:12px; padding:8px; background:rgba(0,0,0,0.2); border-radius:12px; max-height:400px;">
+              <div class="chat-bubble bot" data-welcome="true" style="background:rgba(16,185,129,0.15); padding:12px; border-radius:12px; color:#e2e8f0; margin-bottom:8px;">
+                Bienvenido a Aliado RESICO. Puedo ayudarte con límite anual, declaración anual condicional, IVA, ISR, saldo a favor y salud fiscal.
+              </div>
+            </div>
+            <form id="classifier-form" class="chat-form" autocomplete="off" style="display:flex; gap:8px;">
+              <input type="text" id="classifier-input" placeholder="Ej. ¿Debo presentar declaración anual si solo tuve RESICO?" style="flex:1; padding:12px; border-radius:40px; background:rgba(255,255,255,0.05); border:1px solid #334155; color:#e2e8f0;" />
+              <button id="classifier-submit" type="submit" class="btn-send" style="padding:12px 24px; background:#10b981; border:none; border-radius:40px; color:#fff; font-weight:600; cursor:pointer;">Enviar</button>
+            </form>
+          </div>
+          <div class="classifier-side">
+            <article class="card glass" style="padding:20px; margin-bottom:16px;">
+              <h3 style="color:#e2e8f0; margin:0 0 12px;">🧠 Análisis</h3>
+              <div id="classification-empty" class="result-empty" style="color:#94a3b8;">Envía una consulta para ver el análisis fiscal.</div>
+              <div id="classification-content" hidden>
+                <div id="result-intent" style="font-weight:600; color:#10b981;"></div>
+                <div class="result-row" style="display:flex; justify-content:space-between; align-items:center; margin-top:8px;">
+                  <span style="color:#94a3b8;">Confianza</span>
+                  <span id="result-confidence-val">0%</span>
+                </div>
+                <div class="result-row"><span style="color:#94a3b8;">Keywords</span><span id="result-keywords">—</span></div>
+                <div class="result-row"><span style="color:#94a3b8;">Fuente</span><span id="result-source">—</span></div>
+                <div id="result-resico-context" hidden></div>
+                <div id="result-salud-alerta" hidden></div>
+              </div>
+            </article>
+            <article class="card glass" style="padding:20px;">
+              <h3 style="color:#e2e8f0; margin:0 0 12px;">⚡ Consultas frecuentes</h3>
+              <button class="quick-ask" data-prompt="¿Debo presentar declaración anual si solo tuve RESICO?" style="display:block; width:100%; padding:8px; margin-bottom:8px; background:rgba(255,255,255,0.05); border:1px solid #334155; border-radius:40px; color:#e2e8f0; cursor:pointer;">Declaración anual</button>
+              <button class="quick-ask" data-prompt="Cobré 50000 este mes" style="display:block; width:100%; padding:8px; margin-bottom:8px; background:rgba(255,255,255,0.05); border:1px solid #334155; border-radius:40px; color:#e2e8f0; cursor:pointer;">Registrar ingreso</button>
+              <button class="quick-ask" data-prompt="Mi buzón tributario está inactivo" style="display:block; width:100%; padding:8px; margin-bottom:8px; background:rgba(255,255,255,0.05); border:1px solid #334155; border-radius:40px; color:#e2e8f0; cursor:pointer;">Buzón Tributario</button>
+            </article>
+          </div>
+        </div>
+      </section>
+
+      <!-- ========== DOCUMENTOS TAB ========== -->
+      <section id="documents-tab" class="tab-view" role="tabpanel" hidden>
+        <div class="grid grid-2" style="display:grid; grid-template-columns:1fr 1fr; gap:20px;">
+          <article class="card glass" style="padding:20px;">
+            <h3 style="color:#e2e8f0; margin:0 0 12px;">🧾 Procesar Documento Fiscal</h3>
+            <p style="color:#94a3b8;">Sube una factura, ticket o CFDI para extraer RFC, subtotal, IVA, total, fecha y folio.</p>
+            <input id="file-input" class="input" type="file" accept="image/*,.pdf,application/pdf" style="width:100%; padding:12px; background:rgba(255,255,255,0.05); border:1px solid #334155; border-radius:8px; color:#e2e8f0;" />
+            <button id="ocr-process-btn" class="primary-btn" style="margin-top:12px; padding:10px 24px; background:#10b981; border:none; border-radius:40px; color:#fff; font-weight:600; cursor:pointer;">Analizar documento</button>
+            <div id="ocr-output" class="ocr-result" style="margin-top:12px; color:#94a3b8;">
+              <p class="ocr-placeholder">El IVA desglosado es indispensable para acreditamiento; el ISR RESICO no deduce este gasto.</p>
+            </div>
+          </article>
+          <article class="card glass" style="padding:20px;">
+            <h3 style="color:#e2e8f0; margin:0 0 12px;">🔍 Validador de RFC</h3>
+            <div class="rfc-row" style="display:flex; gap:8px;">
+              <input type="text" id="rfc-input" class="input" placeholder="Ej. GOPE820731RFA" maxlength="13" style="flex:1; padding:12px; background:rgba(255,255,255,0.05); border:1px solid #334155; border-radius:8px; color:#e2e8f0;" />
+              <button id="rfc-validate-btn" class="primary-btn" style="padding:10px 24px; background:#10b981; border:none; border-radius:40px; color:#fff; font-weight:600; cursor:pointer;">Validar</button>
+            </div>
+            <div id="rfc-result" class="rfc-result" style="margin-top:12px;"></div>
+            <p class="footer-note" style="font-size:12px; color:#64748b;">RFC genérico nacional: XAXX010101000 · Extranjero: XEXX010101000</p>
+          </article>
+        </div>
+      </section>
     </main>
   </div>
 
-  <!-- Scripts (orden estricto) -->
+  <!-- ============ SCRIPTS ============ -->
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script src="./js/config.js" defer></script>
   <script src="./js/auth.js" defer></script>
   <script src="./js/store.js" defer></script>
   <script src="./js/FiscalWizard.js" defer></script>
+  <script src="./js/classifier.js" defer></script>
+  <script src="./js/ocr.js" defer></script>
   <script src="./js/dashboard.js" defer></script>
   <script src="./js/app.js" defer></script>
 </body>
