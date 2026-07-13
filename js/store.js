@@ -47,6 +47,16 @@ const Store = (() => {
       opinionStatus: null,
       lastUpdated: null,
     },
+    diagnostic: {
+      income: 0,
+      mixtos: false,
+      socioPM: false,
+      cfdiGlobal: false,
+      anualObligatoria: false,
+      riesgoMulta: false,
+      recomendacion: '',
+      completedAt: null
+    }
   };
 
   function clone(v) { return JSON.parse(JSON.stringify(v)); }
@@ -306,6 +316,7 @@ const Store = (() => {
       settings: { ...state.settings, ...(partial.settings || {}) },
       saludFiscal: { ...state.saludFiscal, ...(partial.saludFiscal || {}) },
       carpetaFiscal: { ...state.carpetaFiscal, ...(partial.carpetaFiscal || {}) },
+      diagnostic: { ...state.diagnostic, ...(partial.diagnostic || {}) }
     };
     recalc();
     persist();
