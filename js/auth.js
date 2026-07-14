@@ -196,7 +196,7 @@ const AuthManager = (() => {
   }
 
   // ============================================================
-  // checkSession: ejecución única y controlada
+  // checkSession: con manejo de 403 y creación automática de fila
   // ============================================================
   async function checkSession() {
     if (_authInitialized) {
@@ -212,7 +212,6 @@ const AuthManager = (() => {
     _checkPromise = (async () => {
       const loader = document.getElementById('auth-loader');
       if (loader) loader.style.display = 'block';
-      // Asegurar que overlay esté visible
       const overlay = document.getElementById('auth-overlay');
       if (overlay && overlay.hidden) {
         overlay.hidden = false;
@@ -243,7 +242,7 @@ const AuthManager = (() => {
           return false;
         }
 
-        // Verificar usuario
+        // Obtener usuario
         const { data: userData, error: userError } = await client.auth.getUser();
         if (userError || !userData?.user) {
           await client.auth.signOut().catch(() => {});
@@ -254,29 +253,81 @@ const AuthManager = (() => {
           return false;
         }
 
-        // Verificar acceso a fiscal_metrics (detección de 403)
+        const userId = userData.user.id;
+
+        // ============================================================
+        // INTENTAR CONSULTAR fiscal_metrics - si falla por 403, crear fila
+        // ============================================================
+        let metricsOk = false;
         try {
-          const { error: testError } = await client
+          const { data: metricsData, error: metricsError } = await client
             .from('fiscal_metrics')
-            .select('user_id')
-            .eq('user_id', userData.user.id)
-            .limit(1)
+            .select('user_id, income_ytd, total_processed, avg_confidence')
+            .eq('user_id', userId)
             .maybeSingle();
 
-          if (testError) {
-            if (testError.code === 'PGRST301' || testError.message?.includes('permission denied') || testError.status === 403) {
-              console.warn('[Auth] Error 403 al consultar fiscal_metrics:', testError.message);
-              _showLoginWithError('Error de Autorización: Contacta a soporte para verificar tu Bóveda Fiscal.');
+          if (metricsError) {
+            // Si es 403 o 404 (tabla sin registro), intentar crear la fila
+            if (metricsError.code === 'PGRST301' || 
+                metricsError.message?.includes('permission denied') ||
+                metricsError.status === 403 ||
+                metricsError.code === 'PGRST116') { // 404 - not found
+              
+              console.warn('[Auth] No se encontró registro en fiscal_metrics, creando...');
+              // Insertar fila para el usuario
+              const { error: insertError } = await client
+                .from('fiscal_metrics')
+                .insert({
+                  user_id: userId,
+                  income_ytd: 0,
+                  total_processed: 0,
+                  avg_confidence: 0
+                })
+                .select();
+
+              if (insertError) {
+                console.warn('[Auth] Error al crear fiscal_metrics:', insertError.message);
+                _showLoginWithError('Error al inicializar Bóveda Fiscal. Contacta a soporte.');
+                enableDemoButton();
+                if (loader) loader.style.display = 'none';
+                _authInitialized = true;
+                return false;
+              }
+              metricsOk = true;
+            } else {
+              console.warn('[Auth] Error consultando fiscal_metrics:', metricsError.message);
+              _showLoginWithError('Error al acceder a Bóveda Fiscal. Contacta a soporte.');
               enableDemoButton();
               if (loader) loader.style.display = 'none';
               _authInitialized = true;
               return false;
             }
-            console.warn('[Auth] Error consultando fiscal_metrics (no 403):', testError.message);
+          } else {
+            metricsOk = true;
           }
-        } catch (testErr) {
-          if (testErr?.status === 403 || testErr?.message?.includes('403')) {
-            _showLoginWithError('Error de Autorización: Contacta a soporte para verificar tu Bóveda Fiscal.');
+        } catch (err) {
+          console.warn('[Auth] Excepción en fiscal_metrics:', err.message);
+          // Intentar crear fila por si la tabla existe pero no hay registro
+          try {
+            const { error: insertError } = await client
+              .from('fiscal_metrics')
+              .insert({
+                user_id: userId,
+                income_ytd: 0,
+                total_processed: 0,
+                avg_confidence: 0
+              })
+              .select();
+            if (insertError) {
+              _showLoginWithError('Error al inicializar Bóveda Fiscal. Contacta a soporte.');
+              enableDemoButton();
+              if (loader) loader.style.display = 'none';
+              _authInitialized = true;
+              return false;
+            }
+            metricsOk = true;
+          } catch (err2) {
+            _showLoginWithError('Error crítico al acceder a Bóveda Fiscal.');
             enableDemoButton();
             if (loader) loader.style.display = 'none';
             _authInitialized = true;
@@ -284,15 +335,24 @@ const AuthManager = (() => {
           }
         }
 
-        // Todo OK
-        currentUser = userData.user;
-        window.APP_STATE.currentUser = currentUser;
-        _showApp(currentUser);
-        _injectWelcomeMessage();
-        window.Dashboard?.syncAndRender?.();
-        if (loader) loader.style.display = 'none';
-        _authInitialized = true;
-        return true;
+        // Si todo OK, continuar
+        if (metricsOk) {
+          currentUser = userData.user;
+          window.APP_STATE.currentUser = currentUser;
+          _showApp(currentUser);
+          _injectWelcomeMessage();
+          window.Dashboard?.syncAndRender?.();
+          if (loader) loader.style.display = 'none';
+          _authInitialized = true;
+          return true;
+        } else {
+          // Fallback a login
+          _showLogin();
+          enableDemoButton();
+          if (loader) loader.style.display = 'none';
+          _authInitialized = true;
+          return false;
+        }
       } catch (err) {
         console.warn('[Auth] checkSession error:', err.message);
         if (err?.status === 403 || err?.message?.includes('403') || err?.message?.includes('permission denied')) {
