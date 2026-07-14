@@ -48,7 +48,7 @@ const AuthManager = (() => {
   let _authInitialized = false;
   let _initializing = false;
   let _initPromise = null;
-  let isRegister = false; // Estado para login/register
+  let isRegister = false;
 
   const FISCAL = {
     INCOME_LIMIT: 3500000,
@@ -115,6 +115,11 @@ const AuthManager = (() => {
     if (logoutBtn) logoutBtn.hidden = false;
     window.APP_STATE.authError = null;
     window.APP_STATE.currentUser = user;
+    
+    // FORZAR RENDERIZADO DEL DASHBOARD
+    if (window.Dashboard?.syncAndRender) {
+      setTimeout(() => window.Dashboard.syncAndRender(), 100);
+    }
   }
 
   function _injectWelcomeMessage() {
@@ -148,14 +153,20 @@ const AuthManager = (() => {
   function bypassToDemo() {
     window.APP_STATE.isDemo = true;
     _showDemoBanner();
-    _showApp(null);
+    // Cargar datos de mock
     window.MockData?.load?.(window.Store);
+    // Mostrar app
+    _showApp(null);
+    // Inyectar mensaje de bienvenida
     _injectWelcomeMessage();
-    window.Dashboard?.syncAndRender?.();
+    // Renderizar dashboard (ya se llama desde _showApp, pero por si acaso)
+    if (window.Dashboard?.syncAndRender) {
+      setTimeout(() => window.Dashboard.syncAndRender(), 200);
+    }
   }
 
   // ================================================================
-  // INICIALIZACIÓN PRINCIPAL CON Promise.all
+  // INICIALIZACIÓN PRINCIPAL CON Promise.all + timeout
   // ================================================================
   async function initialize() {
     if (_authInitialized) return true;
@@ -180,9 +191,17 @@ const AuthManager = (() => {
       }
 
       try {
-        const [sessionResult, metricsResult] = await Promise.all([
-          client.auth.getSession(),
-          client.from('fiscal_metrics').select('user_id').limit(1)
+        // Timeout para evitar bloqueo eterno
+        const timeoutPromise = new Promise((_, reject) => {
+          setTimeout(() => reject(new Error('Timeout al conectar con Supabase')), 8000);
+        });
+
+        const [sessionResult, metricsResult] = await Promise.race([
+          Promise.all([
+            client.auth.getSession(),
+            client.from('fiscal_metrics').select('user_id').limit(1)
+          ]),
+          timeoutPromise.then(() => { throw new Error('Timeout'); })
         ]);
 
         const { data: sessionData, error: sessionError } = sessionResult;
@@ -219,7 +238,7 @@ const AuthManager = (() => {
         window.APP_STATE.currentUser = user;
         _showApp(user);
         _injectWelcomeMessage();
-        window.Dashboard?.syncAndRender?.();
+        // Dashboard se renderiza desde _showApp
         _authInitialized = true;
         _initializing = false;
         return true;
@@ -239,7 +258,7 @@ const AuthManager = (() => {
   }
 
   // ================================================================
-  // CONFIGURACIÓN DE EVENTOS DE AUTENTICACIÓN (BOTONES)
+  // CONFIGURACIÓN DE EVENTOS DE AUTENTICACIÓN
   // ================================================================
   function bindEvents() {
     const submitBtn = document.getElementById('auth-submit');
@@ -312,6 +331,8 @@ const AuthManager = (() => {
               msgEl.className = 'auth-msg success';
               msgEl.style.color = '#10b981';
             }
+            submitBtn.disabled = false;
+            submitBtn.textContent = '✅ Crear Cuenta';
             return;
           }
         } else {
@@ -322,7 +343,19 @@ const AuthManager = (() => {
         currentUser = result.data.user;
         window.APP_STATE.currentUser = currentUser;
         // Ejecutar inicialización completa (verifica RLS)
-        await initialize();
+        const success = await initialize();
+        if (!success) {
+          // Si falla, mostramos error pero no ocultamos el overlay
+          if (msgEl) {
+            msgEl.hidden = false;
+            msgEl.textContent = 'No se pudo acceder a tu Bóveda Fiscal. Intenta con Demo.';
+            msgEl.className = 'auth-msg error';
+            msgEl.style.color = '#ef4444';
+          }
+          // Habilitar demo
+          const demoBtn = document.getElementById('auth-demo');
+          if (demoBtn) { demoBtn.disabled = false; demoBtn.hidden = false; }
+        }
       } catch (err) {
         const map = {
           'Invalid login credentials': 'Correo o contraseña incorrectos.',
@@ -406,13 +439,11 @@ const AuthManager = (() => {
       window.APP_STATE.currentUser = null;
       window.APP_STATE.isDemo = false;
       _authInitialized = false;
-      // Ocultar app, mostrar overlay
       const app = getAppEl();
       if (app) { app.hidden = true; app.style.display = 'none'; }
       _setOverlayState(true, '🔐 Sesión cerrada. Inicia sesión de nuevo.', false);
       const banner = document.getElementById('demo-banner');
       if (banner) banner.remove();
-      // Habilitar demo
       const demoBtn = document.getElementById('auth-demo');
       if (demoBtn) { demoBtn.disabled = false; demoBtn.hidden = false; }
     });
@@ -426,9 +457,7 @@ const AuthManager = (() => {
       console.log('[Auth] Ya inicializado');
       return;
     }
-    // Primero configurar eventos
     bindEvents();
-    // Luego ejecutar inicialización de autenticación
     await initialize();
   }
 
