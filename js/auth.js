@@ -67,7 +67,8 @@ const AuthManager = (() => {
     if (guard) guard.remove();
   }
 
-  function _setOverlayVisible(visible, message, isError = false) {
+  // Control total del overlay: visible, mensaje y estado del botón demo
+  function _setOverlayState(visible, message, isError = false) {
     const overlay = document.getElementById('auth-overlay');
     const msg = document.getElementById('auth-msg');
     const loader = document.getElementById('auth-loader');
@@ -78,17 +79,15 @@ const AuthManager = (() => {
     if (visible) {
       overlay.hidden = false;
       overlay.style.display = 'flex';
-      // Mostrar mensaje si existe
       if (msg) {
         msg.hidden = false;
-        msg.textContent = message || 'Verificando Bóveda Fiscal...';
+        msg.textContent = message || '🔒 Verificando Bóveda Fiscal...';
         msg.className = isError ? 'auth-msg error' : 'auth-msg info';
         msg.style.color = isError ? '#ef4444' : '#f59e0b';
       }
       if (loader) loader.style.display = 'none';
-      // Si hay error, habilitar demo; si no, deshabilitado
       if (demoBtn) {
-        demoBtn.disabled = !isError;
+        demoBtn.disabled = !isError; // solo habilitar si hay error
         demoBtn.hidden = false;
       }
     } else {
@@ -101,15 +100,13 @@ const AuthManager = (() => {
 
   function _showApp(user) {
     removeGuard();
-    // Ocultar overlay definitivamente
-    _setOverlayVisible(false);
+    _setOverlayState(false); // ocultar definitivamente
     const app = getAppEl();
     if (app) {
       app.hidden = false;
       app.style.display = '';
-      void app.offsetHeight; // force reflow
+      void app.offsetHeight; // forzar reflow
     }
-    // Mostrar datos de usuario
     const chip = document.getElementById('user-chip');
     const emailEl = document.getElementById('user-email-display');
     const logoutEl = document.getElementById('logout-btn');
@@ -159,7 +156,9 @@ const AuthManager = (() => {
     window.Dashboard?.syncAndRender?.();
   }
 
-  // --- Función de inicialización principal (Promise) ---
+  // ================================================================
+  // INICIALIZACIÓN PRINCIPAL CON Promise.all
+  // ================================================================
   async function initialize() {
     // Si ya está inicializado, devolver éxito
     if (_authInitialized) {
@@ -173,8 +172,8 @@ const AuthManager = (() => {
 
     _initializing = true;
     _initPromise = (async () => {
-      // 1. Mostrar overlay con mensaje de "Verificando..."
-      _setOverlayVisible(true, '🔒 Verificando Bóveda Fiscal...', false);
+      // 1. Mostrar overlay con mensaje de verificación (bloqueado)
+      _setOverlayState(true, '🔒 Acceso Restringido - Verificando Bóveda Fiscal...', false);
 
       // 2. Obtener cliente y configuración
       const client = window.APP_STATE?.supabase;
@@ -183,7 +182,7 @@ const AuthManager = (() => {
 
       if (!url || !key || !client) {
         console.warn('[Auth] Supabase no configurado. Modo Demo disponible.');
-        _setOverlayVisible(true, '⚠️ Servicio de autenticación no disponible. Usa "Ver Demo".', true);
+        _setOverlayState(true, '⚠️ Servicio de autenticación no disponible. Usa "Ver Demo".', true);
         // Habilitar demo
         const demoBtn = document.getElementById('auth-demo');
         if (demoBtn) { demoBtn.disabled = false; demoBtn.hidden = false; }
@@ -193,8 +192,8 @@ const AuthManager = (() => {
       }
 
       try {
-        // 3. Validaciones combinadas con Promise.allSettled
-        const [sessionResult, metricsResult] = await Promise.allSettled([
+        // 3. Validaciones combinadas con Promise.all (rechaza si alguna falla)
+        const [sessionResult, metricsResult] = await Promise.all([
           // a) Obtener sesión
           client.auth.getSession(),
           // b) Consultar fiscal_metrics (solo para verificar permisos)
@@ -202,76 +201,52 @@ const AuthManager = (() => {
         ]);
 
         // Procesar resultado de sesión
-        let sessionOk = false;
-        let user = null;
-        if (sessionResult.status === 'fulfilled') {
-          const { data, error } = sessionResult.value;
-          if (!error && data?.session) {
-            sessionOk = true;
-            user = data.session.user;
-          }
-        }
-
-        // Procesar resultado de metrics (verificar 403)
-        let metricsOk = false;
-        let metricsError = null;
-        if (metricsResult.status === 'fulfilled') {
-          const { data, error } = metricsResult.value;
-          if (error) {
-            metricsError = error;
-            // Si error es 403 o "permission denied", es un problema de RLS
-            if (error.code === 'PGRST301' || 
-                error.message?.includes('permission denied') ||
-                error.status === 403) {
-              metricsOk = false;
-            } else {
-              // Otros errores (ej: tabla no existe) -> también fallo
-              metricsOk = false;
-            }
-          } else {
-            // Consulta exitosa (aunque no haya datos, es válido)
-            metricsOk = true;
-          }
-        } else {
-          // La promesa fue rechazada (error de red, etc.)
-          metricsOk = false;
-          metricsError = metricsResult.reason;
-        }
-
-        // 4. Tomar decisión final
-        if (sessionOk && metricsOk) {
-          // TODO OK: Sesión válida y acceso a fiscal_metrics permitido
-          currentUser = user;
-          window.APP_STATE.currentUser = user;
-          _showApp(user);
-          _injectWelcomeMessage();
-          window.Dashboard?.syncAndRender?.();
-          _authInitialized = true;
-          _initializing = false;
-          return true;
-        } else {
-          // Fallo: mostrar error y habilitar demo
-          let errorMsg = 'Acceso Restringido - Verificando Bóveda Fiscal';
-          if (!sessionOk) {
-            errorMsg = 'Sesión no válida. Inicia sesión o usa Demo.';
-          } else if (!metricsOk) {
-            if (metricsError?.status === 403 || metricsError?.message?.includes('permission denied')) {
-              errorMsg = 'Error de Autorización: No tienes permisos para acceder a tu Bóveda Fiscal. Contacta a soporte.';
-            } else {
-              errorMsg = 'Error al conectar con Bóveda Fiscal. Contacta a soporte.';
-            }
-          }
-          _setOverlayVisible(true, '⚠️ ' + errorMsg, true);
-          // Habilitar botón demo
+        const { data: sessionData, error: sessionError } = sessionResult;
+        if (sessionError || !sessionData?.session) {
+          console.warn('[Auth] Sesión no válida:', sessionError?.message);
+          _setOverlayState(true, '⚠️ Sesión no válida. Inicia sesión o usa Demo.', true);
           const demoBtn = document.getElementById('auth-demo');
           if (demoBtn) { demoBtn.disabled = false; demoBtn.hidden = false; }
           _authInitialized = true;
           _initializing = false;
           return false;
         }
+
+        // Procesar resultado de metrics
+        const { error: metricsError } = metricsResult;
+        if (metricsError) {
+          // Si error es 403 o "permission denied", es problema de RLS
+          if (metricsError.code === 'PGRST301' || 
+              metricsError.message?.includes('permission denied') ||
+              metricsError.status === 403) {
+            console.warn('[Auth] Error 403 en fiscal_metrics:', metricsError.message);
+            _setOverlayState(true, '⚠️ Error de Autorización: No tienes permisos para acceder a tu Bóveda Fiscal. Contacta a soporte.', true);
+          } else {
+            console.warn('[Auth] Error consultando fiscal_metrics:', metricsError.message);
+            _setOverlayState(true, '⚠️ Error al conectar con Bóveda Fiscal. Contacta a soporte.', true);
+          }
+          const demoBtn = document.getElementById('auth-demo');
+          if (demoBtn) { demoBtn.disabled = false; demoBtn.hidden = false; }
+          _authInitialized = true;
+          _initializing = false;
+          return false;
+        }
+
+        // 4. TODO OK: Sesión válida y acceso a fiscal_metrics permitido
+        const user = sessionData.session.user;
+        currentUser = user;
+        window.APP_STATE.currentUser = user;
+        _showApp(user);
+        _injectWelcomeMessage();
+        window.Dashboard?.syncAndRender?.();
+        _authInitialized = true;
+        _initializing = false;
+        return true;
+
       } catch (err) {
+        // Error general (red, excepción)
         console.warn('[Auth] Error en inicialización:', err.message);
-        _setOverlayVisible(true, '⚠️ Error crítico. Contacta a soporte o usa Demo.', true);
+        _setOverlayState(true, '⚠️ Error crítico. Contacta a soporte o usa Demo.', true);
         const demoBtn = document.getElementById('auth-demo');
         if (demoBtn) { demoBtn.disabled = false; demoBtn.hidden = false; }
         _authInitialized = true;
@@ -285,12 +260,10 @@ const AuthManager = (() => {
 
   // --- Función init para compatibilidad con app.js ---
   async function init() {
-    // Si ya está inicializado, no hacer nada
     if (_authInitialized) {
       console.log('[Auth] Ya inicializado');
       return;
     }
-    // Delegar a initialize()
     await initialize();
   }
 
