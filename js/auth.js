@@ -197,7 +197,8 @@ const AuthManager = (() => {
   }
 
   // ============================================================
-  // checkSession: solo verifica SELECT; si falla, muestra error y demo
+  // checkSession: verifica acceso a fiscal_metrics
+  // Si no hay fila, se considera acceso permitido (se creará después)
   // ============================================================
   async function checkSession() {
     if (_authInitialized) {
@@ -211,13 +212,14 @@ const AuthManager = (() => {
 
     _isChecking = true;
     _checkPromise = (async () => {
-      const loader = document.getElementById('auth-loader');
-      if (loader) loader.style.display = 'block';
+      // Asegurar que overlay esté visible mientras verificamos
       const overlay = document.getElementById('auth-overlay');
-      if (overlay && overlay.hidden) {
+      if (overlay) {
         overlay.hidden = false;
         overlay.style.display = 'flex';
       }
+      const loader = document.getElementById('auth-loader');
+      if (loader) loader.style.display = 'block';
 
       try {
         const url = window.AppConfig?.getSupabaseUrl?.() || '';
@@ -233,6 +235,7 @@ const AuthManager = (() => {
           return false;
         }
 
+        // Obtener sesión y usuario
         const { data: sessionData, error: sessionError } = await client.auth.getSession();
         if (sessionError || !sessionData?.session) {
           _showLogin();
@@ -258,6 +261,8 @@ const AuthManager = (() => {
         // VERIFICAR ACCESO A fiscal_metrics (SELECT)
         // ============================================================
         let hasAccess = false;
+        let isPermissionDenied = false;
+
         try {
           const { data, error } = await client
             .from('fiscal_metrics')
@@ -267,25 +272,34 @@ const AuthManager = (() => {
             .maybeSingle();
 
           if (error) {
-            // Si es 403, mostrar error y habilitar demo
+            // Si es 403 (permission denied), mostrar error y habilitar demo
             if (error.code === 'PGRST301' || 
                 error.message?.includes('permission denied') ||
                 error.status === 403) {
+              isPermissionDenied = true;
+              console.warn('[Auth] Error 403 en fiscal_metrics:', error.message);
               _showLoginWithError('Error de Autorización: No tienes permisos para acceder a tu Bóveda Fiscal. Contacta a soporte.');
               enableDemoButton();
               if (loader) loader.style.display = 'none';
               _authInitialized = true;
               return false;
             }
-            // Otros errores (ej: tabla no existe)
+            // Otros errores (ej: tabla no existe) -> mostrar error genérico
+            console.warn('[Auth] Error consultando fiscal_metrics:', error.message);
             _showLoginWithError('Error al conectar con Bóveda Fiscal. Contacta a soporte.');
             enableDemoButton();
             if (loader) loader.style.display = 'none';
             _authInitialized = true;
             return false;
           }
+
+          // Si no hay datos (null), es un usuario nuevo sin fila -> acceso permitido
+          // La fila se creará en store.js o al primer registro de ingreso
           hasAccess = true;
+          console.log('[Auth] Acceso a fiscal_metrics permitido (usuario nuevo o con fila)');
+
         } catch (err) {
+          // Error de red o excepción
           if (err?.status === 403 || err?.message?.includes('403')) {
             _showLoginWithError('Error de Autorización: No tienes permisos para acceder a tu Bóveda Fiscal. Contacta a soporte.');
           } else {
@@ -298,7 +312,7 @@ const AuthManager = (() => {
         }
 
         // ============================================================
-        // SI TODO OK, MOSTRAR APP
+        // SI ACCESO PERMITIDO, MOSTRAR APP
         // ============================================================
         if (hasAccess) {
           currentUser = userData.user;
