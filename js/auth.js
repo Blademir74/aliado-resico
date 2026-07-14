@@ -77,7 +77,7 @@ const AuthManager = (() => {
     const msg = document.getElementById('auth-msg');
 
     if (loader) loader.style.display = 'none';
-    if (msg) msg.hidden = true;
+    if (msg) { msg.hidden = true; msg.textContent = ''; }
     if (overlay) {
       overlay.hidden = true;
       overlay.style.display = 'none';
@@ -85,11 +85,14 @@ const AuthManager = (() => {
     if (app) {
       app.hidden = false;
       app.style.display = '';
+      // Forzar un reflow para asegurar visibilidad
+      void app.offsetHeight;
     }
     if (chip) chip.hidden = false;
     if (emailEl) emailEl.textContent = user?.email || 'Modo Demo';
     if (logoutEl) logoutEl.hidden = false;
     window.APP_STATE.authError = null;
+    console.log('[Auth] App mostrada correctamente');
   }
 
   function _showLoginWithError(message) {
@@ -129,7 +132,7 @@ const AuthManager = (() => {
     const msg = document.getElementById('auth-msg');
 
     if (loader) loader.style.display = 'none';
-    if (msg) msg.hidden = true;
+    if (msg) { msg.hidden = true; msg.textContent = ''; }
     if (overlay) {
       overlay.hidden = false;
       overlay.style.display = 'flex';
@@ -193,6 +196,7 @@ const AuthManager = (() => {
     window.MockData?.load?.(window.Store);
     _injectWelcomeMessage();
     window.Dashboard?.syncAndRender?.();
+    console.log('[Auth] Modo demo activado correctamente');
   }
 
   // ============================================================
@@ -256,25 +260,68 @@ const AuthManager = (() => {
         const userId = userData.user.id;
 
         // ============================================================
-        // INTENTAR CONSULTAR fiscal_metrics - si falla por 403, crear fila
+        // INTENTAR CONSULTAR fiscal_metrics
         // ============================================================
         let metricsOk = false;
-        try {
-          const { data: metricsData, error: metricsError } = await client
-            .from('fiscal_metrics')
-            .select('user_id, income_ytd, total_processed, avg_confidence')
-            .eq('user_id', userId)
-            .maybeSingle();
+        let retryCount = 0;
+        while (retryCount < 2 && !metricsOk) {
+          try {
+            const { data: metricsData, error: metricsError } = await client
+              .from('fiscal_metrics')
+              .select('user_id, income_ytd, total_processed, avg_confidence')
+              .eq('user_id', userId)
+              .maybeSingle();
 
-          if (metricsError) {
-            // Si es 403 o 404 (tabla sin registro), intentar crear la fila
-            if (metricsError.code === 'PGRST301' || 
-                metricsError.message?.includes('permission denied') ||
-                metricsError.status === 403 ||
-                metricsError.code === 'PGRST116') { // 404 - not found
-              
-              console.warn('[Auth] No se encontró registro en fiscal_metrics, creando...');
-              // Insertar fila para el usuario
+            if (metricsError) {
+              // Si es 403 o 404 (tabla sin registro), intentar crear la fila
+              if (metricsError.code === 'PGRST301' || 
+                  metricsError.message?.includes('permission denied') ||
+                  metricsError.status === 403 ||
+                  metricsError.code === 'PGRST116' ||
+                  metricsError.message?.includes('relation "fiscal_metrics" does not exist')) {
+                
+                console.warn('[Auth] No se encontró registro en fiscal_metrics, creando...');
+                // Insertar fila para el usuario
+                const { error: insertError } = await client
+                  .from('fiscal_metrics')
+                  .insert({
+                    user_id: userId,
+                    income_ytd: 0,
+                    total_processed: 0,
+                    avg_confidence: 0
+                  })
+                  .select();
+
+                if (insertError) {
+                  console.warn('[Auth] Error al crear fiscal_metrics:', insertError.message);
+                  if (insertError.message?.includes('permission denied') || insertError.status === 403) {
+                    _showLoginWithError('Error de Autorización: No se pudo crear Bóveda Fiscal. Contacta a soporte.');
+                    enableDemoButton();
+                    if (loader) loader.style.display = 'none';
+                    _authInitialized = true;
+                    return false;
+                  }
+                  // Si el error es otro, reintentar
+                } else {
+                  metricsOk = true;
+                  console.log('[Auth] Fila creada correctamente en fiscal_metrics');
+                }
+              } else {
+                console.warn('[Auth] Error consultando fiscal_metrics:', metricsError.message);
+                _showLoginWithError('Error al acceder a Bóveda Fiscal. Contacta a soporte.');
+                enableDemoButton();
+                if (loader) loader.style.display = 'none';
+                _authInitialized = true;
+                return false;
+              }
+            } else {
+              metricsOk = true;
+              console.log('[Auth] fiscal_metrics consultado correctamente');
+            }
+          } catch (err) {
+            console.warn('[Auth] Excepción en fiscal_metrics:', err.message);
+            // Intentar crear fila por si la tabla existe pero no hay registro
+            try {
               const { error: insertError } = await client
                 .from('fiscal_metrics')
                 .insert({
@@ -284,9 +331,7 @@ const AuthManager = (() => {
                   avg_confidence: 0
                 })
                 .select();
-
               if (insertError) {
-                console.warn('[Auth] Error al crear fiscal_metrics:', insertError.message);
                 _showLoginWithError('Error al inicializar Bóveda Fiscal. Contacta a soporte.');
                 enableDemoButton();
                 if (loader) loader.style.display = 'none';
@@ -294,45 +339,15 @@ const AuthManager = (() => {
                 return false;
               }
               metricsOk = true;
-            } else {
-              console.warn('[Auth] Error consultando fiscal_metrics:', metricsError.message);
-              _showLoginWithError('Error al acceder a Bóveda Fiscal. Contacta a soporte.');
+            } catch (err2) {
+              _showLoginWithError('Error crítico al acceder a Bóveda Fiscal.');
               enableDemoButton();
               if (loader) loader.style.display = 'none';
               _authInitialized = true;
               return false;
             }
-          } else {
-            metricsOk = true;
           }
-        } catch (err) {
-          console.warn('[Auth] Excepción en fiscal_metrics:', err.message);
-          // Intentar crear fila por si la tabla existe pero no hay registro
-          try {
-            const { error: insertError } = await client
-              .from('fiscal_metrics')
-              .insert({
-                user_id: userId,
-                income_ytd: 0,
-                total_processed: 0,
-                avg_confidence: 0
-              })
-              .select();
-            if (insertError) {
-              _showLoginWithError('Error al inicializar Bóveda Fiscal. Contacta a soporte.');
-              enableDemoButton();
-              if (loader) loader.style.display = 'none';
-              _authInitialized = true;
-              return false;
-            }
-            metricsOk = true;
-          } catch (err2) {
-            _showLoginWithError('Error crítico al acceder a Bóveda Fiscal.');
-            enableDemoButton();
-            if (loader) loader.style.display = 'none';
-            _authInitialized = true;
-            return false;
-          }
+          retryCount++;
         }
 
         // Si todo OK, continuar

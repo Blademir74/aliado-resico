@@ -3,7 +3,7 @@ const App = (() => {
 
   function navigateTo(view) {
     const target = VIEWS.includes(view) ? view : 'dashboard';
-    document.querySelectorAll('.tab-view').forEach(el => el.hidden = true);
+    document.querySelectorAll('.tab-view').forEach(el => { el.hidden = true; });
     const targetEl = document.getElementById(`${target}-tab`);
     if (targetEl) targetEl.hidden = false;
     document.querySelectorAll('.nav-btn[data-tab]').forEach(btn => {
@@ -84,9 +84,12 @@ const App = (() => {
           const cat = window.CATEGORY_CONFIG?.[cls.intent] || { icon: '💬', label: cls.intent };
           intentEl.textContent = `${cat.icon} ${cat.label}`;
         }
-        document.getElementById('result-confidence-val').textContent = `${Math.round(cls.confidence * 100)}%`;
-        document.getElementById('result-keywords').textContent = (cls.keywords_matched || []).join(', ') || '—';
-        document.getElementById('result-source').textContent = cls.source === 'gemini_proxy' ? 'Gemini IA' : 'Reglas locales';
+        const confVal = document.getElementById('result-confidence-val');
+        if (confVal) confVal.textContent = `${Math.round(cls.confidence * 100)}%`;
+        const kwEl = document.getElementById('result-keywords');
+        if (kwEl) kwEl.textContent = (cls.keywords_matched || []).join(', ') || '—';
+        const srcEl = document.getElementById('result-source');
+        if (srcEl) srcEl.textContent = cls.source === 'gemini_proxy' ? 'Gemini IA' : 'Reglas locales';
         const botBubble = document.createElement('div');
         botBubble.className = 'chat-bubble bot';
         botBubble.textContent = cls.assistant_reply || 'Consulta recibida.';
@@ -134,7 +137,7 @@ const App = (() => {
     const demoBtn = document.getElementById('auth-demo');
     if (demoBtn) {
       demoBtn.hidden = false;
-      demoBtn.disabled = true; // se habilitará si falla la configuración
+      demoBtn.disabled = true; // se habilitará si falla la configuración o la autenticación
     }
 
     // 2. CARGAR CONFIGURACIÓN DEL SERVIDOR
@@ -149,11 +152,11 @@ const App = (() => {
     if (!configOk) {
       console.warn('[App] Configuración no disponible. Modo Demo habilitado.');
       if (demoBtn) demoBtn.disabled = false;
-      // Mostrar mensaje en el overlay
       const msgEl = document.getElementById('auth-msg');
       if (msgEl) {
         msgEl.hidden = false;
         msgEl.textContent = '⚠️ Servicio de autenticación no disponible. Usa "Ver Demo" para explorar.';
+        msgEl.className = 'auth-msg warning';
         msgEl.style.color = '#f59e0b';
       }
       return; // No continuar con autenticación
