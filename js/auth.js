@@ -85,14 +85,12 @@ const AuthManager = (() => {
     if (app) {
       app.hidden = false;
       app.style.display = '';
-      // Forzar un reflow para asegurar visibilidad
       void app.offsetHeight;
     }
     if (chip) chip.hidden = false;
     if (emailEl) emailEl.textContent = user?.email || 'Modo Demo';
     if (logoutEl) logoutEl.hidden = false;
     window.APP_STATE.authError = null;
-    console.log('[Auth] App mostrada correctamente');
   }
 
   function _showLoginWithError(message) {
@@ -196,11 +194,10 @@ const AuthManager = (() => {
     window.MockData?.load?.(window.Store);
     _injectWelcomeMessage();
     window.Dashboard?.syncAndRender?.();
-    console.log('[Auth] Modo demo activado correctamente');
   }
 
   // ============================================================
-  // checkSession: con manejo de 403 y creación automática de fila
+  // checkSession: solo verifica SELECT; si falla, muestra error y demo
   // ============================================================
   async function checkSession() {
     if (_authInitialized) {
@@ -236,7 +233,6 @@ const AuthManager = (() => {
           return false;
         }
 
-        // Obtener sesión
         const { data: sessionData, error: sessionError } = await client.auth.getSession();
         if (sessionError || !sessionData?.session) {
           _showLogin();
@@ -246,7 +242,6 @@ const AuthManager = (() => {
           return false;
         }
 
-        // Obtener usuario
         const { data: userData, error: userError } = await client.auth.getUser();
         if (userError || !userData?.user) {
           await client.auth.signOut().catch(() => {});
@@ -260,98 +255,52 @@ const AuthManager = (() => {
         const userId = userData.user.id;
 
         // ============================================================
-        // INTENTAR CONSULTAR fiscal_metrics
+        // VERIFICAR ACCESO A fiscal_metrics (SELECT)
         // ============================================================
-        let metricsOk = false;
-        let retryCount = 0;
-        while (retryCount < 2 && !metricsOk) {
-          try {
-            const { data: metricsData, error: metricsError } = await client
-              .from('fiscal_metrics')
-              .select('user_id, income_ytd, total_processed, avg_confidence')
-              .eq('user_id', userId)
-              .maybeSingle();
+        let hasAccess = false;
+        try {
+          const { data, error } = await client
+            .from('fiscal_metrics')
+            .select('user_id')
+            .eq('user_id', userId)
+            .limit(1)
+            .maybeSingle();
 
-            if (metricsError) {
-              // Si es 403 o 404 (tabla sin registro), intentar crear la fila
-              if (metricsError.code === 'PGRST301' || 
-                  metricsError.message?.includes('permission denied') ||
-                  metricsError.status === 403 ||
-                  metricsError.code === 'PGRST116' ||
-                  metricsError.message?.includes('relation "fiscal_metrics" does not exist')) {
-                
-                console.warn('[Auth] No se encontró registro en fiscal_metrics, creando...');
-                // Insertar fila para el usuario
-                const { error: insertError } = await client
-                  .from('fiscal_metrics')
-                  .insert({
-                    user_id: userId,
-                    income_ytd: 0,
-                    total_processed: 0,
-                    avg_confidence: 0
-                  })
-                  .select();
-
-                if (insertError) {
-                  console.warn('[Auth] Error al crear fiscal_metrics:', insertError.message);
-                  if (insertError.message?.includes('permission denied') || insertError.status === 403) {
-                    _showLoginWithError('Error de Autorización: No se pudo crear Bóveda Fiscal. Contacta a soporte.');
-                    enableDemoButton();
-                    if (loader) loader.style.display = 'none';
-                    _authInitialized = true;
-                    return false;
-                  }
-                  // Si el error es otro, reintentar
-                } else {
-                  metricsOk = true;
-                  console.log('[Auth] Fila creada correctamente en fiscal_metrics');
-                }
-              } else {
-                console.warn('[Auth] Error consultando fiscal_metrics:', metricsError.message);
-                _showLoginWithError('Error al acceder a Bóveda Fiscal. Contacta a soporte.');
-                enableDemoButton();
-                if (loader) loader.style.display = 'none';
-                _authInitialized = true;
-                return false;
-              }
-            } else {
-              metricsOk = true;
-              console.log('[Auth] fiscal_metrics consultado correctamente');
-            }
-          } catch (err) {
-            console.warn('[Auth] Excepción en fiscal_metrics:', err.message);
-            // Intentar crear fila por si la tabla existe pero no hay registro
-            try {
-              const { error: insertError } = await client
-                .from('fiscal_metrics')
-                .insert({
-                  user_id: userId,
-                  income_ytd: 0,
-                  total_processed: 0,
-                  avg_confidence: 0
-                })
-                .select();
-              if (insertError) {
-                _showLoginWithError('Error al inicializar Bóveda Fiscal. Contacta a soporte.');
-                enableDemoButton();
-                if (loader) loader.style.display = 'none';
-                _authInitialized = true;
-                return false;
-              }
-              metricsOk = true;
-            } catch (err2) {
-              _showLoginWithError('Error crítico al acceder a Bóveda Fiscal.');
+          if (error) {
+            // Si es 403, mostrar error y habilitar demo
+            if (error.code === 'PGRST301' || 
+                error.message?.includes('permission denied') ||
+                error.status === 403) {
+              _showLoginWithError('Error de Autorización: No tienes permisos para acceder a tu Bóveda Fiscal. Contacta a soporte.');
               enableDemoButton();
               if (loader) loader.style.display = 'none';
               _authInitialized = true;
               return false;
             }
+            // Otros errores (ej: tabla no existe)
+            _showLoginWithError('Error al conectar con Bóveda Fiscal. Contacta a soporte.');
+            enableDemoButton();
+            if (loader) loader.style.display = 'none';
+            _authInitialized = true;
+            return false;
           }
-          retryCount++;
+          hasAccess = true;
+        } catch (err) {
+          if (err?.status === 403 || err?.message?.includes('403')) {
+            _showLoginWithError('Error de Autorización: No tienes permisos para acceder a tu Bóveda Fiscal. Contacta a soporte.');
+          } else {
+            _showLoginWithError('Error crítico al acceder a Bóveda Fiscal.');
+          }
+          enableDemoButton();
+          if (loader) loader.style.display = 'none';
+          _authInitialized = true;
+          return false;
         }
 
-        // Si todo OK, continuar
-        if (metricsOk) {
+        // ============================================================
+        // SI TODO OK, MOSTRAR APP
+        // ============================================================
+        if (hasAccess) {
           currentUser = userData.user;
           window.APP_STATE.currentUser = currentUser;
           _showApp(currentUser);
@@ -360,14 +309,15 @@ const AuthManager = (() => {
           if (loader) loader.style.display = 'none';
           _authInitialized = true;
           return true;
-        } else {
-          // Fallback a login
-          _showLogin();
-          enableDemoButton();
-          if (loader) loader.style.display = 'none';
-          _authInitialized = true;
-          return false;
         }
+
+        // Fallback
+        _showLogin();
+        enableDemoButton();
+        if (loader) loader.style.display = 'none';
+        _authInitialized = true;
+        return false;
+
       } catch (err) {
         console.warn('[Auth] checkSession error:', err.message);
         if (err?.status === 403 || err?.message?.includes('403') || err?.message?.includes('permission denied')) {
