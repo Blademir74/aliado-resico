@@ -1,17 +1,24 @@
 const App = (() => {
   const VIEWS = ['dashboard', 'wizard', 'classifier', 'documents'];
+  let _booted = false;
 
   function navigateTo(view) {
     const target = VIEWS.includes(view) ? view : 'dashboard';
-    document.querySelectorAll('.tab-view').forEach(el => { el.hidden = true; });
+
+    document.querySelectorAll('.tab-view').forEach(el => {
+      el.hidden = true;
+    });
+
     const targetEl = document.getElementById(`${target}-tab`);
     if (targetEl) targetEl.hidden = false;
+
     document.querySelectorAll('.nav-btn[data-tab]').forEach(btn => {
       const isActive = btn.getAttribute('data-tab') === target;
       btn.classList.toggle('active', isActive);
       btn.style.background = isActive ? 'rgba(16,185,129,0.2)' : 'transparent';
       btn.style.color = isActive ? '#e2e8f0' : '#94a3b8';
     });
+
     window.location.hash = target;
   }
 
@@ -19,7 +26,9 @@ const App = (() => {
     const btn = document.getElementById('theme-toggle');
     const saved = localStorage.getItem('ar_theme') || 'dark';
     document.body.dataset.theme = saved;
+
     if (btn) btn.textContent = saved === 'light' ? '☀️' : '🌙';
+
     btn?.addEventListener('click', () => {
       const next = (localStorage.getItem('ar_theme') || 'dark') === 'dark' ? 'light' : 'dark';
       localStorage.setItem('ar_theme', next);
@@ -32,6 +41,7 @@ const App = (() => {
     console.log('[App] Configurando navegación...');
     const navBtns = document.querySelectorAll('.nav-btn[data-tab]');
     console.log('[App] Botones de navegación encontrados:', navBtns.length);
+
     navBtns.forEach(btn => {
       btn.addEventListener('click', () => {
         const tab = btn.getAttribute('data-tab');
@@ -39,6 +49,7 @@ const App = (() => {
         navigateTo(tab);
       });
     });
+
     const initial = (window.location.hash || '').replace('#', '');
     navigateTo(initial || 'dashboard');
   }
@@ -47,102 +58,145 @@ const App = (() => {
     const btn = document.getElementById('rfc-validate-btn');
     const inp = document.getElementById('rfc-input');
     const out = document.getElementById('rfc-result');
+
     if (!btn || !inp || !out) return;
+
     const validate = () => {
       const rfc = inp.value.trim().toUpperCase();
-      if (!rfc) { out.innerHTML = '<div style="color:#ef4444;">Ingresa un RFC.</div>'; return; }
+      if (!rfc) {
+        out.innerHTML = '<div style="color:#ef4444">Ingresa un RFC.</div>';
+        return;
+      }
       const pf = /^[A-Z&Ñ]{4}\d{6}[A-Z0-9]{3}$/;
       const pm = /^[A-Z&Ñ]{3}\d{6}[A-Z0-9]{3}$/;
-      if (pf.test(rfc) || pm.test(rfc) || ['XAXX010101000','XEXX010101000'].includes(rfc)) {
-        out.innerHTML = `<div style="color:#10b981;">RFC válido: ${rfc}</div>`;
+      if (pf.test(rfc) || pm.test(rfc) || ['XAXX010101000', 'XEXX010101000'].includes(rfc)) {
+        out.innerHTML = `<div style="color:#10b981">RFC válido: ${rfc}</div>`;
       } else {
-        out.innerHTML = '<div style="color:#ef4444;">Formato inválido.</div>';
+        out.innerHTML = '<div style="color:#ef4444">Formato inválido.</div>';
       }
     };
+
     btn.addEventListener('click', validate);
-    inp.addEventListener('keydown', e => { if (e.key === 'Enter') validate(); });
+    inp.addEventListener('keydown', e => {
+      if (e.key === 'Enter') validate();
+    });
   }
 
   function initChat() {
     const form = document.getElementById('classifier-form');
     const input = document.getElementById('classifier-input');
     const chat = document.getElementById('chat-messages');
+
     if (!form || !input || !chat) {
       console.warn('[App] Chat elements not found');
       return;
     }
-    form.addEventListener('submit', async (e) => {
+
+    if (form.dataset.bound === '1') return;
+    form.dataset.bound = '1';
+
+    form.addEventListener('submit', async e => {
       e.preventDefault();
       const text = input.value.trim();
       if (!text) return;
+
       const userBubble = document.createElement('div');
       userBubble.className = 'chat-bubble user';
       userBubble.textContent = text;
       chat.appendChild(userBubble);
+
       input.value = '';
       chat.scrollTop = chat.scrollHeight;
+
       try {
-        if (!window.IntentClassifier) {
-          throw new Error('Clasificador no disponible');
-        }
+        if (!window.IntentClassifier) throw new Error('Clasificador no disponible');
+
         const cls = await window.IntentClassifier.process(text);
+
         const empty = document.getElementById('classification-empty');
         const content = document.getElementById('classification-content');
         if (empty) empty.hidden = true;
         if (content) content.hidden = false;
+
         const intentEl = document.getElementById('result-intent');
         if (intentEl) {
-          const cat = window.CATEGORY_CONFIG?.[cls.intent] || { icon: '💬', label: cls.intent };
-          intentEl.textContent = `${cat.icon} ${cat.label}`;
+          const cat = window.CATEGORY_CONFIG?.[cls.intent] || { icon: '', label: cls.intent };
+          intentEl.textContent = `${cat.icon || ''} ${cat.label || cls.intent}`.trim();
         }
+
         const confVal = document.getElementById('result-confidence-val');
-        if (confVal) confVal.textContent = `${Math.round(cls.confidence * 100)}%`;
+        if (confVal) confVal.textContent = Math.round(cls.confidence * 100) + '%';
+
         const kwEl = document.getElementById('result-keywords');
-        if (kwEl) kwEl.textContent = (cls.keywords_matched || []).join(', ') || '—';
+        if (kwEl) kwEl.textContent = cls.keywordsMatched?.join(', ') || '';
+
         const srcEl = document.getElementById('result-source');
-        if (srcEl) srcEl.textContent = cls.source === 'gemini_proxy' ? 'Gemini IA' : 'Reglas locales';
+        if (srcEl) srcEl.textContent = cls.source === 'gemini-proxy' ? 'Gemini IA' : 'Reglas locales';
+
         const botBubble = document.createElement('div');
         botBubble.className = 'chat-bubble bot';
-        botBubble.textContent = cls.assistant_reply || 'Consulta recibida.';
+        botBubble.textContent = cls.assistantReply || 'Consulta recibida.';
         chat.appendChild(botBubble);
         chat.scrollTop = chat.scrollHeight;
-        window.Store?.addConversation?.({ text, intent: cls.intent, confidence: cls.confidence, is_fiscal_audit_completed: cls.intent === 'SALUD_FISCAL' });
+
+        window.Store?.addConversation?.({
+          message_text: text,
+          intent: cls.intent,
+          confidence: cls.confidence,
+          is_fiscal_audit_completed: cls.intent === 'SALUD_FISCAL'
+        });
+
         window.Dashboard?.syncAndRender?.();
       } catch (err) {
         console.error('[App] Error en chat:', err);
         const errBubble = document.createElement('div');
         errBubble.className = 'chat-bubble bot';
-        errBubble.textContent = 'Error: ' + err.message;
+        errBubble.textContent = `Error: ${err.message}`;
         chat.appendChild(errBubble);
         chat.scrollTop = chat.scrollHeight;
       }
     });
 
     document.querySelectorAll('.quick-ask').forEach(btn => {
+      if (btn.dataset.bound === '1') return;
+      btn.dataset.bound = '1';
       btn.addEventListener('click', () => {
-        input.value = btn.getAttribute('data-prompt') || '';
+        input.value = btn.getAttribute('data-prompt');
         form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
       });
     });
   }
 
-  async function init() {
-    console.log('[App] Inicializando aplicación...');
+  function bootAuthenticatedArea() {
+    if (_booted) return;
+    _booted = true;
+
+    console.log('[App] Inicializando aplicación autenticada...');
     initTheme();
     initNavigation();
     initRFC();
+    initChat();
+
+    window.APP_STATE.appReady = true;
+  }
+
+  async function init() {
+    console.log('[App] Inicializando shell...');
 
     const overlay = document.getElementById('auth-overlay');
+    const app = document.getElementById('app');
+    const demoBtn = document.getElementById('auth-demo');
+
     if (overlay) {
       overlay.hidden = false;
       overlay.style.display = 'flex';
     }
-    const app = document.getElementById('app');
+
     if (app) {
       app.hidden = true;
       app.style.display = 'none';
     }
-    const demoBtn = document.getElementById('auth-demo');
+
     if (demoBtn) {
       demoBtn.hidden = false;
       demoBtn.disabled = true;
@@ -150,7 +204,7 @@ const App = (() => {
 
     let configOk = false;
     try {
-      configOk = await window.AppConfig?.loadServerConfig?.() || false;
+      configOk = await window.AppConfig?.loadServerConfig?.();
     } catch (e) {
       console.warn('[App] Error al cargar configuración:', e.message);
     }
@@ -161,7 +215,7 @@ const App = (() => {
       const msgEl = document.getElementById('auth-msg');
       if (msgEl) {
         msgEl.hidden = false;
-        msgEl.textContent = '⚠️ Servicio de autenticación no disponible. Usa "Ver Demo" para explorar.';
+        msgEl.textContent = 'Servicio de autenticación no disponible. Usa "Ver Demo" para explorar.';
         msgEl.className = 'auth-msg warning';
         msgEl.style.color = '#f59e0b';
       }
@@ -179,26 +233,13 @@ const App = (() => {
     } catch (e) {
       console.warn('[App] Error inicializando Auth:', e.message);
     }
-
-    try {
-      await window.Dashboard?.init?.();
-    } catch (e) {
-      console.warn('[App] Error inicializando Dashboard:', e.message);
-    }
-    try {
-      await window.DocumentProcessor?.init?.();
-    } catch (e) {
-      console.warn('[App] Error inicializando DocumentProcessor:', e.message);
-    }
-
-    window.Store?.on?.('store:updated', () => window.Dashboard?.syncAndRender?.());
-    window.Store?.on?.('store:reset', () => window.Dashboard?.syncAndRender?.());
-
-    initChat();
-    window.Dashboard?.syncAndRender?.();
   }
 
-  return { init, navigateTo };
+  return {
+    init,
+    navigateTo,
+    bootAuthenticatedArea
+  };
 })();
 
 window.App = App;
