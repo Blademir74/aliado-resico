@@ -1,239 +1,137 @@
 const IntentClassifier = (() => {
-  const CACHE = new Map();
-  const CACHE_MAX = 100;
-  const CACHE_TTL = 5 * 60 * 1000;
-  const FLOW_KEY = 'ar_annual_flow_v2';
-
-  const SLANG_MAP = {
-    'la chiva': 'sat',
-    'el chivo': 'sat',
-    'hacienda': 'sat',
-    'timbrar': 'emitir cfdi',
-    'facturar': 'emitir cfdi',
-    'recibito': 'ticket',
-    'notita': 'nota de venta',
-    'me cayó': 'recibi pago',
-    'deposité': 'recibi pago',
-    'me devuelvan': 'devolucion',
-    'me regresen': 'devolucion'
+  const INTENTS = {
+    CONSULTA_FISCAL: {
+      keywords: ['resico', 'isr', 'iva', 'anual', 'declaración', 'declaracion', 'impuesto', 'sat', 'régimen', 'regimen']
+    },
+    SOLICITUD_FACTURA: {
+      keywords: ['factura', 'cfdi', 'timbrar', 'timbrado', 'comprobante', 'folio']
+    },
+    REGISTRO_GASTO: {
+      keywords: ['gasto', 'ticket', 'deducir', 'acreditar', 'iva acreditable', 'subtotal', 'proveedor']
+    },
+    REPORTE_PAGO: {
+      keywords: ['pagué', 'pague', 'pagué', 'pago', 'transferencia', 'deposité', 'deposite', 'aboné', 'abone']
+    },
+    SALUD_FISCAL: {
+      keywords: ['buzón', 'buzon', 'e.firma', 'efirma', 'opinión', 'opinion', 'cumplimiento', 'sello digital', 'csd']
+    }
   };
 
-  function normalize(text) {
-    let t = String(text || '').toLowerCase().trim();
-    Object.entries(SLANG_MAP).forEach(([a, b]) => {
-      t = t.replaceAll(a, b);
+  function normalizeText(text) {
+    return String(text || '')
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .toLowerCase()
+      .trim();
+  }
+
+  function extractKeywords(text, list) {
+    const t = normalizeText(text);
+    return list.filter(k => t.includes(normalizeText(k)));
+  }
+
+  function classifyLocal(text) {
+    let bestIntent = 'OTROS';
+    let bestHits = [];
+
+    Object.entries(INTENTS).forEach(([intent, cfg]) => {
+      const hits = extractKeywords(text, cfg.keywords);
+      if (hits.length > bestHits.length) {
+        bestIntent = intent;
+        bestHits = hits;
+      }
     });
-    return t;
-  }
 
-  function getAnnualFlow() {
-    try {
-      return JSON.parse(localStorage.getItem(FLOW_KEY) || '{"awaiting":false}');
-    } catch {
-      return { awaiting: false };
-    }
-  }
-
-  function setAnnualFlow(v) {
-    try {
-      localStorage.setItem(FLOW_KEY, JSON.stringify(v));
-    } catch (_) {}
-  }
-
-  function clearAnnualFlow() {
-    setAnnualFlow({ awaiting: false });
-  }
-
-  function detectAnnual(raw) {
-    const text = normalize(raw);
-    const flow = getAnnualFlow();
-
-    const yes = /^(si|sí|yes|claro)\b/.test(text);
-    const no = /^(no|nel)\b/.test(text);
-    const mixed = /(salarios?|nomina|nómina|intereses?|dividendos?|arrendamiento|plataformas?|uber|didi|mercado libre)/i.test(text);
-    const asksAnnual = /(declaraci[oó]n anual|anual|tengo que presentar anual|debo presentar anual)/i.test(text);
-    const onlyResico = /(solo resico|solamente resico|puro resico)/i.test(text);
-
-    if (flow.awaiting) {
-      if (yes || mixed) {
-        clearAnnualFlow();
-        return {
-          annual_obligation: 'obligated',
-          assistant_reply: 'Sí debes tratar el caso como posible obligación anual porque confirmaste ingresos mixtos. Primero revisa pagos mensuales, buzón y e.firma.'
-        };
-      }
-      if (no || onlyResico) {
-        clearAnnualFlow();
-        return {
-          annual_obligation: 'not_obligated',
-          assistant_reply: 'Si solo tuviste ingresos RESICO y cumpliste pagos mensuales, no debes marcar la anual como obligatoria por defecto.'
-        };
-      }
-      return {
-        annual_obligation: 'ask_mixed_income',
-        assistant_reply: 'Para cerrar la validación, respóndeme sí o no: ¿tuviste ingresos mixtos como salarios mayores a $400,000, intereses, dividendos, arrendamiento o plataformas?'
-      };
-    }
-
-    if (asksAnnual) {
-      if (mixed) {
-        return {
-          annual_obligation: 'obligated',
-          assistant_reply: 'Hay indicios de ingresos mixtos; no debe tratarse como RESICO puro.'
-        };
-      }
-      if (onlyResico) {
-        return {
-          annual_obligation: 'not_obligated',
-          assistant_reply: 'Si tu caso es RESICO puro y cumpliste con pagos mensuales, no se confirma obligación anual automática.'
-        };
-      }
-      setAnnualFlow({ awaiting: true });
-      return {
-        annual_obligation: 'ask_mixed_income',
-        assistant_reply: 'Antes de confirmarte la anual necesito validar algo: ¿tuviste solo RESICO o también salarios mayores a $400,000, intereses, dividendos, arrendamiento o plataformas?'
-      };
-    }
-
-    return null;
-  }
-
-  function classifyLocal(raw) {
-    const text = normalize(raw);
-    const annual = detectAnnual(raw);
-
-    if (annual) {
-      return {
-        intent: 'CONSULTA_FISCAL',
-        confidence: 0.95,
-        keywords_matched: ['anual', 'resico'],
-        explanation: 'Flujo condicional anual',
-        source: 'local',
-        ...annual
-      };
-    }
-
-    const buckets = [
-      ['SALUD_FISCAL', /(buz[oó]n|e\.firma|efirma|multa|sat|notificaci[oó]n|sellos|csd)/i],
-      ['DEVOLUCION_SALDO_A_FAVOR', /(saldo a favor|devoluci[oó]n|me retuvieron|compensaci[oó]n)/i],
-      ['REGISTRO_GASTO', /(gasto|ticket|iva|acreditar|cfdi de gasto|gasolina|compra)/i],
-      ['SOLICITUD_FACTURA', /(factura|cfdi|timbrar|xml|folio|receptor)/i],
-      ['REPORTE_PAGO', /(cobr[eé]|recibi pago|me pagaron|transferencia|dep[oó]sito|ingreso)/i],
-      ['CONSULTA_FISCAL', /(resico|isr|l[ií]mite|3\.5|3500000|anual|113-e|113-f)/i]
-    ];
-
-    for (const [intent, rgx] of buckets) {
-      if (rgx.test(text)) {
-        return {
-          intent,
-          confidence: 0.84,
-          keywords_matched: [],
-          explanation: `Clasificación local ${intent}`,
-          source: 'local',
-          resico_context:
-            intent === 'REGISTRO_GASTO'
-              ? 'ISR: sin deducciones. IVA: gasto indispensable con CFDI válido para acreditamiento.'
-              : (intent === 'CONSULTA_FISCAL' ? 'Límite anual RESICO: $3,500,000 MXN. Umbrales LISR: 80% preventivo ($2.8M), 90% riesgo alto ($3.15M), 94% riesgo de expulsión ($3.3M).' : null),
-          salud_fiscal_alerta:
-            intent === 'SALUD_FISCAL'
-              ? '⚠️ Buzón Tributario inactivo: multa hasta $10,260 MXN, pérdida de plazos y riesgo operativo severo ante el SAT, incluyendo afectación sobre sellos digitales si el incumplimiento escala.'
-              : null,
-          assistant_reply:
-            intent === 'CONSULTA_FISCAL'
-              ? 'El límite anual de ingresos para RESICO es de $3,500,000 MXN (Art. 113-E LISR). Los umbrales de riesgo son: 80% Preventivo ($2,800,000 MXN), 90% Riesgo Alto ($3,150,000 MXN) y 94% Riesgo de Expulsión ($3,300,000 MXN).'
-              : (intent === 'SALUD_FISCAL' ? 'Art. 17-K CFF: multa hasta $10,260 MXN por Buzón Tributario inactivo, pérdida de plazos y riesgo operativo grave; si el incumplimiento escala, también aumenta el riesgo sobre sellos digitales.' : '')
-        };
-      }
-    }
+    const confidence = bestHits.length
+      ? Math.min(0.99, 0.62 + bestHits.length * 0.08)
+      : 0.55;
 
     return {
-      intent: 'OTROS',
-      confidence: 0.4,
-      keywords_matched: [],
-      explanation: 'Sin coincidencias claras',
-      source: 'local'
+      intent: bestIntent,
+      confidence,
+      keywordsMatched: bestHits
     };
   }
 
-  async function classifyWithProxy(message) {
-    const session = await window.APP_STATE?.supabase?.auth?.getSession?.();
-    const token = session?.data?.session?.access_token;
-    const headers = { 'Content-Type': 'application/json' };
-    if (token) headers.Authorization = `Bearer ${token}`;
+  function getContext() {
+    const st = window.Store?.getState?.() || {};
+    return {
+      incomeYTD: st?.incomeYTD ?? 0,
+      annualLimit: st?.fiscalMetrics?.annualLimit ?? 3500000,
+      riskLevel: st?.fiscalMetrics?.riskLevel ?? 'SEGURO',
+      isDemo: !!window.APP_STATE?.isDemo,
+      userEmail: window.APP_STATE?.currentUser?.email || ''
+    };
+  }
 
-    const prompt = [
-      'Responde SOLO JSON válido.',
-      'Campos: intent, confidence, keywords_detected, explanation, annual_obligation, answer, resico_context, salud_fiscal_alerta.',
-      `Mensaje: "${String(message || '').slice(0, 1500)}"`
-    ].join('\n');
-
-    const r = await fetch('/api/gemini-proxy', {
+  async function askProxy(text) {
+    const response = await fetch('/api/gemini-proxy', {
       method: 'POST',
-      headers,
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        contents: [{ parts: [{ text: prompt }] }],
-        generationConfig: { temperature: 0.1, maxOutputTokens: 350 }
+        message: text,
+        context: getContext()
       })
     });
 
-    if (!r.ok) throw new Error(`Proxy HTTP ${r.status}`);
-    const data = await r.json();
-    if (data?.is_fallback) throw new Error(`fallback:${data.fallback_reason || 'proxy'}`);
+    if (!response.ok) {
+      throw new Error(`Proxy HTTP ${response.status}`);
+    }
 
-    const raw = data?.candidates?.[0]?.content?.parts?.[0]?.text || '';
-    const cleaned = raw.replace(/```json/gi, '```').replace(/```/g, '').trim();
-    const start = cleaned.indexOf('{');
-    const end = cleaned.lastIndexOf('}');
-    if (start === -1 || end <= start) throw new Error('JSON no encontrado');
-
-    const p = JSON.parse(cleaned.slice(start, end + 1));
-    return {
-      intent: p.intent || 'OTROS',
-      confidence: Number(p.confidence || 0.5),
-      keywords_matched: p.keywords_detected || [],
-      explanation: p.explanation || '',
-      annual_obligation: p.annual_obligation ?? null,
-      assistant_reply: p.answer || '',
-      resico_context: p.resico_context || null,
-      salud_fiscal_alerta: p.salud_fiscal_alerta || null,
-      source: 'gemini_proxy'
-    };
+    return response.json();
   }
 
-  async function process(message) {
-    const key = normalize(message);
-    const cached = CACHE.get(key);
-    if (cached && Date.now() - cached.ts < CACHE_TTL) return cached.value;
+  function extractReply(data) {
+    if (typeof data?.reply === 'string' && data.reply.trim()) {
+      return data.reply.trim();
+    }
 
-    let result;
+    const rawReply = data?.raw?.candidates?.[0]?.content?.parts
+      ?.map(p => p?.text || '')
+      .join('\n')
+      .trim();
+
+    if (rawReply) return rawReply;
+
+    const fallbackReply = data?.candidates?.[0]?.content?.parts
+      ?.map(p => p?.text || '')
+      .join('\n')
+      .trim();
+
+    return fallbackReply || '';
+  }
+
+  async function process(text) {
+    const local = classifyLocal(text);
+
     try {
-      const annual = detectAnnual(message);
-      result = annual
-        ? { intent: 'CONSULTA_FISCAL', confidence: 0.95, keywords_matched: ['anual'], explanation: 'Flujo anual', source: 'local', ...annual }
-        : await classifyWithProxy(message);
-    } catch (_) {
-      result = classifyLocal(message);
-    }
+      const data = await askProxy(text);
+      const assistantReply = extractReply(data);
 
-    if (/buz[oó]n inactivo|no tengo buz[oó]n/i.test(normalize(message))) {
-      window.Store?.updateSaludFiscal?.({
-        buzonTributarioActivo: false,
-        alertLevel: 'danger',
-        lastAuditDate: new Date().toISOString()
-      });
-      result.salud_fiscal_alerta =
-        '⚠️ Art. 17-K CFF: multa hasta $10,260 MXN por Buzón Tributario inactivo, pérdida de plazos y riesgo operativo grave; si el incumplimiento escala, también aumenta el riesgo sobre sellos digitales.';
+      return {
+        intent: local.intent,
+        confidence: local.confidence,
+        keywordsMatched: local.keywordsMatched,
+        assistantReply: assistantReply || 'No pude generar una respuesta completa, pero ya identifiqué tu consulta fiscal.',
+        source: data?.source || 'gemini-proxy',
+        isFallback: !!data?.is_fallback,
+        raw: data
+      };
+    } catch (err) {
+      return {
+        intent: local.intent,
+        confidence: Math.max(0.5, local.confidence - 0.1),
+        keywordsMatched: local.keywordsMatched,
+        assistantReply:
+          'Tu consulta fue identificada, pero la IA no respondió en este momento. Regla base: en RESICO el ISR se calcula sobre ingresos brutos y la anual no debe confirmarse sin revisar si hubo ingresos mixtos.',
+        source: 'local-fallback',
+        isFallback: true,
+        raw: { error: err?.message || 'unknown_error' }
+      };
     }
-
-    CACHE.set(key, { ts: Date.now(), value: result });
-    if (CACHE.size > CACHE_MAX) CACHE.delete(CACHE.keys().next().value);
-    return result;
   }
 
-  return {
-    process,
-    classifyLocal
-  };
+  return { process };
 })();
 
 window.IntentClassifier = IntentClassifier;
