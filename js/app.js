@@ -29,8 +29,15 @@ const App = (() => {
   }
 
   function initNavigation() {
-    document.querySelectorAll('.nav-btn[data-tab]').forEach(btn => {
-      btn.addEventListener('click', () => navigateTo(btn.getAttribute('data-tab')));
+    console.log('[App] Configurando navegación...');
+    const navBtns = document.querySelectorAll('.nav-btn[data-tab]');
+    console.log('[App] Botones de navegación encontrados:', navBtns.length);
+    navBtns.forEach(btn => {
+      btn.addEventListener('click', () => {
+        const tab = btn.getAttribute('data-tab');
+        console.log('[App] Navegando a:', tab);
+        navigateTo(tab);
+      });
     });
     const initial = (window.location.hash || '').replace('#', '');
     navigateTo(initial || 'dashboard');
@@ -60,8 +67,10 @@ const App = (() => {
     const form = document.getElementById('classifier-form');
     const input = document.getElementById('classifier-input');
     const chat = document.getElementById('chat-messages');
-    if (!form || !input || !chat) return;
-
+    if (!form || !input || !chat) {
+      console.warn('[App] Chat elements not found');
+      return;
+    }
     form.addEventListener('submit', async (e) => {
       e.preventDefault();
       const text = input.value.trim();
@@ -72,8 +81,10 @@ const App = (() => {
       chat.appendChild(userBubble);
       input.value = '';
       chat.scrollTop = chat.scrollHeight;
-
       try {
+        if (!window.IntentClassifier) {
+          throw new Error('Clasificador no disponible');
+        }
         const cls = await window.IntentClassifier.process(text);
         const empty = document.getElementById('classification-empty');
         const content = document.getElementById('classification-content');
@@ -98,6 +109,7 @@ const App = (() => {
         window.Store?.addConversation?.({ text, intent: cls.intent, confidence: cls.confidence, is_fiscal_audit_completed: cls.intent === 'SALUD_FISCAL' });
         window.Dashboard?.syncAndRender?.();
       } catch (err) {
+        console.error('[App] Error en chat:', err);
         const errBubble = document.createElement('div');
         errBubble.className = 'chat-bubble bot';
         errBubble.textContent = 'Error: ' + err.message;
@@ -114,15 +126,12 @@ const App = (() => {
     });
   }
 
-  // ============================================================
-  // FLUJO PRINCIPAL: Configuración → Autenticación → Dashboard
-  // ============================================================
   async function init() {
+    console.log('[App] Inicializando aplicación...');
     initTheme();
     initNavigation();
     initRFC();
 
-    // 1. MOSTRAR OVERLAY DE LOGIN POR DEFECTO (estable)
     const overlay = document.getElementById('auth-overlay');
     if (overlay) {
       overlay.hidden = false;
@@ -133,14 +142,12 @@ const App = (() => {
       app.hidden = true;
       app.style.display = 'none';
     }
-    // Asegurar que el botón demo esté visible pero deshabilitado inicialmente
     const demoBtn = document.getElementById('auth-demo');
     if (demoBtn) {
       demoBtn.hidden = false;
-      demoBtn.disabled = true; // se habilitará si falla la configuración o la autenticación
+      demoBtn.disabled = true;
     }
 
-    // 2. CARGAR CONFIGURACIÓN DEL SERVIDOR
     let configOk = false;
     try {
       configOk = await window.AppConfig?.loadServerConfig?.() || false;
@@ -148,7 +155,6 @@ const App = (() => {
       console.warn('[App] Error al cargar configuración:', e.message);
     }
 
-    // 3. Si la configuración falla, habilitar demo y detener flujo de autenticación
     if (!configOk) {
       console.warn('[App] Configuración no disponible. Modo Demo habilitado.');
       if (demoBtn) demoBtn.disabled = false;
@@ -159,10 +165,9 @@ const App = (() => {
         msgEl.className = 'auth-msg warning';
         msgEl.style.color = '#f59e0b';
       }
-      return; // No continuar con autenticación
+      return;
     }
 
-    // 4. Configuración OK: Inicializar Supabase y Auth
     try {
       await window.Store?.initSupabase?.();
     } catch (e) {
@@ -175,7 +180,6 @@ const App = (() => {
       console.warn('[App] Error inicializando Auth:', e.message);
     }
 
-    // 5. Inicializar módulos del dashboard
     try {
       await window.Dashboard?.init?.();
     } catch (e) {
@@ -187,7 +191,6 @@ const App = (() => {
       console.warn('[App] Error inicializando DocumentProcessor:', e.message);
     }
 
-    // 6. Sincronizar eventos
     window.Store?.on?.('store:updated', () => window.Dashboard?.syncAndRender?.());
     window.Store?.on?.('store:reset', () => window.Dashboard?.syncAndRender?.());
 
@@ -201,7 +204,11 @@ const App = (() => {
 window.App = App;
 
 if (document.readyState === 'loading') {
-  document.addEventListener('DOMContentLoaded', () => App.init());
+  document.addEventListener('DOMContentLoaded', () => {
+    console.log('[App] DOMContentLoaded, iniciando...');
+    App.init();
+  });
 } else {
+  console.log('[App] DOM ya listo, iniciando...');
   App.init();
 }
