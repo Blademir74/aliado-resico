@@ -46,8 +46,8 @@ window.MockData = window.MockData || {
 const AuthManager = (() => {
   let currentUser = null;
   let _authInitialized = false;
-  let _isChecking = false;
-  let _checkPromise = null;
+  let _initializing = false;
+  let _initPromise = null;
 
   const FISCAL = {
     INCOME_LIMIT: 3500000,
@@ -59,6 +59,7 @@ const AuthManager = (() => {
     ART_86C: 'Art. 86-C CFF'
   };
 
+  // --- DOM helpers ---
   function getAppEl() { return document.getElementById('app'); }
 
   function removeGuard() {
@@ -66,106 +67,57 @@ const AuthManager = (() => {
     if (guard) guard.remove();
   }
 
-  function _showApp(user) {
-    removeGuard();
+  function _setOverlayVisible(visible, message, isError = false) {
     const overlay = document.getElementById('auth-overlay');
-    const app = getAppEl();
-    const chip = document.getElementById('user-chip');
-    const emailEl = document.getElementById('user-email-display');
-    const logoutEl = document.getElementById('logout-btn');
-    const loader = document.getElementById('auth-loader');
     const msg = document.getElementById('auth-msg');
+    const loader = document.getElementById('auth-loader');
+    const demoBtn = document.getElementById('auth-demo');
 
-    if (loader) loader.style.display = 'none';
-    if (msg) { msg.hidden = true; msg.textContent = ''; }
-    if (overlay) {
+    if (!overlay) return;
+
+    if (visible) {
+      overlay.hidden = false;
+      overlay.style.display = 'flex';
+      // Mostrar mensaje si existe
+      if (msg) {
+        msg.hidden = false;
+        msg.textContent = message || 'Verificando Bóveda Fiscal...';
+        msg.className = isError ? 'auth-msg error' : 'auth-msg info';
+        msg.style.color = isError ? '#ef4444' : '#f59e0b';
+      }
+      if (loader) loader.style.display = 'none';
+      // Si hay error, habilitar demo; si no, deshabilitado
+      if (demoBtn) {
+        demoBtn.disabled = !isError;
+        demoBtn.hidden = false;
+      }
+    } else {
       overlay.hidden = true;
       overlay.style.display = 'none';
+      if (msg) { msg.hidden = true; msg.textContent = ''; }
+      if (loader) loader.style.display = 'none';
     }
+  }
+
+  function _showApp(user) {
+    removeGuard();
+    // Ocultar overlay definitivamente
+    _setOverlayVisible(false);
+    const app = getAppEl();
     if (app) {
       app.hidden = false;
       app.style.display = '';
-      void app.offsetHeight;
+      void app.offsetHeight; // force reflow
     }
+    // Mostrar datos de usuario
+    const chip = document.getElementById('user-chip');
+    const emailEl = document.getElementById('user-email-display');
+    const logoutEl = document.getElementById('logout-btn');
     if (chip) chip.hidden = false;
     if (emailEl) emailEl.textContent = user?.email || 'Modo Demo';
     if (logoutEl) logoutEl.hidden = false;
     window.APP_STATE.authError = null;
-  }
-
-  function _showLoginWithError(message) {
-    const overlay = document.getElementById('auth-overlay');
-    const app = getAppEl();
-    const chip = document.getElementById('user-chip');
-    const logoutEl = document.getElementById('logout-btn');
-    const loader = document.getElementById('auth-loader');
-    const msg = document.getElementById('auth-msg');
-
-    if (loader) loader.style.display = 'none';
-    if (msg) {
-      msg.hidden = false;
-      msg.textContent = message || 'Error de autorización. Contacta a soporte para verificar tu Bóveda Fiscal.';
-      msg.className = 'auth-msg error';
-      msg.style.color = '#ef4444';
-    }
-    if (overlay) {
-      overlay.hidden = false;
-      overlay.style.display = 'flex';
-    }
-    if (app) {
-      app.hidden = true;
-      app.style.display = 'none';
-    }
-    if (chip) chip.hidden = true;
-    if (logoutEl) logoutEl.hidden = true;
-    window.APP_STATE.authError = message || 'Error de autorización';
-  }
-
-  function _showLogin() {
-    const overlay = document.getElementById('auth-overlay');
-    const app = getAppEl();
-    const chip = document.getElementById('user-chip');
-    const logoutEl = document.getElementById('logout-btn');
-    const loader = document.getElementById('auth-loader');
-    const msg = document.getElementById('auth-msg');
-
-    if (loader) loader.style.display = 'none';
-    if (msg) { msg.hidden = true; msg.textContent = ''; }
-    if (overlay) {
-      overlay.hidden = false;
-      overlay.style.display = 'flex';
-    }
-    if (app) {
-      app.hidden = true;
-      app.style.display = 'none';
-    }
-    if (chip) chip.hidden = true;
-    if (logoutEl) logoutEl.hidden = true;
-    window.APP_STATE.authError = null;
-  }
-
-  function _showAuthMsg(el, text, isError) {
-    if (!el) return;
-    el.hidden = false;
-    el.textContent = text;
-    el.className = isError ? 'auth-msg error' : 'auth-msg success';
-    el.style.color = isError ? '#ef4444' : '#10b981';
-  }
-
-  function enableDemoButton() {
-    const btn = document.getElementById('auth-demo');
-    if (!btn) return;
-    btn.disabled = false;
-    btn.hidden = false;
-  }
-
-  function _showDemoBanner() {
-    if (document.getElementById('demo-banner')) return;
-    const banner = document.createElement('div');
-    banner.id = 'demo-banner';
-    banner.style.cssText = 'position:fixed;top:0;left:0;right:0;z-index:9999;background:#92400e;color:#fff;padding:10px 16px;text-align:center;font-size:13px;font-weight:600;';
-    banner.textContent = `⚠️ MODO DEMO — ${FISCAL.ART_17K}: multa hasta $${FISCAL.MULTA_BUZON.toLocaleString('es-MX')} MXN por Buzón Tributario inactivo.`;
-    document.body.prepend(banner);
+    window.APP_STATE.currentUser = user;
   }
 
   function _injectWelcomeMessage() {
@@ -187,6 +139,17 @@ const AuthManager = (() => {
     chatEl.appendChild(bubble);
   }
 
+  function _showDemoBanner() {
+    if (document.getElementById('demo-banner')) return;
+    const banner = document.createElement('div');
+    banner.id = 'demo-banner';
+    banner.style.cssText = 'position:fixed;top:0;left:0;right:0;z-index:9999;background:#92400e;color:#fff;padding:10px 16px;text-align:center;font-size:13px;font-weight:600;';
+    banner.textContent = `⚠️ MODO DEMO — ${FISCAL.ART_17K}: multa hasta $${FISCAL.MULTA_BUZON.toLocaleString('es-MX')} MXN por Buzón Tributario inactivo.`;
+    document.body.prepend(banner);
+  }
+
+  // --- Funciones públicas ---
+
   function bypassToDemo() {
     window.APP_STATE.isDemo = true;
     _showDemoBanner();
@@ -196,298 +159,145 @@ const AuthManager = (() => {
     window.Dashboard?.syncAndRender?.();
   }
 
-  // ============================================================
-  // checkSession: verifica acceso a fiscal_metrics
-  // Si no hay fila, se considera acceso permitido (se creará después)
-  // ============================================================
-  async function checkSession() {
+  // --- Función de inicialización principal (Promise) ---
+  async function initialize() {
+    // Si ya está inicializado, devolver éxito
     if (_authInitialized) {
-      console.log('[Auth] Sesión ya verificada');
       return true;
     }
-    if (_isChecking) {
-      console.log('[Auth] checkSession en ejecución, esperando...');
-      return _checkPromise;
+
+    // Si ya está en proceso, esperar la misma promesa
+    if (_initializing) {
+      return _initPromise;
     }
 
-    _isChecking = true;
-    _checkPromise = (async () => {
-      // Asegurar que overlay esté visible mientras verificamos
-      const overlay = document.getElementById('auth-overlay');
-      if (overlay) {
-        overlay.hidden = false;
-        overlay.style.display = 'flex';
+    _initializing = true;
+    _initPromise = (async () => {
+      // 1. Mostrar overlay con mensaje de "Verificando..."
+      _setOverlayVisible(true, '🔒 Verificando Bóveda Fiscal...', false);
+
+      // 2. Obtener cliente y configuración
+      const client = window.APP_STATE?.supabase;
+      const url = window.AppConfig?.getSupabaseUrl?.() || '';
+      const key = window.AppConfig?.getSupabaseKey?.() || '';
+
+      if (!url || !key || !client) {
+        console.warn('[Auth] Supabase no configurado. Modo Demo disponible.');
+        _setOverlayVisible(true, '⚠️ Servicio de autenticación no disponible. Usa "Ver Demo".', true);
+        // Habilitar demo
+        const demoBtn = document.getElementById('auth-demo');
+        if (demoBtn) { demoBtn.disabled = false; demoBtn.hidden = false; }
+        _authInitialized = true;
+        _initializing = false;
+        return false;
       }
-      const loader = document.getElementById('auth-loader');
-      if (loader) loader.style.display = 'block';
 
       try {
-        const url = window.AppConfig?.getSupabaseUrl?.() || '';
-        const key = window.AppConfig?.getSupabaseKey?.() || '';
-        const client = window.APP_STATE?.supabase;
+        // 3. Validaciones combinadas con Promise.allSettled
+        const [sessionResult, metricsResult] = await Promise.allSettled([
+          // a) Obtener sesión
+          client.auth.getSession(),
+          // b) Consultar fiscal_metrics (solo para verificar permisos)
+          client.from('fiscal_metrics').select('user_id').limit(1)
+        ]);
 
-        if (!url || !key || !client) {
-          console.warn('[Auth] Supabase no configurado');
-          _showLogin();
-          enableDemoButton();
-          if (loader) loader.style.display = 'none';
-          _authInitialized = true;
-          return false;
+        // Procesar resultado de sesión
+        let sessionOk = false;
+        let user = null;
+        if (sessionResult.status === 'fulfilled') {
+          const { data, error } = sessionResult.value;
+          if (!error && data?.session) {
+            sessionOk = true;
+            user = data.session.user;
+          }
         }
 
-        // Obtener sesión y usuario
-        const { data: sessionData, error: sessionError } = await client.auth.getSession();
-        if (sessionError || !sessionData?.session) {
-          _showLogin();
-          enableDemoButton();
-          if (loader) loader.style.display = 'none';
-          _authInitialized = true;
-          return false;
-        }
-
-        const { data: userData, error: userError } = await client.auth.getUser();
-        if (userError || !userData?.user) {
-          await client.auth.signOut().catch(() => {});
-          _showLogin();
-          enableDemoButton();
-          if (loader) loader.style.display = 'none';
-          _authInitialized = true;
-          return false;
-        }
-
-        const userId = userData.user.id;
-
-        // ============================================================
-        // VERIFICAR ACCESO A fiscal_metrics (SELECT)
-        // ============================================================
-        let hasAccess = false;
-        let isPermissionDenied = false;
-
-        try {
-          const { data, error } = await client
-            .from('fiscal_metrics')
-            .select('user_id')
-            .eq('user_id', userId)
-            .limit(1)
-            .maybeSingle();
-
+        // Procesar resultado de metrics (verificar 403)
+        let metricsOk = false;
+        let metricsError = null;
+        if (metricsResult.status === 'fulfilled') {
+          const { data, error } = metricsResult.value;
           if (error) {
-            // Si es 403 (permission denied), mostrar error y habilitar demo
+            metricsError = error;
+            // Si error es 403 o "permission denied", es un problema de RLS
             if (error.code === 'PGRST301' || 
                 error.message?.includes('permission denied') ||
                 error.status === 403) {
-              isPermissionDenied = true;
-              console.warn('[Auth] Error 403 en fiscal_metrics:', error.message);
-              _showLoginWithError('Error de Autorización: No tienes permisos para acceder a tu Bóveda Fiscal. Contacta a soporte.');
-              enableDemoButton();
-              if (loader) loader.style.display = 'none';
-              _authInitialized = true;
-              return false;
+              metricsOk = false;
+            } else {
+              // Otros errores (ej: tabla no existe) -> también fallo
+              metricsOk = false;
             }
-            // Otros errores (ej: tabla no existe) -> mostrar error genérico
-            console.warn('[Auth] Error consultando fiscal_metrics:', error.message);
-            _showLoginWithError('Error al conectar con Bóveda Fiscal. Contacta a soporte.');
-            enableDemoButton();
-            if (loader) loader.style.display = 'none';
-            _authInitialized = true;
-            return false;
-          }
-
-          // Si no hay datos (null), es un usuario nuevo sin fila -> acceso permitido
-          // La fila se creará en store.js o al primer registro de ingreso
-          hasAccess = true;
-          console.log('[Auth] Acceso a fiscal_metrics permitido (usuario nuevo o con fila)');
-
-        } catch (err) {
-          // Error de red o excepción
-          if (err?.status === 403 || err?.message?.includes('403')) {
-            _showLoginWithError('Error de Autorización: No tienes permisos para acceder a tu Bóveda Fiscal. Contacta a soporte.');
           } else {
-            _showLoginWithError('Error crítico al acceder a Bóveda Fiscal.');
+            // Consulta exitosa (aunque no haya datos, es válido)
+            metricsOk = true;
           }
-          enableDemoButton();
-          if (loader) loader.style.display = 'none';
-          _authInitialized = true;
-          return false;
+        } else {
+          // La promesa fue rechazada (error de red, etc.)
+          metricsOk = false;
+          metricsError = metricsResult.reason;
         }
 
-        // ============================================================
-        // SI ACCESO PERMITIDO, MOSTRAR APP
-        // ============================================================
-        if (hasAccess) {
-          currentUser = userData.user;
-          window.APP_STATE.currentUser = currentUser;
-          _showApp(currentUser);
+        // 4. Tomar decisión final
+        if (sessionOk && metricsOk) {
+          // TODO OK: Sesión válida y acceso a fiscal_metrics permitido
+          currentUser = user;
+          window.APP_STATE.currentUser = user;
+          _showApp(user);
           _injectWelcomeMessage();
           window.Dashboard?.syncAndRender?.();
-          if (loader) loader.style.display = 'none';
           _authInitialized = true;
+          _initializing = false;
           return true;
-        }
-
-        // Fallback
-        _showLogin();
-        enableDemoButton();
-        if (loader) loader.style.display = 'none';
-        _authInitialized = true;
-        return false;
-
-      } catch (err) {
-        console.warn('[Auth] checkSession error:', err.message);
-        if (err?.status === 403 || err?.message?.includes('403') || err?.message?.includes('permission denied')) {
-          _showLoginWithError('Error de Autorización: Contacta a soporte para verificar tu Bóveda Fiscal.');
         } else {
-          _showLogin();
+          // Fallo: mostrar error y habilitar demo
+          let errorMsg = 'Acceso Restringido - Verificando Bóveda Fiscal';
+          if (!sessionOk) {
+            errorMsg = 'Sesión no válida. Inicia sesión o usa Demo.';
+          } else if (!metricsOk) {
+            if (metricsError?.status === 403 || metricsError?.message?.includes('permission denied')) {
+              errorMsg = 'Error de Autorización: No tienes permisos para acceder a tu Bóveda Fiscal. Contacta a soporte.';
+            } else {
+              errorMsg = 'Error al conectar con Bóveda Fiscal. Contacta a soporte.';
+            }
+          }
+          _setOverlayVisible(true, '⚠️ ' + errorMsg, true);
+          // Habilitar botón demo
+          const demoBtn = document.getElementById('auth-demo');
+          if (demoBtn) { demoBtn.disabled = false; demoBtn.hidden = false; }
+          _authInitialized = true;
+          _initializing = false;
+          return false;
         }
-        enableDemoButton();
-        if (loader) loader.style.display = 'none';
+      } catch (err) {
+        console.warn('[Auth] Error en inicialización:', err.message);
+        _setOverlayVisible(true, '⚠️ Error crítico. Contacta a soporte o usa Demo.', true);
+        const demoBtn = document.getElementById('auth-demo');
+        if (demoBtn) { demoBtn.disabled = false; demoBtn.hidden = false; }
         _authInitialized = true;
+        _initializing = false;
         return false;
       }
     })();
 
-    const result = await _checkPromise;
-    _isChecking = false;
-    return result;
+    return _initPromise;
   }
 
-  // ============================================================
-  // Inicialización
-  // ============================================================
+  // --- Función init para compatibilidad con app.js ---
   async function init() {
+    // Si ya está inicializado, no hacer nada
     if (_authInitialized) {
       console.log('[Auth] Ya inicializado');
       return;
     }
-
-    const submitBtn = document.getElementById('auth-submit');
-    const demoBtn = document.getElementById('auth-demo');
-    const msgEl = document.getElementById('auth-msg');
-    const emailInput = document.getElementById('auth-email');
-    const passInput = document.getElementById('auth-password');
-    const logoutBtn = document.getElementById('logout-btn');
-    const tabLogin = document.getElementById('tab-login');
-    const tabRegister = document.getElementById('tab-register');
-
-    if (!submitBtn) return;
-
-    let isRegister = false;
-
-    tabLogin?.addEventListener('click', () => {
-      isRegister = false;
-      tabLogin.classList.add('active');
-      tabRegister?.classList.remove('active');
-      submitBtn.textContent = '🔐 Iniciar Sesión';
-      if (msgEl) msgEl.hidden = true;
-    });
-
-    tabRegister?.addEventListener('click', () => {
-      isRegister = true;
-      tabRegister.classList.add('active');
-      tabLogin?.classList.remove('active');
-      submitBtn.textContent = '✅ Crear Cuenta';
-      if (msgEl) msgEl.hidden = true;
-    });
-
-    submitBtn.addEventListener('click', async () => {
-      const email = emailInput?.value?.trim();
-      const pass = passInput?.value;
-      if (!email || !pass) {
-        _showAuthMsg(msgEl, 'Ingresa tu correo y contraseña.', true);
-        return;
-      }
-      const client = window.APP_STATE?.supabase;
-      if (!client) {
-        enableDemoButton();
-        _showAuthMsg(msgEl, 'Supabase no está listo. Usa Demo.', true);
-        return;
-      }
-      submitBtn.disabled = true;
-      submitBtn.textContent = '⏳ Procesando…';
-      if (msgEl) msgEl.hidden = true;
-      try {
-        let result;
-        if (isRegister) {
-          result = await client.auth.signUp({ email, password: pass });
-          if (result.error) throw result.error;
-          if (result.data?.user && !result.data?.session) {
-            _showAuthMsg(msgEl, 'Cuenta creada. Revisa tu correo para confirmar.', false);
-            return;
-          }
-        } else {
-          result = await client.auth.signInWithPassword({ email, password: pass });
-          if (result.error) throw result.error;
-        }
-        currentUser = result.data.user;
-        window.APP_STATE.currentUser = currentUser;
-        await checkSession();
-      } catch (err) {
-        const map = {
-          'Invalid login credentials': 'Correo o contraseña incorrectos.',
-          'Email not confirmed': 'Confirma tu correo antes de entrar.',
-          'User already registered': 'Ese correo ya tiene cuenta.'
-        };
-        _showAuthMsg(msgEl, map[err.message] || err.message, true);
-      } finally {
-        submitBtn.disabled = false;
-        submitBtn.textContent = isRegister ? '✅ Crear Cuenta' : '🔐 Iniciar Sesión';
-      }
-    });
-
-    [emailInput, passInput].forEach(el =>
-      el?.addEventListener('keydown', e => {
-        if (e.key === 'Enter') submitBtn.click();
-      })
-    );
-
-    demoBtn?.addEventListener('click', bypassToDemo);
-
-    const forgotBtn = document.getElementById('auth-forgot-password');
-    forgotBtn?.addEventListener('click', async (e) => {
-      e.preventDefault();
-      const email = emailInput?.value?.trim();
-      if (!email) {
-        _showAuthMsg(msgEl, 'Ingresa tu correo para restablecer tu contraseña.', true);
-        return;
-      }
-      const client = window.APP_STATE?.supabase;
-      if (!client) {
-        _showAuthMsg(msgEl, 'Supabase no está disponible.', true);
-        return;
-      }
-      forgotBtn.textContent = '⏳ Enviando…';
-      try {
-        const { error } = await client.auth.resetPasswordForEmail(email, {
-          redirectTo: `${window.location.origin}/api/auth-callback?next=/`
-        });
-        if (error) throw error;
-        _showAuthMsg(msgEl, 'Correo de recuperación enviado. Revisa tu bandeja de entrada.', false);
-      } catch (err) {
-        _showAuthMsg(msgEl, err.message, true);
-      } finally {
-        forgotBtn.textContent = '¿Olvidaste tu contraseña?';
-      }
-    });
-
-    logoutBtn?.addEventListener('click', async () => {
-      try {
-        await window.APP_STATE?.supabase?.auth?.signOut();
-      } catch (_) {}
-      window.Store?.reset?.();
-      window.APP_STATE.currentUser = null;
-      window.APP_STATE.isDemo = false;
-      _authInitialized = false;
-      _showLogin();
-      enableDemoButton();
-    });
-
-    await checkSession();
+    // Delegar a initialize()
+    await initialize();
   }
 
+  // --- Exponer funciones públicas ---
   return {
     init,
-    checkSession,
-    enableDemoButton,
+    initialize,
     bypassToDemo,
     isInitialized: () => _authInitialized
   };
