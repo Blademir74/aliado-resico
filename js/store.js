@@ -1,14 +1,36 @@
 const Store = (() => {
-  const KEY = 'aliado_resico_v7';
+  const KEY = 'aliado_resico_v8';
   const EVT = {};
   const DEFAULT_LIMIT = 3500000;
   const MAX_CONVERSATIONS = 200;
   const MAX_DOCUMENTS = 100;
+  const YEAR = 2026;
+  const MONTHS = [
+    'Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio',
+    'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'
+  ];
 
   let db = null;
   let usr = null;
   let rtChannel = null;
   let authListenerBound = false;
+
+  function buildMonthlyFolders(year = YEAR) {
+    return MONTHS.map((monthName, idx) => ({
+      year,
+      monthNumber: idx + 1,
+      monthKey: `${year}-${String(idx + 1).padStart(2, '0')}`,
+      monthName,
+      total: 0,
+      categories: {
+        ingresos: [],
+        gastos_iva: [],
+        efirma: [],
+        constancia: [],
+        opinion: []
+      }
+    }));
+  }
 
   const DEF = {
     conversations: [],
@@ -37,6 +59,7 @@ const Store = (() => {
       sound: false
     },
     documents: [],
+    invoiceProfiles: [],
     saludFiscal: {
       buzonTributarioActivo: null,
       eFirmaVigente: null,
@@ -45,9 +68,19 @@ const Store = (() => {
       alertLevel: 'safe'
     },
     carpetaFiscal: {
+      year: YEAR,
+      monthlyFolders: buildMonthlyFolders(YEAR),
+      summary: {
+        total: 0,
+        ingresos: 0,
+        gastos_iva: 0,
+        efirma: 0,
+        constancia: 0,
+        opinion: 0
+      },
       efirmaExpiry: null,
-      constanciaStatus: null,
-      opinionStatus: null,
+      constanciaStatus: 'pendiente',
+      opinionStatus: 'pendiente',
       lastUpdated: null
     },
     diagnostic: {
@@ -78,10 +111,32 @@ const Store = (() => {
     return `local-${Date.now()}-${Math.random().toString(16).slice(2)}`;
   }
 
+  function normalizeMonthlyFolders(input) {
+    const base = buildMonthlyFolders(YEAR);
+    if (!Array.isArray(input) || !input.length) return base;
+
+    return base.map(baseMonth => {
+      const found = input.find(m => String(m.monthKey) === String(baseMonth.monthKey));
+      if (!found) return baseMonth;
+      return {
+        ...baseMonth,
+        ...found,
+        categories: {
+          ingresos: Array.isArray(found.categories?.ingresos) ? found.categories.ingresos : [],
+          gastos_iva: Array.isArray(found.categories?.gastos_iva) ? found.categories.gastos_iva : [],
+          efirma: Array.isArray(found.categories?.efirma) ? found.categories.efirma : [],
+          constancia: Array.isArray(found.categories?.constancia) ? found.categories.constancia : [],
+          opinion: Array.isArray(found.categories?.opinion) ? found.categories.opinion : []
+        }
+      };
+    });
+  }
+
   function load() {
     try {
       const raw = localStorage.getItem(KEY);
       if (!raw) return clone(DEF);
+
       const parsed = JSON.parse(raw);
       return {
         ...clone(DEF),
@@ -90,10 +145,15 @@ const Store = (() => {
         fiscalMetrics: { ...clone(DEF).fiscalMetrics, ...(parsed.fiscalMetrics || {}) },
         settings: { ...clone(DEF).settings, ...(parsed.settings || {}) },
         saludFiscal: { ...clone(DEF).saludFiscal, ...(parsed.saludFiscal || {}) },
-        carpetaFiscal: { ...clone(DEF).carpetaFiscal, ...(parsed.carpetaFiscal || {}) },
+        carpetaFiscal: {
+          ...clone(DEF).carpetaFiscal,
+          ...(parsed.carpetaFiscal || {}),
+          monthlyFolders: normalizeMonthlyFolders(parsed.carpetaFiscal?.monthlyFolders)
+        },
+        invoiceProfiles: Array.isArray(parsed.invoiceProfiles) ? parsed.invoiceProfiles : [],
         diagnostic: { ...clone(DEF).diagnostic, ...(parsed.diagnostic || {}) }
       };
-    } catch (_) {
+    } catch {
       return clone(DEF);
     }
   }
@@ -103,16 +163,16 @@ const Store = (() => {
   function persist() {
     try {
       localStorage.setItem(KEY, JSON.stringify(state));
-    } catch (_) {}
+    } catch {}
   }
 
   function emit(ev, data) {
     (EVT[ev] || []).forEach(fn => {
-      try { fn(data); } catch (_) {}
+      try { fn(data); } catch {}
     });
   }
 
-  function emitAll(data) {
+  function emitAll() {
     emit('store:updated', state);
     emit('storeUpdated', state);
     emit('metrics:updated', state.metrics);
@@ -142,14 +202,10 @@ const Store = (() => {
     });
 
     let confidenceSum = 0;
-
     state.conversations.forEach(c => {
       const intent = c.intent || 'OTROS';
-      if (intent in state.metrics.byCategory) {
-        state.metrics.byCategory[intent]++;
-      } else {
-        state.metrics.byCategory.OTROS++;
-      }
+      if (intent in state.metrics.byCategory) state.metrics.byCategory[intent]++;
+      else state.metrics.byCategory.OTROS++;
       confidenceSum += Number(c.confidence || 0);
     });
 
@@ -163,7 +219,7 @@ const Store = (() => {
     );
   }
 
-  function _mapConversation(row) {
+  function mapConversation(row) {
     return {
       id: row.id,
       text: row.message_text || '',
@@ -176,22 +232,128 @@ const Store = (() => {
     };
   }
 
-  function _mapDocument(row) {
+  function normalizeDocumentType(row) {
+    return row.document_type || row.doc_type || 'OTRO';
+  }
+
+  function mapDocument(row) {
     return {
       id: row.id,
       file_name: row.file_name || 'archivo',
-      confidence: Number(row.confidence || 0),
-      document_type: row.doc_type || 'OTRO',
+      doc_type: normalizeDocumentType(row),
+      document_type: normalizeDocumentType(row),
       extracted_data: row.extracted_data || {},
+      confidence: Number(row.confidence || 0),
       safety_flag: !!row.safety_flag,
       validation_status: row.validation_status || 'pendiente',
       needs_review: !!row.needs_review,
       source: row.source || 'unknown',
-      created_at: row.created_at || new Date().toISOString()
+      file_url: row.file_url || null,
+      created_at: row.created_at || new Date().toISOString(),
+      updated_at: row.updated_at || row.created_at || new Date().toISOString()
     };
   }
 
-  async function _syncDown() {
+  function deriveDocumentDate(doc) {
+    const fiscalDate = doc?.extracted_data?.fecha || doc?.created_at || doc?.updated_at;
+    const parsed = new Date(fiscalDate);
+    return Number.isNaN(parsed.getTime()) ? new Date() : parsed;
+  }
+
+  function normalizeFolderCategory(value) {
+    const v = String(value || '').trim().toLowerCase();
+    if (['ingresos', 'gastos_iva', 'efirma', 'constancia', 'opinion'].includes(v)) return v;
+    return 'gastos_iva';
+  }
+
+  function detectFolderCategory(doc) {
+    const explicit = doc?.folder_category || doc?.extracted_data?.folder_category;
+    if (explicit) return normalizeFolderCategory(explicit);
+
+    const type = String(doc.document_type || doc.doc_type || '').toUpperCase();
+    const source = String(doc.source || '').toLowerCase();
+    const usefulness = String(doc.extracted_data?.tax_usefulness || '').toUpperCase();
+
+    if (source.includes('alegra') || source.includes('invoice')) return 'ingresos';
+    if (type === 'EFIRMA') return 'efirma';
+    if (type === 'CONSTANCIA') return 'constancia';
+    if (type === 'OPINION') return 'opinion';
+    if (type === 'CFDI' && usefulness === 'ISR') return 'ingresos';
+    if (type === 'CFDI' && (usefulness === 'IVA' || usefulness === 'AMBOS')) return 'gastos_iva';
+    if (type === 'TICKET') return 'gastos_iva';
+    return 'gastos_iva';
+  }
+
+  function slimFolderDoc(doc) {
+    return {
+      id: doc.id,
+      file_name: doc.file_name || 'archivo',
+      document_type: doc.document_type || doc.doc_type || 'OTRO',
+      created_at: doc.created_at || new Date().toISOString(),
+      fecha_fiscal: doc.extracted_data?.fecha || null,
+      confidence: Number(doc.confidence || 0),
+      needs_review: !!doc.needs_review || !!doc.safety_flag,
+      validation_status: doc.validation_status || 'pendiente',
+      source: doc.source || 'local'
+    };
+  }
+
+  function rebuildCarpetaFiscal() {
+    const folders = buildMonthlyFolders(YEAR);
+    const summary = {
+      total: 0,
+      ingresos: 0,
+      gastos_iva: 0,
+      efirma: 0,
+      constancia: 0,
+      opinion: 0
+    };
+
+    let latestEFirma = null;
+    let latestConstancia = null;
+    let latestOpinion = null;
+
+    (state.documents || []).forEach(doc => {
+      const d = deriveDocumentDate(doc);
+      if (d.getFullYear() !== YEAR) return;
+
+      const monthIdx = d.getMonth();
+      const category = detectFolderCategory(doc);
+      const folder = folders[monthIdx];
+      if (!folder || !folder.categories[category]) return;
+
+      const slim = slimFolderDoc(doc);
+      folder.categories[category].push(slim);
+      folder.total += 1;
+      summary.total += 1;
+      summary[category] += 1;
+
+      if (category === 'efirma') {
+        if (!latestEFirma || new Date(doc.created_at) > new Date(latestEFirma.created_at)) latestEFirma = doc;
+      }
+      if (category === 'constancia') {
+        if (!latestConstancia || new Date(doc.created_at) > new Date(latestConstancia.created_at)) latestConstancia = doc;
+      }
+      if (category === 'opinion') {
+        if (!latestOpinion || new Date(doc.created_at) > new Date(latestOpinion.created_at)) latestOpinion = doc;
+      }
+    });
+
+    state.carpetaFiscal = {
+      ...state.carpetaFiscal,
+      year: YEAR,
+      monthlyFolders: folders,
+      summary,
+      efirmaExpiry: latestEFirma?.extracted_data?.fecha_vencimiento || latestEFirma?.extracted_data?.fecha || state.carpetaFiscal.efirmaExpiry || 'pendiente',
+      constanciaStatus: latestConstancia ? 'actualizada' : 'pendiente',
+      opinionStatus: latestOpinion ? 'cargada' : 'pendiente',
+      lastUpdated: new Date().toISOString()
+    };
+
+    emit('carpetaUpdated', state.carpetaFiscal);
+  }
+
+  async function syncDown() {
     if (!db || !usr?.id) return;
 
     try {
@@ -211,14 +373,14 @@ const Store = (() => {
 
         db
           .from('documents')
-          .select('id,user_id,file_name,doc_type,extracted_data,confidence,safety_flag,validation_status,needs_review,source,created_at')
+          .select('id,user_id,file_name,doc_type,document_type,file_url,extracted_data,confidence,safety_flag,validation_status,needs_review,source,created_at,updated_at')
           .eq('user_id', usr.id)
           .order('created_at', { ascending: false })
           .limit(MAX_DOCUMENTS)
       ]);
 
       if (!convRes.error && Array.isArray(convRes.data)) {
-        state.conversations = convRes.data.map(_mapConversation);
+        state.conversations = convRes.data.map(mapConversation);
       } else if (convRes.error) {
         console.warn('[Store] conversations sync error:', convRes.error.message);
       }
@@ -235,20 +397,21 @@ const Store = (() => {
       }
 
       if (!docRes.error && Array.isArray(docRes.data)) {
-        state.documents = docRes.data.map(_mapDocument);
+        state.documents = docRes.data.map(mapDocument);
       } else if (docRes.error) {
         console.warn('[Store] documents sync error:', docRes.error.message);
       }
 
       recalc();
+      rebuildCarpetaFiscal();
       persist();
-      emitAll(state);
+      emitAll();
     } catch (e) {
       console.warn('[Store] syncDown:', e.message);
     }
   }
 
-  async function _upsertConversation(c) {
+  async function upsertConversation(c) {
     if (!db || !usr?.id) return;
 
     const payload = {
@@ -262,15 +425,13 @@ const Store = (() => {
 
     try {
       const { error } = await db.from('conversations').upsert(payload, { onConflict: 'id' });
-      if (error) {
-        console.warn('[Store] upsertConversation:', error.message);
-      }
+      if (error) console.warn('[Store] upsertConversation:', error.message);
     } catch (e) {
       console.warn('[Store] upsertConversation:', e.message);
     }
   }
 
-  async function _upsertMetrics() {
+  async function upsertMetrics() {
     if (!db || !usr?.id) return;
 
     const payload = {
@@ -285,89 +446,73 @@ const Store = (() => {
 
     try {
       const { error } = await db.from('fiscal_metrics').upsert(payload, { onConflict: 'user_id' });
-      if (error) {
-        console.warn('[Store] upsertMetrics:', error.message, error);
-      }
+      if (error) console.warn('[Store] upsertMetrics:', error.message);
     } catch (e) {
       console.warn('[Store] upsertMetrics:', e.message);
     }
   }
 
-  async function _saveDocumentRemote(doc) {
+  async function saveDocumentRemote(doc) {
     if (!db || !usr?.id) return;
+
+    const normalizedType = doc.document_type || doc.doc_type || 'OTRO';
 
     const payload = {
       id: doc.id || safeUUID(),
       user_id: usr.id,
       file_name: doc.file_name || 'unnamed_file',
-      doc_type: doc.document_type || 'OTRO',
+      doc_type: normalizedType,
+      document_type: normalizedType,
       extracted_data: doc.extracted_data || {},
       confidence: Number(doc.confidence || 0),
       safety_flag: !!doc.safety_flag,
       validation_status: doc.validation_status || 'pendiente',
       needs_review: !!doc.needs_review || !!doc.safety_flag,
-      source: doc.source || 'web_upload'
+      source: doc.source || 'web_upload',
+      file_url: doc.file_url || null,
+      updated_at: new Date().toISOString()
     };
 
     try {
       const { error } = await db.from('documents').upsert(payload, { onConflict: 'id' });
-      if (error) {
-        console.warn('[Store] saveDocument error:', error.message, error);
-      }
+      if (error) console.warn('[Store] saveDocumentRemote:', error.message);
     } catch (e) {
-      console.warn('[Store] saveDocument error:', e.message);
+      console.warn('[Store] saveDocumentRemote:', e.message);
     }
   }
 
-  function _subscribeRealtime() {
+  function subscribeRealtime() {
     if (!db || !usr?.id) return;
 
     try {
-      if (rtChannel) {
-        db.removeChannel(rtChannel);
-      }
-    } catch (_) {}
+      if (rtChannel) db.removeChannel(rtChannel);
+    } catch {}
 
     rtChannel = db
       .channel(`aliado_rt_${usr.id}`)
       .on(
         'postgres_changes',
-        {
-          event: '*',
-          schema: 'public',
-          table: 'conversations',
-          filter: `user_id=eq.${usr.id}`
-        },
-        () => _syncDown()
+        { event: '*', schema: 'public', table: 'conversations', filter: `user_id=eq.${usr.id}` },
+        () => syncDown()
       )
       .on(
         'postgres_changes',
-        {
-          event: '*',
-          schema: 'public',
-          table: 'fiscal_metrics',
-          filter: `user_id=eq.${usr.id}`
-        },
-        () => _syncDown()
+        { event: '*', schema: 'public', table: 'fiscal_metrics', filter: `user_id=eq.${usr.id}` },
+        () => syncDown()
       )
       .on(
         'postgres_changes',
-        {
-          event: '*',
-          schema: 'public',
-          table: 'documents',
-          filter: `user_id=eq.${usr.id}`
-        },
-        () => _syncDown()
+        { event: '*', schema: 'public', table: 'documents', filter: `user_id=eq.${usr.id}` },
+        () => syncDown()
       )
-      .subscribe((status) => {
+      .subscribe(status => {
         if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
-          setTimeout(() => _subscribeRealtime(), 5000);
+          setTimeout(() => subscribeRealtime(), 5000);
         }
       });
   }
 
-  function _bindAuthListenerOnce() {
+  function bindAuthListenerOnce() {
     if (!db || authListenerBound) return;
 
     db.auth.onAuthStateChange(async (_event, session) => {
@@ -375,12 +520,12 @@ const Store = (() => {
       window.APP_STATE.currentUser = usr;
 
       if (usr?.id) {
-        await _syncDown();
-        _subscribeRealtime();
+        await syncDown();
+        subscribeRealtime();
       } else {
         try {
           if (rtChannel) db.removeChannel(rtChannel);
-        } catch (_) {}
+        } catch {}
         rtChannel = null;
       }
     });
@@ -408,21 +553,19 @@ const Store = (() => {
         }
       });
       window.APP_STATE.supabase = db;
-      _bindAuthListenerOnce();
+      bindAuthListenerOnce();
     }
 
     try {
       const { data, error } = await db.auth.getSession();
-      if (error) {
-        console.warn('[Store] getSession:', error.message);
-      }
+      if (error) console.warn('[Store] getSession:', error.message);
 
       usr = data?.session?.user || null;
       window.APP_STATE.currentUser = usr;
 
       if (usr?.id) {
-        await _syncDown();
-        _subscribeRealtime();
+        await syncDown();
+        subscribeRealtime();
       }
 
       return db;
@@ -440,6 +583,7 @@ const Store = (() => {
   function getSaludFiscal() { return state.saludFiscal; }
   function getCarpetaFiscal() { return state.carpetaFiscal; }
   function getDiagnostic() { return state.diagnostic; }
+  function getInvoiceProfiles() { return state.invoiceProfiles || []; }
 
   function setState(partial = {}) {
     state = {
@@ -449,13 +593,19 @@ const Store = (() => {
       fiscalMetrics: { ...state.fiscalMetrics, ...(partial.fiscalMetrics || {}) },
       settings: { ...state.settings, ...(partial.settings || {}) },
       saludFiscal: { ...state.saludFiscal, ...(partial.saludFiscal || {}) },
-      carpetaFiscal: { ...state.carpetaFiscal, ...(partial.carpetaFiscal || {}) },
+      carpetaFiscal: {
+        ...state.carpetaFiscal,
+        ...(partial.carpetaFiscal || {}),
+        monthlyFolders: normalizeMonthlyFolders(partial.carpetaFiscal?.monthlyFolders || state.carpetaFiscal.monthlyFolders)
+      },
+      invoiceProfiles: Array.isArray(partial.invoiceProfiles) ? partial.invoiceProfiles : state.invoiceProfiles,
       diagnostic: { ...state.diagnostic, ...(partial.diagnostic || {}) }
     };
 
     recalc();
+    rebuildCarpetaFiscal();
     persist();
-    emitAll(state);
+    emitAll();
   }
 
   function addConversation(c) {
@@ -479,54 +629,54 @@ const Store = (() => {
     persist();
     emit('conversation:added', conv);
     emit('conversationAdded', conv);
-    emitAll(state);
+    emitAll();
 
-    _upsertConversation(conv);
-    _upsertMetrics();
+    upsertConversation(conv);
+    upsertMetrics();
   }
 
   function updateIncome(amount) {
     state.incomeYTD = Number(amount || 0);
-    state.fiscalMetrics.riskLevel = calcRiskLevel(
-      state.incomeYTD,
-      state.fiscalMetrics.annualLimit
-    );
-
+    state.fiscalMetrics.riskLevel = calcRiskLevel(state.incomeYTD, state.fiscalMetrics.annualLimit);
     persist();
-    emitAll(state);
-    _upsertMetrics();
+    emitAll();
+    upsertMetrics();
   }
 
   function updateAnnualLimit(amount) {
     const nextLimit = Number(amount || DEFAULT_LIMIT);
     state.fiscalMetrics.annualLimit = nextLimit > 0 ? nextLimit : DEFAULT_LIMIT;
     state.fiscalMetrics.riskLevel = calcRiskLevel(state.incomeYTD, state.fiscalMetrics.annualLimit);
-
     persist();
-    emitAll(state);
-    _upsertMetrics();
+    emitAll();
+    upsertMetrics();
   }
 
   function updateSaludFiscal(data) {
     state.saludFiscal = { ...state.saludFiscal, ...data };
     persist();
-    emit('saludfiscal:updated', state.saludFiscal);
     emit('saludFiscalUpdated', state.saludFiscal);
-    emitAll(state);
+    emitAll();
   }
 
   async function saveDocument(doc) {
+    const normalizedType = doc.document_type || doc.doc_type || 'OTRO';
+
     const localDoc = {
       id: doc.id || safeUUID(),
       file_name: doc.file_name || 'unnamed_file',
-      confidence: Number(doc.confidence || 0),
-      document_type: doc.document_type || 'OTRO',
+      doc_type: normalizedType,
+      document_type: normalizedType,
       extracted_data: doc.extracted_data || {},
+      confidence: Number(doc.confidence || 0),
       safety_flag: !!doc.safety_flag,
       validation_status: doc.validation_status || 'pendiente',
       needs_review: !!doc.needs_review || !!doc.safety_flag,
       source: doc.source || 'local',
-      created_at: doc.created_at || new Date().toISOString()
+      file_url: doc.file_url || null,
+      created_at: doc.created_at || new Date().toISOString(),
+      updated_at: doc.updated_at || new Date().toISOString(),
+      folder_category: doc.folder_category || doc.extracted_data?.folder_category || null
     };
 
     state.documents.unshift(localDoc);
@@ -534,24 +684,32 @@ const Store = (() => {
       state.documents = state.documents.slice(0, MAX_DOCUMENTS);
     }
 
+    rebuildCarpetaFiscal();
     persist();
     emit('document:added', localDoc);
     emit('documentAdded', localDoc);
-    emitAll(state);
+    emitAll();
 
-    await _saveDocumentRemote(localDoc);
+    await saveDocumentRemote(localDoc);
+    return localDoc;
   }
 
   function updateCarpetaFiscal(data) {
     state.carpetaFiscal = {
       ...state.carpetaFiscal,
       ...data,
+      monthlyFolders: normalizeMonthlyFolders(data?.monthlyFolders || state.carpetaFiscal.monthlyFolders),
       lastUpdated: new Date().toISOString()
     };
     persist();
-    emit('carpeta:updated', state.carpetaFiscal);
     emit('carpetaUpdated', state.carpetaFiscal);
-    emitAll(state);
+    emitAll();
+  }
+
+  function setInvoiceProfiles(list = []) {
+    state.invoiceProfiles = Array.isArray(list) ? list.slice(0, 50) : [];
+    persist();
+    emitAll();
   }
 
   function updateDiagnostic(data) {
@@ -561,9 +719,8 @@ const Store = (() => {
       completedAt: data?.completedAt || state.diagnostic.completedAt || new Date().toISOString()
     };
     persist();
-    emit('diagnostic:updated', state.diagnostic);
     emit('diagnosticUpdated', state.diagnostic);
-    emitAll(state);
+    emitAll();
   }
 
   function reset() {
@@ -572,13 +729,14 @@ const Store = (() => {
 
     try {
       if (rtChannel && db) db.removeChannel(rtChannel);
-    } catch (_) {}
+    } catch {}
     rtChannel = null;
 
-    emit('store:reset', null);
     emit('storeReset', null);
-    emitAll(state);
+    emitAll();
   }
+
+  rebuildCarpetaFiscal();
 
   return {
     on,
@@ -591,6 +749,8 @@ const Store = (() => {
     getSaludFiscal,
     getCarpetaFiscal,
     getDiagnostic,
+    getInvoiceProfiles,
+    setInvoiceProfiles,
     setState,
     addConversation,
     updateIncome,

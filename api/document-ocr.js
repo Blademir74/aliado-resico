@@ -8,8 +8,8 @@ const ALLOWED_ORIGINS = [
   'http://127.0.0.1:5500'
 ];
 
-const GEMINI_MODEL = 'gemini-1.5-flash';
-const GEMINI_ENDPOINT = `https://generativelanguage.googleapis.com/v1/models/${GEMINI_MODEL}:generateContent`;
+const GEMINI_MODEL = 'gemini-2.0-flash';
+const GEMINI_ENDPOINT = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent`;
 
 function resolveOrigin(origin = '') {
   if (!origin) return ALLOWED_ORIGINS[0];
@@ -27,14 +27,53 @@ function setHeaders(req, res) {
   res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
 }
 
-function fallback(reason, fileName = '') {
+function parseBody(req) {
+  if (!req?.body) return {};
+  if (typeof req.body === 'object') return req.body;
+  try {
+    return JSON.parse(req.body);
+  } catch {
+    return {};
+  }
+}
+
+function normalizeDocType(value) {
+  const v = String(value || '').trim().toUpperCase();
+  const allowed = new Set(['CFDI', 'TICKET', 'CONSTANCIA', 'OPINION', 'EFIRMA', 'OTRO']);
+  return allowed.has(v) ? v : 'OTRO';
+}
+
+function extractReplyText(data) {
+  return (
+    data?.candidates?.[0]?.content?.parts
+      ?.map(part => part?.text || '')
+      .join('\n')
+      .trim() || ''
+  );
+}
+
+function extractJSON(text) {
+  if (!text) return null;
+  const cleaned = String(text)
+    .replace(/```json/gi, '```')
+    .replace(/```/g, '')
+    .trim();
+  const start = cleaned.indexOf('{');
+  const end = cleaned.lastIndexOf('}');
+  if (start === -1 || end <= start) return null;
+  return cleaned.slice(start, end + 1);
+}
+
+function buildFallback(reason, fileName = '') {
+  const docType = 'OTRO';
   return {
     ok: true,
     is_fallback: true,
     reason,
     document: {
       file_name: fileName || 'documento',
-      document_type: 'DESCONOCIDO',
+      doc_type: docType,
+      document_type: docType,
       confidence: 0.5,
       file_url: `local:${fileName || 'documento'}`,
       extracted_data: {
@@ -44,22 +83,18 @@ function fallback(reason, fileName = '') {
         iva: null,
         total: null,
         folio: null,
-        fecha: null
+        fecha: null,
+        summary: null,
+        tax_usefulness: null
       },
       safety_flag: true,
-      pedagogical_note: 'ISR: Sin deducciones. IVA: Gasto indispensable para acreditamiento con CFDI válido.'
+      validation_status: 'pendiente',
+      needs_review: true,
+      source: 'ocr_fallback',
+      pedagogical_note: 'ISR RESICO: sin deducciones. IVA: requiere CFDI válido y gasto indispensable para acreditamiento.'
     },
     needsHumanReview: true
   };
-}
-
-function extractJSON(text) {
-  if (!text) return null;
-  const cleaned = String(text).replace(/```json/gi, '```').replace(/```/g, '').trim();
-  const start = cleaned.indexOf('{');
-  const end = cleaned.lastIndexOf('}');
-  if (start === -1 || end <= start) return null;
-  return cleaned.slice(start, end + 1);
 }
 
 export default async function handler(req, res) {
@@ -70,15 +105,17 @@ export default async function handler(req, res) {
   }
 
   if (req.method !== 'POST') {
-    return res.status(405).json({ ok: false, error: 'Method not allowed' });
+    return res.status(405).json({ ok: false, error: 'Method Not Allowed' });
   }
 
-  const geminiApiKey = process.env.GEMINI_API_KEY || '';
-  if (!geminiApiKey) {
-    return res.status(200).json(fallback('missing_api_key', req.body?.fileName || ''));
+  const body = parseBody(req);
+  const { fileName, mimeType, base64Data } = body;
+  const apiKey = process.env.GEMINI_API_KEY || '';
+
+  if (!apiKey) {
+    return res.status(200).json(buildFallback('missing_api_key', fileName || ''));
   }
 
-  const { fileName, mimeType, base64Data } = req.body || {};
   if (!fileName || !mimeType || !base64Data) {
     return res.status(400).json({
       ok: false,
@@ -87,11 +124,13 @@ export default async function handler(req, res) {
   }
 
   const prompt = [
-    'Eres un extractor fiscal mexicano para RESICO 2026.',
+    'Eres un extractor fiscal mexicano especializado en RESICO 2026.',
     'Analiza el documento y responde SOLO JSON válido.',
-    'Sin markdown. Sin texto adicional.',
-    'Identifica si es CFDI, ticket, constancia, opinión de cumplimiento, e.firma u otro.',
-    'Campos exactos:',
+    'No uses markdown. No uses explicaciones.',
+    'Detecta si es CFDI, ticket, constancia, opinión de cumplimiento, e.firma u otro.',
+    'Si falta un dato, devuelve null.',
+    'El IVA debe ir explícito cuando se detecte; si no aparece, devuelve 0 o null según corresponda.',
+    'Responde con esta forma exacta:',
     '{',
     '"document_type":"CFDI|TICKET|CONSTANCIA|OPINION|EFIRMA|OTRO",',
     '"confidence":0.97,',
@@ -105,13 +144,13 @@ export default async function handler(req, res) {
     '"summary":"breve",',
     '"tax_usefulness":"IVA|ISR|AMBOS|NINGUNO"',
     '}',
-    'Si no puedes leer algo, devuelve null.',
-    'Si es gasto, recuerda que en RESICO el ISR no deduce gastos, pero el IVA sí requiere CFDI válido y gasto indispensable.'
+    'Regla fiscal pedagógica: ISR RESICO no deduce gastos; IVA solo es acreditable con CFDI válido y gasto indispensable.'
   ].join('\n');
 
-  const body = {
+  const payload = {
     contents: [
       {
+        role: 'user',
         parts: [
           { text: prompt },
           {
@@ -124,32 +163,40 @@ export default async function handler(req, res) {
       }
     ],
     generationConfig: {
-      temperature: 0.1,
-      maxOutputTokens: 600
+      temperature: 0.05,
+      topP: 0.9,
+      maxOutputTokens: 700
     }
   };
 
   try {
-    const response = await fetch(`${GEMINI_ENDPOINT}?key=${geminiApiKey}`, {
+    const upstream = await fetch(`${GEMINI_ENDPOINT}?key=${apiKey}`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body)
+      body: JSON.stringify(payload)
     });
 
-    const data = await response.json().catch(() => null);
+    const data = await upstream.json().catch(() => ({}));
 
-    if (!response.ok || data?.error) {
-      return res.status(200).json(fallback('gemini_error', fileName));
+    if (!upstream.ok || data?.error) {
+      return res.status(200).json(buildFallback('gemini_error', fileName));
     }
 
-    const rawText = data?.candidates?.?.content?.parts?.?.text || '';
+    const rawText = extractReplyText(data);
     const jsonText = extractJSON(rawText);
 
     if (!jsonText) {
-      return res.status(200).json(fallback('empty_response', fileName));
+      return res.status(200).json(buildFallback('empty_response', fileName));
     }
 
-    const parsed = JSON.parse(jsonText);
+    let parsed;
+    try {
+      parsed = JSON.parse(jsonText);
+    } catch {
+      return res.status(200).json(buildFallback('invalid_json', fileName));
+    }
+
+    const docType = normalizeDocType(parsed.document_type);
     const confidence = Number(parsed.confidence || 0);
     const safetyFlag = confidence < 0.85;
 
@@ -158,7 +205,8 @@ export default async function handler(req, res) {
       is_fallback: false,
       document: {
         file_name: fileName,
-        document_type: parsed.document_type || 'OTRO',
+        doc_type: docType,
+        document_type: docType,
         confidence,
         file_url: `local:${fileName}`,
         extracted_data: {
@@ -173,11 +221,15 @@ export default async function handler(req, res) {
           tax_usefulness: parsed.tax_usefulness || null
         },
         safety_flag: safetyFlag,
-        pedagogical_note: 'ISR: Sin deducciones (tasa fija). IVA: Gasto indispensable para acreditamiento con CFDI válido.'
+        validation_status: 'pendiente',
+        needs_review: safetyFlag,
+        source: 'ocr_ai',
+        pedagogical_note: 'ISR RESICO: sin deducciones. IVA: requiere CFDI válido y gasto indispensable para acreditamiento.'
       },
-      needsHumanReview: safetyFlag
+      needsHumanReview: safetyFlag,
+      model: GEMINI_MODEL
     });
   } catch (error) {
-    return res.status(200).json(fallback(error?.message || 'network_error', fileName));
+    return res.status(200).json(buildFallback(error?.message || 'network_error', fileName));
   }
 }
