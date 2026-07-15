@@ -1,16 +1,5 @@
 {
   "version": 2,
-  "functions": {
-    "api/config.js": {
-      "runtime": "nodejs24.x"
-    },
-    "api/gemini-proxy.js": {
-      "runtime": "nodejs24.x"
-    },
-    "api/document-ocr.js": {
-      "runtime": "nodejs24.x"
-    }
-  },
   "rewrites": [
     {
       "source": "/((?!api/|js/|styles\\.css|logo\\.png|favicon\\.ico|foto\\.png).*)",
