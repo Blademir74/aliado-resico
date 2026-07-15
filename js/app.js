@@ -44,15 +44,9 @@ const App = (() => {
 
     window.location.hash = target;
 
-    if (target === 'documents') {
-      window.DocumentsManager?.renderDocuments?.();
-    }
-    if (target === 'invoicing') {
-      window.Invoicing?.renderProfiles?.();
-    }
-    if (target === 'carpeta') {
-      renderCarpetaFiscal();
-    }
+    if (target === 'documents') window.DocumentsManager?.renderDocuments?.();
+    if (target === 'invoicing') window.Invoicing?.renderProfiles?.();
+    if (target === 'carpeta') renderCarpetaFiscal();
   }
 
   function initTheme() {
@@ -90,24 +84,14 @@ const App = (() => {
     }
   }
 
-  function loadConfigEFOSList() {
-    const cfg = window.RESICO_CONFIG?.EFOS_RFC_LIST;
-    return Array.isArray(cfg) ? cfg : [];
-  }
-
   function getEFOSWatchlist() {
-    const all = [...loadConfigEFOSList(), ...loadLocalEFOSList()]
+    const cfg = Array.isArray(window.RESICO_CONFIG?.EFOS_RFC_LIST) ? window.RESICO_CONFIG.EFOS_RFC_LIST : [];
+    const local = loadLocalEFOSList();
+    const all = [...cfg, ...local]
       .map(v => String(v || '').trim().toUpperCase())
       .filter(Boolean);
     return [...new Set(all)];
   }
-
-  window.setEFOSWatchlist = function setEFOSWatchlist(list = []) {
-    const clean = Array.isArray(list)
-      ? list.map(v => String(v || '').trim().toUpperCase()).filter(Boolean)
-      : [];
-    localStorage.setItem(EFOS_KEY, JSON.stringify([...new Set(clean)]));
-  };
 
   function classifyRFCDeep(rfc) {
     const clean = String(rfc || '').trim().toUpperCase();
@@ -166,7 +150,7 @@ const App = (() => {
         efos: true,
         risk: 'danger',
         message: `RFC válido con alerta crítica: ${clean}`,
-        detail: 'El RFC coincide con la watchlist EFOS configurada. Revisión fiscal obligatoria antes de facturar o acreditar IVA.'
+        detail: 'El RFC coincide con la watchlist EFOS configurada. Revisión obligatoria antes de acreditar IVA o facturar en automático.'
       };
     }
 
@@ -177,7 +161,7 @@ const App = (() => {
       efos: false,
       risk: 'safe',
       message: `RFC válido: ${clean}`,
-      detail: `Estructura detectada de ${type}. Sin coincidencia en watchlist EFOS cargada.`
+      detail: `Estructura detectada de ${type}. Sin coincidencia en watchlist EFOS.`
     };
   }
 
@@ -201,15 +185,13 @@ const App = (() => {
         ? { bg: 'rgba(245,158,11,0.12)', bd: 'rgba(245,158,11,0.35)', tx: '#fde68a' }
         : { bg: 'rgba(16,185,129,0.12)', bd: 'rgba(16,185,129,0.35)', tx: '#d1fae5' };
 
-    const efosNote = result.efos
-      ? `<div style="font-size:13px;margin-top:8px;">Alerta EFOS: evita acreditar IVA o seguir flujo automático hasta validación humana. Riesgo operativo y fiscal elevado.</div>`
-      : `<div style="font-size:13px;margin-top:8px;">Watchlist EFOS: sin coincidencia con la lista cargada localmente.</div>`;
-
     out.innerHTML = `
       <div style="background:${tone.bg};border:1px solid ${tone.bd};padding:12px;border-radius:12px;color:${tone.tx};">
         <div style="font-weight:700;">${esc(result.message)}</div>
         <div style="font-size:13px;margin-top:4px;">${esc(result.type || '')} · ${esc(result.detail || '')}</div>
-        ${efosNote}
+        <div style="font-size:13px;margin-top:8px;">
+          ${result.efos ? 'Alerta EFOS en watchlist local/configurada.' : 'Sin coincidencia EFOS en watchlist local/configurada.'}
+        </div>
       </div>
     `;
   }
@@ -217,11 +199,10 @@ const App = (() => {
   function initRFC() {
     const btn = byId('rfc-validate-btn');
     const inp = byId('rfc-input');
-    if (!btn || !inp) return;
+    const out = byId('rfc-result');
+    if (!btn || !inp || !out) return;
 
-    const validate = () => {
-      renderRFCResult(classifyRFCDeep(inp.value));
-    };
+    const validate = () => renderRFCResult(classifyRFCDeep(inp.value));
 
     btn.addEventListener('click', validate);
     inp.addEventListener('keydown', e => {
@@ -289,15 +270,10 @@ const App = (() => {
     }
 
     if (msgEl) {
-      if (risk === 'EXPULSION') {
-        msgEl.innerHTML = '<span style="color:#fecaca;">Riesgo crítico: ya estás en zona de expulsión del régimen.</span>';
-      } else if (risk === 'RIESGO_ALTO') {
-        msgEl.innerHTML = '<span style="color:#fdba74;">Riesgo alto: revisa ingresos cobrados y cierre mensual.</span>';
-      } else if (risk === 'PREVENTIVO') {
-        msgEl.innerHTML = '<span style="color:#fde68a;">Alerta preventiva: ya superaste el 80% del límite anual.</span>';
-      } else {
-        msgEl.innerHTML = '<span style="color:#86efac;">Sin riesgo actual: mantén monitoreo sobre ingresos efectivamente cobrados.</span>';
-      }
+      if (risk === 'EXPULSION') msgEl.innerHTML = '<span style="color:#fecaca;">Riesgo crítico: zona de expulsión del régimen.</span>';
+      else if (risk === 'RIESGO_ALTO') msgEl.innerHTML = '<span style="color:#fdba74;">Riesgo alto: revisa ingresos cobrados y cierre mensual.</span>';
+      else if (risk === 'PREVENTIVO') msgEl.innerHTML = '<span style="color:#fde68a;">Alerta preventiva: ya superaste el 80% del límite anual.</span>';
+      else msgEl.innerHTML = '<span style="color:#86efac;">Sin riesgo actual.</span>';
     }
   }
 
@@ -312,36 +288,26 @@ const App = (() => {
     if (buzonStatus) {
       buzonStatus.textContent = salud.buzonTributarioActivo === true
         ? 'Activo'
-        : salud.buzonTributarioActivo === false
-          ? 'Inactivo'
-          : 'Verificando...';
+        : salud.buzonTributarioActivo === false ? 'Inactivo' : 'Verificando...';
       buzonStatus.style.color = salud.buzonTributarioActivo === false ? '#f59e0b' : '#10b981';
     }
 
     if (efirmaStatus) {
       efirmaStatus.textContent = salud.eFirmaVigente === true
         ? 'Vigente'
-        : salud.eFirmaVigente === false
-          ? 'Vencida'
-          : 'Verificando...';
+        : salud.eFirmaVigente === false ? 'Vencida' : 'Verificando...';
       efirmaStatus.style.color = salud.eFirmaVigente === false ? '#ef4444' : '#10b981';
     }
 
-    if (efirmaDays) {
-      efirmaDays.textContent = salud.eFirmaExpiry || '-- días restantes';
-    }
+    if (efirmaDays) efirmaDays.textContent = salud.eFirmaExpiry || '-- días restantes';
 
     if (opinionStatus) {
       opinionStatus.textContent = salud.alertLevel === 'danger'
         ? 'Revisar urgente'
-        : salud.alertLevel === 'warning'
-          ? 'Pendiente'
-          : 'No consultada';
+        : salud.alertLevel === 'warning' ? 'Pendiente' : 'No consultada';
       opinionStatus.style.color = salud.alertLevel === 'danger'
         ? '#ef4444'
-        : salud.alertLevel === 'warning'
-          ? '#f59e0b'
-          : '#94a3b8';
+        : salud.alertLevel === 'warning' ? '#f59e0b' : '#94a3b8';
     }
 
     if (healthAlert) {
@@ -361,14 +327,12 @@ const App = (() => {
     if (!st) return;
 
     const conversations = (st.conversations || []).slice(0, 4).map(item => ({
-      type: 'consulta',
       at: item.timestamp || Date.now(),
       title: item.intent || 'OTROS',
       detail: item.message_text || item.text || 'Consulta'
     }));
 
     const documents = (st.documents || []).slice(0, 4).map(item => ({
-      type: 'documento',
       at: new Date(item.created_at || Date.now()).getTime(),
       title: item.document_type || item.doc_type || 'OTRO',
       detail: item.file_name || 'Documento'
@@ -394,21 +358,58 @@ const App = (() => {
     `).join('');
   }
 
-  function appendChatMessage(text, role = 'bot') {
-    const box = byId('chat-messages');
-    if (!box) return;
+  function renderCategoryList(items = [], emptyLabel) {
+    if (!items.length) return `<div style="color:#64748b;font-size:13px;">${esc(emptyLabel)}</div>`;
+    return items.map(item => `
+      <div style="padding:10px;border-radius:10px;background:rgba(255,255,255,0.04);margin-bottom:8px;">
+        <div style="display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap;">
+          <strong style="color:#e2e8f0;">${esc(item.file_name || 'archivo')}</strong>
+          <span style="font-size:12px;color:${item.needs_review ? '#f59e0b' : '#94a3b8'};">${item.needs_review ? 'Revisión' : 'OK'}</span>
+        </div>
+        <div style="font-size:12px;color:#94a3b8;margin-top:4px;">
+          ${esc(item.document_type || 'OTRO')} · ${esc(item.fecha_fiscal || item.created_at || '')}
+        </div>
+      </div>
+    `).join('');
+  }
 
-    const bubble = document.createElement('div');
-    bubble.className = `chat-bubble ${role}`;
-    bubble.style.background = role === 'user' ? 'rgba(255,255,255,0.08)' : 'rgba(16,185,129,0.15)';
-    bubble.style.padding = '12px';
-    bubble.style.borderRadius = '12px';
-    bubble.style.color = '#e2e8f0';
-    bubble.style.marginBottom = '8px';
-    bubble.textContent = text;
+  function renderCarpetaFiscal() {
+    const carpeta = window.Store?.getCarpetaFiscal?.() || {};
+    const summaryEl = byId('carpeta-summary');
+    const monthsEl = byId('carpeta-months');
+    if (!summaryEl || !monthsEl) return;
 
-    box.appendChild(bubble);
-    box.scrollTop = box.scrollHeight;
+    const totals = carpeta.summary || { total: 0, ingresos: 0, gastos_iva: 0, efirma: 0, constancia: 0, opinion: 0 };
+
+    summaryEl.innerHTML = `
+      <div class="health-grid">
+        <div class="health-item"><div style="font-size:12px;color:#94a3b8;">Total documentos</div><div style="font-size:22px;color:#e2e8f0;font-weight:700;">${Number(totals.total || 0)}</div></div>
+        <div class="health-item"><div style="font-size:12px;color:#94a3b8;">Ingresos</div><div style="font-size:22px;color:#e2e8f0;font-weight:700;">${Number(totals.ingresos || 0)}</div></div>
+        <div class="health-item"><div style="font-size:12px;color:#94a3b8;">Gastos IVA</div><div style="font-size:22px;color:#e2e8f0;font-weight:700;">${Number(totals.gastos_iva || 0)}</div></div>
+        <div class="health-item"><div style="font-size:12px;color:#94a3b8;">e.firma</div><div style="font-size:22px;color:#e2e8f0;font-weight:700;">${Number(totals.efirma || 0)}</div></div>
+        <div class="health-item"><div style="font-size:12px;color:#94a3b8;">Constancia</div><div style="font-size:22px;color:#e2e8f0;font-weight:700;">${Number(totals.constancia || 0)}</div></div>
+        <div class="health-item"><div style="font-size:12px;color:#94a3b8;">Opinión</div><div style="font-size:22px;color:#e2e8f0;font-weight:700;">${Number(totals.opinion || 0)}</div></div>
+      </div>
+      <div style="margin-top:16px;color:#94a3b8;font-size:13px;">
+        Última actualización: ${esc(carpeta.lastUpdated || '—')}
+      </div>
+    `;
+
+    const folders = Array.isArray(carpeta.monthlyFolders) ? carpeta.monthlyFolders : [];
+    monthsEl.innerHTML = folders.map(folder => `
+      <details style="background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.08);border-radius:14px;padding:14px;margin-bottom:12px;" ${folder.monthNumber === new Date().getMonth() + 1 ? 'open' : ''}>
+        <summary style="cursor:pointer;color:#e2e8f0;font-weight:700;">
+          ${esc(folder.monthName)} ${esc(folder.year)} · ${folder.total} documento(s)
+        </summary>
+        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:14px;margin-top:14px;">
+          <div><div style="color:#10b981;font-weight:700;margin-bottom:8px;">Ingresos (${folder.categories.ingresos.length})</div>${renderCategoryList(folder.categories.ingresos, 'Sin documentos de ingreso.')}</div>
+          <div><div style="color:#38bdf8;font-weight:700;margin-bottom:8px;">Gastos IVA acreditable (${folder.categories.gastos_iva.length})</div>${renderCategoryList(folder.categories.gastos_iva, 'Sin gastos acreditables.')}</div>
+          <div><div style="color:#f59e0b;font-weight:700;margin-bottom:8px;">e.firma (${folder.categories.efirma.length})</div>${renderCategoryList(folder.categories.efirma, 'Sin archivos de e.firma.')}</div>
+          <div><div style="color:#a78bfa;font-weight:700;margin-bottom:8px;">Constancia (${folder.categories.constancia.length})</div>${renderCategoryList(folder.categories.constancia, 'Sin constancia cargada.')}</div>
+          <div><div style="color:#f472b6;font-weight:700;margin-bottom:8px;">Opinión (${folder.categories.opinion.length})</div>${renderCategoryList(folder.categories.opinion, 'Sin opinión cargada.')}</div>
+        </div>
+      </details>
+    `).join('');
   }
 
   function showAnalysis(result) {
@@ -427,6 +428,21 @@ const App = (() => {
     if (source) source.textContent = result.source || 'classifier';
   }
 
+  function appendChatMessage(text, role = 'bot') {
+    const box = byId('chat-messages');
+    if (!box) return;
+    const bubble = document.createElement('div');
+    bubble.className = `chat-bubble ${role}`;
+    bubble.style.background = role === 'user' ? 'rgba(255,255,255,0.08)' : 'rgba(16,185,129,0.15)';
+    bubble.style.padding = '12px';
+    bubble.style.borderRadius = '12px';
+    bubble.style.color = '#e2e8f0';
+    bubble.style.marginBottom = '8px';
+    bubble.textContent = text;
+    box.appendChild(bubble);
+    box.scrollTop = box.scrollHeight;
+  }
+
   async function handleClassifierSubmit(text) {
     const input = byId('classifier-input');
     const submit = byId('classifier-submit');
@@ -441,7 +457,6 @@ const App = (() => {
 
     try {
       const result = await window.IntentClassifier?.process?.(text);
-
       if (!result) {
         appendChatMessage('No pude procesar la consulta en este momento.', 'bot');
         return;
@@ -509,15 +524,7 @@ const App = (() => {
     if (socioPM) recomendacion += ' Revisa compatibilidad societaria de tu régimen.';
     if (riesgoMulta) recomendacion += ' Emite CFDI faltantes para reducir riesgo de multa.';
 
-    return {
-      income,
-      mixtos,
-      socioPM,
-      cfdiGlobal,
-      anualObligatoria,
-      riesgoMulta,
-      recomendacion
-    };
+    return { income, mixtos, socioPM, cfdiGlobal, anualObligatoria, riesgoMulta, recomendacion };
   }
 
   function renderDiagnostic(result) {
@@ -549,7 +556,6 @@ const App = (() => {
   function resetWizard() {
     wizardStep = 1;
     setWizardStep(1);
-
     ['wiz-income', 'wiz-mixtos', 'wiz-socio', 'wiz-cfdi'].forEach(id => {
       const el = byId(id);
       if (!el) return;
@@ -557,17 +563,11 @@ const App = (() => {
       if (el.tagName === 'SELECT') el.selectedIndex = 0;
     });
 
-    renderDiagnostic({
-      income: 0,
-      anualObligatoria: false,
-      riesgoMulta: false,
-      recomendacion: '--'
-    });
+    renderDiagnostic({ income: 0, anualObligatoria: false, riesgoMulta: false, recomendacion: '--' });
   }
 
   function saveDiagnostic() {
     const result = evaluateDiagnostic();
-
     window.Store?.updateDiagnostic?.({
       income: result.income,
       mixtos: result.mixtos,
@@ -578,116 +578,9 @@ const App = (() => {
       recomendacion: result.recomendacion,
       completedAt: new Date().toISOString()
     });
-
     window.Store?.updateIncome?.(result.income);
     syncAndRender();
     navigateTo('dashboard');
-  }
-
-  function renderCategoryList(items = [], emptyLabel) {
-    if (!items.length) {
-      return `<div style="color:#64748b;font-size:13px;">${esc(emptyLabel)}</div>`;
-    }
-
-    return items.map(item => `
-      <div style="padding:10px;border-radius:10px;background:rgba(255,255,255,0.04);margin-bottom:8px;">
-        <div style="display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap;">
-          <strong style="color:#e2e8f0;">${esc(item.file_name || 'archivo')}</strong>
-          <span style="font-size:12px;color:${item.needs_review ? '#f59e0b' : '#94a3b8'};">
-            ${item.needs_review ? 'Revisión' : 'OK'}
-          </span>
-        </div>
-        <div style="font-size:12px;color:#94a3b8;margin-top:4px;">
-          ${esc(item.document_type || 'OTRO')} · ${esc(item.fecha_fiscal || item.created_at || '')}
-        </div>
-      </div>
-    `).join('');
-  }
-
-  function renderCarpetaFiscal() {
-    const carpeta = window.Store?.getCarpetaFiscal?.() || {};
-    const summaryEl = byId('carpeta-summary');
-    const monthsEl = byId('carpeta-months');
-    if (!summaryEl || !monthsEl) return;
-
-    const totals = carpeta.summary || {
-      total: 0,
-      ingresos: 0,
-      gastos_iva: 0,
-      efirma: 0,
-      constancia: 0,
-      opinion: 0
-    };
-
-    summaryEl.innerHTML = `
-      <div class="health-grid">
-        <div class="health-item">
-          <div style="font-size:12px;color:#94a3b8;">Total documentos</div>
-          <div style="font-size:22px;color:#e2e8f0;font-weight:700;">${Number(totals.total || 0)}</div>
-        </div>
-        <div class="health-item">
-          <div style="font-size:12px;color:#94a3b8;">Ingresos</div>
-          <div style="font-size:22px;color:#e2e8f0;font-weight:700;">${Number(totals.ingresos || 0)}</div>
-        </div>
-        <div class="health-item">
-          <div style="font-size:12px;color:#94a3b8;">Gastos IVA</div>
-          <div style="font-size:22px;color:#e2e8f0;font-weight:700;">${Number(totals.gastos_iva || 0)}</div>
-        </div>
-        <div class="health-item">
-          <div style="font-size:12px;color:#94a3b8;">e.firma</div>
-          <div style="font-size:22px;color:#e2e8f0;font-weight:700;">${Number(totals.efirma || 0)}</div>
-        </div>
-        <div class="health-item">
-          <div style="font-size:12px;color:#94a3b8;">Constancia</div>
-          <div style="font-size:22px;color:#e2e8f0;font-weight:700;">${Number(totals.constancia || 0)}</div>
-        </div>
-        <div class="health-item">
-          <div style="font-size:12px;color:#94a3b8;">Opinión</div>
-          <div style="font-size:22px;color:#e2e8f0;font-weight:700;">${Number(totals.opinion || 0)}</div>
-        </div>
-      </div>
-
-      <div style="margin-top:16px;color:#94a3b8;font-size:13px;">
-        Última actualización: ${esc(carpeta.lastUpdated || '—')} · e.firma: ${esc(carpeta.efirmaExpiry || 'pendiente')} · Constancia: ${esc(carpeta.constanciaStatus || 'pendiente')} · Opinión: ${esc(carpeta.opinionStatus || 'pendiente')}
-      </div>
-    `;
-
-    const folders = Array.isArray(carpeta.monthlyFolders) ? carpeta.monthlyFolders : [];
-
-    monthsEl.innerHTML = folders.map(folder => `
-      <details style="background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.08);border-radius:14px;padding:14px;margin-bottom:12px;" ${folder.monthNumber === new Date().getMonth() + 1 ? 'open' : ''}>
-        <summary style="cursor:pointer;color:#e2e8f0;font-weight:700;">
-          ${esc(folder.monthName)} ${esc(folder.year)} · ${folder.total} documento(s)
-        </summary>
-
-        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:14px;margin-top:14px;">
-          <div>
-            <div style="color:#10b981;font-weight:700;margin-bottom:8px;">Ingresos (${folder.categories.ingresos.length})</div>
-            ${renderCategoryList(folder.categories.ingresos, 'Sin documentos de ingreso.')}
-          </div>
-
-          <div>
-            <div style="color:#38bdf8;font-weight:700;margin-bottom:8px;">Gastos IVA acreditable (${folder.categories.gastos_iva.length})</div>
-            ${renderCategoryList(folder.categories.gastos_iva, 'Sin gastos acreditables.')}
-          </div>
-
-          <div>
-            <div style="color:#f59e0b;font-weight:700;margin-bottom:8px;">e.firma (${folder.categories.efirma.length})</div>
-            ${renderCategoryList(folder.categories.efirma, 'Sin archivos de e.firma.')}
-          </div>
-
-          <div>
-            <div style="color:#a78bfa;font-weight:700;margin-bottom:8px;">Constancia (${folder.categories.constancia.length})</div>
-            ${renderCategoryList(folder.categories.constancia, 'Sin constancia cargada.')}
-          </div>
-
-          <div>
-            <div style="color:#f472b6;font-weight:700;margin-bottom:8px;">Opinión (${folder.categories.opinion.length})</div>
-            ${renderCategoryList(folder.categories.opinion, 'Sin opinión cargada.')}
-          </div>
-        </div>
-      </details>
-    `).join('');
   }
 
   function syncAndRender() {
@@ -726,6 +619,7 @@ const App = (() => {
     window.Store?.on?.('carpetaUpdated', renderCarpetaFiscal);
 
     syncAndRender();
+    window.AuthManager?.init?.();
   }
 
   return {
