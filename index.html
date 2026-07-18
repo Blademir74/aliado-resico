@@ -519,28 +519,28 @@
         </div>
       </section>
 
-      <section id="carpeta-tab" class="tab-view" role="tabpanel" hidden>
+  <section id="carpeta-tab" class="tab-view" role="tabpanel" hidden>
   <article class="glass card" style="margin-bottom:16px;">
     <h2 style="margin-top:0;">Mi Carpeta Fiscal 2026</h2>
     <p style="color:#94a3b8;">
-      Repositorio fiscal para e.firma, Constancia de Situación Fiscal y Opinión de Cumplimiento.
-      La e.firma tiene vigencia de 4 años y su monitoreo alimenta la Salud Fiscal del dashboard.
+      Organización mensual por Ingresos, Gastos acreditables de IVA, e.firma, Constancia y Opinión de Cumplimiento.
     </p>
 
     <div id="carpeta-upload-grid" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:16px;margin-top:16px;">
       <div class="glass" style="padding:16px;border-radius:16px;border:1px dashed rgba(245,158,11,0.35);">
         <h3 style="margin-top:0;color:#f59e0b;">e.firma SAT</h3>
-        <p style="color:#94a3b8;font-size:14px;">Carga ambos archivos: certificado (.cer) y llave privada (.key).</p>
+        <p style="color:#94a3b8;font-size:14px;">Carga tus archivos .cer y .key. Al detectarlos, el dashboard simulará vigencia de 4 años.</p>
 
-        <div id="drop-efirma" class="carpeta-dropzone" data-category="efirma"
+        <div id="drop-efirma-cer" class="carpeta-dropzone"
              style="padding:18px;border:1px dashed rgba(255,255,255,0.18);border-radius:14px;text-align:center;cursor:pointer;background:rgba(255,255,255,0.03);margin-bottom:12px;">
-          Arrastra aquí tu e.firma o haz clic para seleccionar
+          Arrastra aquí tu archivo .cer o haz clic para seleccionar
         </div>
-
-        <label for="carpeta-efirma-cer" style="display:block;color:#94a3b8;font-size:13px;margin-bottom:6px;">Archivo .cer</label>
         <input id="carpeta-efirma-cer" type="file" accept=".cer,application/pkix-cert" />
 
-        <label for="carpeta-efirma-key" style="display:block;color:#94a3b8;font-size:13px;margin:12px 0 6px;">Archivo .key</label>
+        <div id="drop-efirma-key" class="carpeta-dropzone"
+             style="padding:18px;border:1px dashed rgba(255,255,255,0.18);border-radius:14px;text-align:center;cursor:pointer;background:rgba(255,255,255,0.03);margin:12px 0;">
+          Arrastra aquí tu archivo .key o haz clic para seleccionar
+        </div>
         <input id="carpeta-efirma-key" type="file" accept=".key,application/octet-stream" />
 
         <div id="efirma-upload-status" style="margin-top:12px;font-size:13px;color:#94a3b8;">Pendiente de carga.</div>
@@ -550,7 +550,7 @@
         <h3 style="margin-top:0;color:#a78bfa;">Constancia de Situación Fiscal</h3>
         <p style="color:#94a3b8;font-size:14px;">PDF o imagen de la constancia actualizada.</p>
 
-        <div id="drop-constancia" class="carpeta-dropzone" data-category="constancia"
+        <div id="drop-constancia" class="carpeta-dropzone"
              style="padding:18px;border:1px dashed rgba(255,255,255,0.18);border-radius:14px;text-align:center;cursor:pointer;background:rgba(255,255,255,0.03);margin-bottom:12px;">
           Arrastra aquí tu constancia o haz clic para seleccionar
         </div>
@@ -561,9 +561,9 @@
 
       <div class="glass" style="padding:16px;border-radius:16px;border:1px dashed rgba(244,114,182,0.35);">
         <h3 style="margin-top:0;color:#f472b6;">Opinión de Cumplimiento</h3>
-        <p style="color:#94a3b8;font-size:14px;">Carga la opinión vigente para validar permanencia operativa.</p>
+        <p style="color:#94a3b8;font-size:14px;">PDF o imagen de la opinión vigente.</p>
 
-        <div id="drop-opinion" class="carpeta-dropzone" data-category="opinion"
+        <div id="drop-opinion" class="carpeta-dropzone"
              style="padding:18px;border:1px dashed rgba(255,255,255,0.18);border-radius:14px;text-align:center;cursor:pointer;background:rgba(255,255,255,0.03);margin-bottom:12px;">
           Arrastra aquí tu opinión o haz clic para seleccionar
         </div>
