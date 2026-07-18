@@ -324,58 +324,90 @@
       </section>
 
       <section id="wizard-tab" class="tab-view" role="tabpanel" hidden>
-        <div class="glass card" style="max-width:800px;margin:0 auto;">
-          <h2 style="margin-top:0;">Diagnóstico Fiscal RESICO 2026</h2>
-          <p style="color:#94a3b8;">Responde 4 pasos para conocer tu situación fiscal y obligaciones.</p>
+  <div class="glass card" style="max-width:860px;margin:0 auto;">
+    <h2 style="margin-top:0;">Diagnóstico Fiscal RESICO 2026</h2>
+    <p style="color:#94a3b8;">Responde 5 pasos para conocer tu situación fiscal, tu obligación anual y tu nivel de riesgo operativo.</p>
 
-          <div id="wizard-container">
-            <div class="wizard-step active" data-step="1">
-              <h3>Paso 1 · Ingresos estimados</h3>
-              <p style="color:#94a3b8;">¿Cuánto estimas facturar este año en MXN?</p>
-              <input type="number" id="wiz-income" placeholder="Ej. 2500000" />
-              <button class="btn-primary" onclick="wizardNext()" style="margin-top:16px;">Siguiente</button>
-            </div>
+    <div id="wizard-msg" style="display:none;margin-bottom:14px;padding:12px;border-radius:12px;background:rgba(239,68,68,0.12);color:#fecaca;"></div>
 
-            <div class="wizard-step" data-step="2">
-              <h3>Paso 2 · Ingresos mixtos y socios</h3>
-              <p style="color:#94a3b8;">¿Tienes ingresos adicionales que sumen más de $400,000 MXN anuales?</p>
-              <select id="wiz-mixtos">
-                <option value="no">No</option>
-                <option value="si">Sí</option>
-              </select>
+    <div id="wizard-container">
+      <div class="wizard-step active" data-step="1">
+        <h3>Paso 1 · Ingresos estimados</h3>
+        <p style="color:#94a3b8;">¿Cuánto estimas facturar este año en MXN?</p>
+        <input type="number" id="wiz-income" placeholder="Ej. 2500000" min="0" step="0.01" />
+        <button class="btn-primary" onclick="wizardNext()" style="margin-top:16px;">Siguiente</button>
+      </div>
 
-              <p style="color:#94a3b8;margin-top:12px;">¿Eres socio de una Persona Moral?</p>
-              <select id="wiz-socio">
-                <option value="no">No</option>
-                <option value="si">Sí</option>
-              </select>
+      <div class="wizard-step" data-step="2">
+        <h3>Paso 2 · Ingresos mixtos y socios</h3>
+        <p style="color:#94a3b8;">¿Tuviste ingresos mixtos además de RESICO?</p>
+        <select id="wiz-mixtos">
+          <option value="no">No</option>
+          <option value="si">Sí</option>
+        </select>
 
-              <button class="btn-primary" onclick="wizardNext()" style="margin-top:16px;">Siguiente</button>
-            </div>
+        <p style="color:#94a3b8;margin-top:12px;">¿Eres socio de una Persona Moral?</p>
+        <select id="wiz-socio">
+          <option value="no">No</option>
+          <option value="si">Sí</option>
+        </select>
 
-            <div class="wizard-step" data-step="3">
-              <h3>Paso 3 · CFDI Global</h3>
-              <p style="color:#94a3b8;">¿Has emitido CFDI por todas tus operaciones del mes anterior?</p>
-              <select id="wiz-cfdi">
-                <option value="si">Sí, he facturado todo</option>
-                <option value="no">No, tengo operaciones sin facturar</option>
-              </select>
-              <button class="btn-primary" onclick="wizardNext()" style="margin-top:16px;">Siguiente</button>
-            </div>
+        <button class="btn-primary" onclick="wizardNext()" style="margin-top:16px;">Siguiente</button>
+      </div>
 
-            <div class="wizard-step" data-step="4">
-              <h3>Diagnóstico completado</h3>
-              <div style="background:rgba(255,255,255,0.03);border-radius:12px;padding:16px;">
-                <p><strong>Ingresos estimados:</strong> <span id="res-income">--</span></p>
-                <p><strong>Declaración Anual:</strong> <span id="res-anual" style="color:#10b981;">No obligatoria</span></p>
-                <p><strong>Riesgo de multa (Art. 17-K):</strong> <span id="res-multa" style="color:#10b981;">Sin riesgo</span></p>
-                <p><strong>Recomendación:</strong> <span id="res-recomendacion">--</span></p>
-              </div>
-              <button class="btn-primary" onclick="saveDiagnostic()" style="margin-top:16px;">Guardar diagnóstico</button>
-              <button onclick="resetWizard()" style="margin-left:12px;background:transparent;border:1px solid #64748b;padding:10px 20px;border-radius:40px;color:#94a3b8;cursor:pointer;">Reiniciar</button>
-            </div>
-          </div>
+      <div class="wizard-step" data-step="3">
+        <h3>Paso 3 · Salarios e intereses</h3>
+        <p style="color:#94a3b8;">Captura tus salarios anuales. Si no aplica, deja 0.</p>
+        <input type="number" id="wiz-salarios" placeholder="Ej. 450000" min="0" step="0.01" value="0" />
+
+        <p style="color:#94a3b8;margin-top:12px;">Captura tus intereses reales anuales. Si no aplica, deja 0.</p>
+        <input type="number" id="wiz-intereses" placeholder="Ej. 120000" min="0" step="0.01" value="0" />
+
+        <button class="btn-primary" onclick="wizardNext()" style="margin-top:16px;">Siguiente</button>
+      </div>
+
+      <div class="wizard-step" data-step="4">
+        <h3>Paso 4 · CFDI y Buzón Tributario</h3>
+        <p style="color:#94a3b8;">¿Has emitido CFDI por todas tus operaciones del mes anterior?</p>
+        <select id="wiz-cfdi">
+          <option value="si">Sí, he facturado todo</option>
+          <option value="no">No, tengo operaciones sin facturar</option>
+        </select>
+
+        <p style="color:#94a3b8;margin-top:12px;">¿Tu Buzón Tributario está activo?</p>
+        <select id="wiz-buzon">
+          <option value="si">Sí, está activo</option>
+          <option value="no">No, está inactivo</option>
+        </select>
+
+        <button class="btn-primary" onclick="wizardNext()" style="margin-top:16px;">Siguiente</button>
+      </div>
+
+      <div class="wizard-step" data-step="5">
+        <h3>Diagnóstico completado</h3>
+
+        <div id="wizard-result" style="background:rgba(255,255,255,0.03);border-radius:12px;padding:16px;display:block;">
+          <p><strong>Ingresos estimados:</strong> <span id="res-income">--</span></p>
+          <p><strong>Salarios:</strong> <span id="res-salarios">--</span></p>
+          <p><strong>Intereses:</strong> <span id="res-intereses">--</span></p>
+          <p><strong>Declaración Anual:</strong> <span id="res-anual">--</span></p>
+          <p><strong>Riesgo CFDI:</strong> <span id="res-multa">--</span></p>
+          <p><strong>Buzón Tributario:</strong> <span id="res-buzon">--</span></p>
+          <p><strong>Semáforo RESICO:</strong> <span id="res-risk">--</span></p>
+          <p><strong>Nota pedagógica:</strong> <span id="res-pedagogia">--</span></p>
+          <p><strong>Observaciones:</strong> <span id="res-notas">--</span></p>
+          <p><strong>Recomendación:</strong> <span id="res-recomendacion">--</span></p>
         </div>
+
+        <div style="display:flex;gap:12px;flex-wrap:wrap;margin-top:16px;">
+          <button class="btn-primary" onclick="wizardNext()">Calcular diagnóstico</button>
+          <button onclick="saveDiagnostic()" style="background:transparent;border:1px solid #10b981;padding:10px 20px;border-radius:40px;color:#10b981;cursor:pointer;">Guardar diagnóstico</button>
+          <button onclick="resetWizard()" style="background:transparent;border:1px solid #64748b;padding:10px 20px;border-radius:40px;color:#94a3b8;cursor:pointer;">Reiniciar</button>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
       </section>
 
       <section id="classifier-tab" class="tab-view" role="tabpanel" hidden>
@@ -488,17 +520,72 @@
       </section>
 
       <section id="carpeta-tab" class="tab-view" role="tabpanel" hidden>
-        <article class="glass card" style="margin-bottom:16px;">
-          <h2 style="margin-top:0;">Mi Carpeta Fiscal 2026</h2>
-          <p style="color:#94a3b8;">Organización mensual por Ingresos, Gastos acreditables de IVA, e.firma, Constancia y Opinión de Cumplimiento.</p>
-          <div id="carpeta-summary"></div>
-        </article>
+  <article class="glass card" style="margin-bottom:16px;">
+    <h2 style="margin-top:0;">Mi Carpeta Fiscal 2026</h2>
+    <p style="color:#94a3b8;">
+      Repositorio fiscal para e.firma, Constancia de Situación Fiscal y Opinión de Cumplimiento.
+      La e.firma tiene vigencia de 4 años y su monitoreo alimenta la Salud Fiscal del dashboard.
+    </p>
 
-        <article class="glass card">
-          <h3 style="margin-top:0;">Carpetas por mes</h3>
-          <div id="carpeta-months"></div>
-        </article>
-      </section>
+    <div id="carpeta-upload-grid" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:16px;margin-top:16px;">
+      <div class="glass" style="padding:16px;border-radius:16px;border:1px dashed rgba(245,158,11,0.35);">
+        <h3 style="margin-top:0;color:#f59e0b;">e.firma SAT</h3>
+        <p style="color:#94a3b8;font-size:14px;">Carga ambos archivos: certificado (.cer) y llave privada (.key).</p>
+
+        <div id="drop-efirma" class="carpeta-dropzone" data-category="efirma"
+             style="padding:18px;border:1px dashed rgba(255,255,255,0.18);border-radius:14px;text-align:center;cursor:pointer;background:rgba(255,255,255,0.03);margin-bottom:12px;">
+          Arrastra aquí tu e.firma o haz clic para seleccionar
+        </div>
+
+        <label for="carpeta-efirma-cer" style="display:block;color:#94a3b8;font-size:13px;margin-bottom:6px;">Archivo .cer</label>
+        <input id="carpeta-efirma-cer" type="file" accept=".cer,application/pkix-cert" />
+
+        <label for="carpeta-efirma-key" style="display:block;color:#94a3b8;font-size:13px;margin:12px 0 6px;">Archivo .key</label>
+        <input id="carpeta-efirma-key" type="file" accept=".key,application/octet-stream" />
+
+        <div id="efirma-upload-status" style="margin-top:12px;font-size:13px;color:#94a3b8;">Pendiente de carga.</div>
+      </div>
+
+      <div class="glass" style="padding:16px;border-radius:16px;border:1px dashed rgba(167,139,250,0.35);">
+        <h3 style="margin-top:0;color:#a78bfa;">Constancia de Situación Fiscal</h3>
+        <p style="color:#94a3b8;font-size:14px;">PDF o imagen de la constancia actualizada.</p>
+
+        <div id="drop-constancia" class="carpeta-dropzone" data-category="constancia"
+             style="padding:18px;border:1px dashed rgba(255,255,255,0.18);border-radius:14px;text-align:center;cursor:pointer;background:rgba(255,255,255,0.03);margin-bottom:12px;">
+          Arrastra aquí tu constancia o haz clic para seleccionar
+        </div>
+
+        <input id="carpeta-constancia-file" type="file" accept=".pdf,image/*" />
+        <div id="constancia-upload-status" style="margin-top:12px;font-size:13px;color:#94a3b8;">Pendiente de carga.</div>
+      </div>
+
+      <div class="glass" style="padding:16px;border-radius:16px;border:1px dashed rgba(244,114,182,0.35);">
+        <h3 style="margin-top:0;color:#f472b6;">Opinión de Cumplimiento</h3>
+        <p style="color:#94a3b8;font-size:14px;">Carga la opinión vigente para validar permanencia operativa.</p>
+
+        <div id="drop-opinion" class="carpeta-dropzone" data-category="opinion"
+             style="padding:18px;border:1px dashed rgba(255,255,255,0.18);border-radius:14px;text-align:center;cursor:pointer;background:rgba(255,255,255,0.03);margin-bottom:12px;">
+          Arrastra aquí tu opinión o haz clic para seleccionar
+        </div>
+
+        <input id="carpeta-opinion-file" type="file" accept=".pdf,image/*" />
+        <div id="opinion-upload-status" style="margin-top:12px;font-size:13px;color:#94a3b8;">Pendiente de carga.</div>
+      </div>
+    </div>
+
+    <div id="carpeta-fiscal-msg" style="display:none;margin-top:16px;padding:12px;border-radius:12px;background:rgba(16,185,129,0.12);color:#d1fae5;"></div>
+  </article>
+
+  <article class="glass card" style="margin-bottom:16px;">
+    <h3 style="margin-top:0;">Resumen documental</h3>
+    <div id="carpeta-summary"></div>
+  </article>
+
+  <article class="glass card">
+    <h3 style="margin-top:0;">Carpetas por mes</h3>
+    <div id="carpeta-months"></div>
+  </article>
+</section>
     </main>
   </div>
 

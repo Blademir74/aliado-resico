@@ -2,6 +2,9 @@ const Store = (() => {
   const KEY = 'aliado_resico_v8';
   const EVT = {};
   const DEFAULT_LIMIT = 3500000;
+  const ALERT_80 = 2800000;
+  const ALERT_90 = 3150000;
+  const ALERT_94 = 3290000;
   const MAX_CONVERSATIONS = 200;
   const MAX_DOCUMENTS = 100;
   const YEAR = 2026;
@@ -87,9 +90,14 @@ const Store = (() => {
       income: 0,
       mixtos: false,
       socioPM: false,
+      salarios: 0,
+      intereses: 0,
       cfdiGlobal: false,
+      buzonActivo: true,
       anualObligatoria: false,
       riesgoMulta: false,
+      riesgoBuzon: false,
+      riskLevel: 'SEGURO',
       recomendacion: '',
       completedAt: null
     }
@@ -118,6 +126,7 @@ const Store = (() => {
     return base.map(baseMonth => {
       const found = input.find(m => String(m.monthKey) === String(baseMonth.monthKey));
       if (!found) return baseMonth;
+
       return {
         ...baseMonth,
         ...found,
@@ -187,10 +196,13 @@ const Store = (() => {
   }
 
   function calcRiskLevel(income, limit = DEFAULT_LIMIT) {
-    const ratio = limit > 0 ? Number(income || 0) / Number(limit || DEFAULT_LIMIT) : 0;
-    if (ratio >= 0.94) return 'EXPULSION';
-    if (ratio >= 0.90) return 'RIESGO_ALTO';
-    if (ratio >= 0.80) return 'PREVENTIVO';
+    const value = Number(income || 0);
+    const max = Number(limit || DEFAULT_LIMIT);
+    const ratio = max > 0 ? value / max : 0;
+
+    if (value >= ALERT_94 || ratio >= 0.94) return 'EXPULSION';
+    if (value >= ALERT_90 || ratio >= 0.90) return 'RIESGO_ALTO';
+    if (value >= ALERT_80 || ratio >= 0.80) return 'PREVENTIVO';
     return 'SEGURO';
   }
 
@@ -202,6 +214,7 @@ const Store = (() => {
     });
 
     let confidenceSum = 0;
+
     state.conversations.forEach(c => {
       const intent = c.intent || 'OTROS';
       if (intent in state.metrics.byCategory) state.metrics.byCategory[intent]++;
@@ -250,7 +263,8 @@ const Store = (() => {
       source: row.source || 'unknown',
       file_url: row.file_url || null,
       created_at: row.created_at || new Date().toISOString(),
-      updated_at: row.updated_at || row.created_at || new Date().toISOString()
+      updated_at: row.updated_at || row.created_at || new Date().toISOString(),
+      folder_category: row.folder_category || row.extracted_data?.folder_category || null
     };
   }
 
@@ -295,6 +309,40 @@ const Store = (() => {
       needs_review: !!doc.needs_review || !!doc.safety_flag,
       validation_status: doc.validation_status || 'pendiente',
       source: doc.source || 'local'
+    };
+  }
+
+  function diffDaysFromToday(dateStr) {
+    if (!dateStr || dateStr === 'pendiente') return null;
+    const today = new Date();
+    const target = new Date(dateStr);
+    today.setHours(0, 0, 0, 0);
+    target.setHours(0, 0, 0, 0);
+    return Math.ceil((target.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
+  }
+
+  function refreshSaludFiscalFromCarpeta() {
+    const expiry = state.carpetaFiscal?.efirmaExpiry || state.saludFiscal?.eFirmaExpiry || null;
+    const days = diffDaysFromToday(expiry);
+    const hasEFirma = !!expiry && expiry !== 'pendiente';
+
+    let alertLevel = 'safe';
+    if (state.saludFiscal?.buzonTributarioActivo === false) alertLevel = 'danger';
+    if (days !== null && days <= 0) alertLevel = 'danger';
+    else if (days !== null && days <= 30) alertLevel = 'warning';
+    else if (
+      state.carpetaFiscal?.constanciaStatus !== 'actualizada' ||
+      state.carpetaFiscal?.opinionStatus !== 'cargada'
+    ) {
+      alertLevel = state.saludFiscal?.buzonTributarioActivo === false ? 'danger' : 'warning';
+    }
+
+    state.saludFiscal = {
+      ...state.saludFiscal,
+      eFirmaVigente: hasEFirma ? days > 0 : null,
+      eFirmaExpiry: expiry,
+      alertLevel,
+      lastAuditDate: state.saludFiscal?.lastAuditDate || new Date().toISOString()
     };
   }
 
@@ -344,12 +392,17 @@ const Store = (() => {
       year: YEAR,
       monthlyFolders: folders,
       summary,
-      efirmaExpiry: latestEFirma?.extracted_data?.fecha_vencimiento || latestEFirma?.extracted_data?.fecha || state.carpetaFiscal.efirmaExpiry || 'pendiente',
+      efirmaExpiry:
+        latestEFirma?.extracted_data?.fecha_vencimiento ||
+        latestEFirma?.extracted_data?.fecha ||
+        state.carpetaFiscal?.efirmaExpiry ||
+        'pendiente',
       constanciaStatus: latestConstancia ? 'actualizada' : 'pendiente',
       opinionStatus: latestOpinion ? 'cargada' : 'pendiente',
       lastUpdated: new Date().toISOString()
     };
 
+    refreshSaludFiscalFromCarpeta();
     emit('carpetaUpdated', state.carpetaFiscal);
   }
 
@@ -367,7 +420,7 @@ const Store = (() => {
 
         db
           .from('fiscal_metrics')
-          .select('user_id,cumulative_income,annual_limit,risk_level')
+          .select('user_id,income_ytd,total_processed,avg_confidence,updated_at')
           .eq('user_id', usr.id)
           .maybeSingle(),
 
@@ -386,11 +439,11 @@ const Store = (() => {
       }
 
       if (!metricRes.error && metricRes.data) {
-        state.incomeYTD = Number(metricRes.data.cumulative_income || 0);
-        state.fiscalMetrics.annualLimit = Number(metricRes.data.annual_limit || DEFAULT_LIMIT);
-        state.fiscalMetrics.riskLevel = metricRes.data.risk_level || calcRiskLevel(
-          Number(metricRes.data.cumulative_income || 0),
-          Number(metricRes.data.annual_limit || DEFAULT_LIMIT)
+        state.incomeYTD = Number(metricRes.data.income_ytd || 0);
+        state.fiscalMetrics.annualLimit = Number(state.fiscalMetrics.annualLimit || DEFAULT_LIMIT);
+        state.fiscalMetrics.riskLevel = calcRiskLevel(
+          Number(metricRes.data.income_ytd || 0),
+          Number(state.fiscalMetrics.annualLimit || DEFAULT_LIMIT)
         );
       } else if (metricRes.error) {
         console.warn('[Store] fiscal_metrics sync error:', metricRes.error.message);
@@ -436,12 +489,9 @@ const Store = (() => {
 
     const payload = {
       user_id: usr.id,
-      cumulative_income: Number(state.incomeYTD || 0),
-      annual_limit: Number(state.fiscalMetrics?.annualLimit || DEFAULT_LIMIT),
-      risk_level: calcRiskLevel(
-        Number(state.incomeYTD || 0),
-        Number(state.fiscalMetrics?.annualLimit || DEFAULT_LIMIT)
-      )
+      income_ytd: Number(state.incomeYTD || 0),
+      total_processed: Number(state.metrics?.totalProcessed || state.conversations.length || 0),
+      avg_confidence: Number(state.metrics?.avgConfidence || 0)
     };
 
     try {
@@ -536,8 +586,8 @@ const Store = (() => {
   async function initSupabase() {
     ensureAppState();
 
-    const url = window.SUPABASE_CONFIG?.url || window.AppConfig?.getSupabaseUrl?.() || '';
-    const anonKey = window.SUPABASE_CONFIG?.anonKey || window.AppConfig?.getSupabaseKey?.() || '';
+    const url = window.SUPABASE_CONFIG?.url || window.AppConfig?.getSupabaseUrl?.();
+    const anonKey = window.SUPABASE_CONFIG?.anonKey || window.AppConfig?.getSupabaseKey?.();
 
     if (!url || !anonKey || !window.supabase?.createClient) {
       window.APP_STATE.supabase = null;
@@ -552,9 +602,10 @@ const Store = (() => {
           detectSessionInUrl: true
         }
       });
-      window.APP_STATE.supabase = db;
-      bindAuthListenerOnce();
     }
+
+    window.APP_STATE.supabase = db;
+    bindAuthListenerOnce();
 
     try {
       const { data, error } = await db.auth.getSession();
@@ -575,17 +626,43 @@ const Store = (() => {
     }
   }
 
-  function getState() { return state; }
-  function getMetrics() { return state.metrics; }
-  function getConversations() { return state.conversations; }
-  function getSettings() { return state.settings; }
-  function getDocuments() { return state.documents; }
-  function getSaludFiscal() { return state.saludFiscal; }
-  function getCarpetaFiscal() { return state.carpetaFiscal; }
-  function getDiagnostic() { return state.diagnostic; }
-  function getInvoiceProfiles() { return state.invoiceProfiles || []; }
+  function getState() {
+    return state;
+  }
 
-  function setState(partial = {}) {
+  function getMetrics() {
+    return state.metrics;
+  }
+
+  function getConversations() {
+    return state.conversations;
+  }
+
+  function getSettings() {
+    return state.settings;
+  }
+
+  function getDocuments() {
+    return state.documents;
+  }
+
+  function getSaludFiscal() {
+    return state.saludFiscal;
+  }
+
+  function getCarpetaFiscal() {
+    return state.carpetaFiscal;
+  }
+
+  function getDiagnostic() {
+    return state.diagnostic;
+  }
+
+  function getInvoiceProfiles() {
+    return state.invoiceProfiles;
+  }
+
+  function setState(partial) {
     state = {
       ...state,
       ...partial,
@@ -596,9 +673,13 @@ const Store = (() => {
       carpetaFiscal: {
         ...state.carpetaFiscal,
         ...(partial.carpetaFiscal || {}),
-        monthlyFolders: normalizeMonthlyFolders(partial.carpetaFiscal?.monthlyFolders || state.carpetaFiscal.monthlyFolders)
+        monthlyFolders: normalizeMonthlyFolders(
+          partial.carpetaFiscal?.monthlyFolders || state.carpetaFiscal.monthlyFolders
+        )
       },
-      invoiceProfiles: Array.isArray(partial.invoiceProfiles) ? partial.invoiceProfiles : state.invoiceProfiles,
+      invoiceProfiles: Array.isArray(partial.invoiceProfiles)
+        ? partial.invoiceProfiles
+        : state.invoiceProfiles,
       diagnostic: { ...state.diagnostic, ...(partial.diagnostic || {}) }
     };
 
@@ -627,17 +708,19 @@ const Store = (() => {
 
     recalc();
     persist();
-    emit('conversation:added', conv);
     emit('conversationAdded', conv);
+    emit('conversationadded', conv);
     emitAll();
-
     upsertConversation(conv);
     upsertMetrics();
   }
 
   function updateIncome(amount) {
     state.incomeYTD = Number(amount || 0);
-    state.fiscalMetrics.riskLevel = calcRiskLevel(state.incomeYTD, state.fiscalMetrics.annualLimit);
+    state.fiscalMetrics.riskLevel = calcRiskLevel(
+      state.incomeYTD,
+      Number(state.fiscalMetrics.annualLimit || DEFAULT_LIMIT)
+    );
     persist();
     emitAll();
     upsertMetrics();
@@ -646,14 +729,29 @@ const Store = (() => {
   function updateAnnualLimit(amount) {
     const nextLimit = Number(amount || DEFAULT_LIMIT);
     state.fiscalMetrics.annualLimit = nextLimit > 0 ? nextLimit : DEFAULT_LIMIT;
-    state.fiscalMetrics.riskLevel = calcRiskLevel(state.incomeYTD, state.fiscalMetrics.annualLimit);
+    state.fiscalMetrics.riskLevel = calcRiskLevel(
+      state.incomeYTD,
+      state.fiscalMetrics.annualLimit
+    );
     persist();
     emitAll();
     upsertMetrics();
   }
 
   function updateSaludFiscal(data) {
-    state.saludFiscal = { ...state.saludFiscal, ...data };
+    state.saludFiscal = {
+      ...state.saludFiscal,
+      ...data
+    };
+
+    if (data?.eFirmaExpiry) {
+      state.carpetaFiscal = {
+        ...state.carpetaFiscal,
+        efirmaExpiry: data.eFirmaExpiry
+      };
+    }
+
+    refreshSaludFiscalFromCarpeta();
     persist();
     emit('saludFiscalUpdated', state.saludFiscal);
     emitAll();
@@ -686,8 +784,8 @@ const Store = (() => {
 
     rebuildCarpetaFiscal();
     persist();
-    emit('document:added', localDoc);
     emit('documentAdded', localDoc);
+    emit('documentadded', localDoc);
     emitAll();
 
     await saveDocumentRemote(localDoc);
@@ -698,15 +796,19 @@ const Store = (() => {
     state.carpetaFiscal = {
       ...state.carpetaFiscal,
       ...data,
-      monthlyFolders: normalizeMonthlyFolders(data?.monthlyFolders || state.carpetaFiscal.monthlyFolders),
+      monthlyFolders: normalizeMonthlyFolders(
+        data?.monthlyFolders || state.carpetaFiscal.monthlyFolders
+      ),
       lastUpdated: new Date().toISOString()
     };
+
+    refreshSaludFiscalFromCarpeta();
     persist();
     emit('carpetaUpdated', state.carpetaFiscal);
     emitAll();
   }
 
-  function setInvoiceProfiles(list = []) {
+  function setInvoiceProfiles(list) {
     state.invoiceProfiles = Array.isArray(list) ? list.slice(0, 50) : [];
     persist();
     emitAll();
@@ -730,10 +832,11 @@ const Store = (() => {
     try {
       if (rtChannel && db) db.removeChannel(rtChannel);
     } catch {}
-    rtChannel = null;
 
+    rtChannel = null;
     emit('storeReset', null);
     emitAll();
+    rebuildCarpetaFiscal();
   }
 
   rebuildCarpetaFiscal();

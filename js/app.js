@@ -1,6 +1,16 @@
 const App = (() => {
   const VIEWS = ['dashboard', 'wizard', 'classifier', 'documents', 'invoicing', 'carpeta'];
   const EFOS_KEY = 'ar_efos_watchlist_v1';
+  const RESICO_LIMIT = 3500000;
+  const ALERT_80 = 2800000;
+  const ALERT_90 = 3150000;
+  const ALERT_94 = 3290000;
+  const MIXTOS_LIMIT = 400000;
+  const INTERESES_LIMIT = 100000;
+  const BUZON_MULTA = 10260;
+  const EFIRMA_YEARS = 4;
+  const WIZARD_MAX_STEPS = 5;
+
   let booted = false;
   let wizardStep = 1;
 
@@ -52,6 +62,7 @@ const App = (() => {
   function initTheme() {
     const btn = byId('theme-toggle');
     const saved = localStorage.getItem('ar_theme') || 'dark';
+
     document.body.dataset.theme = saved;
     if (btn) btn.textContent = saved === 'light' ? '☀️' : '🌙';
 
@@ -85,11 +96,15 @@ const App = (() => {
   }
 
   function getEFOSWatchlist() {
-    const cfg = Array.isArray(window.RESICO_CONFIG?.EFOS_RFC_LIST) ? window.RESICO_CONFIG.EFOS_RFC_LIST : [];
+    const cfg = Array.isArray(window.RESICO_CONFIG?.EFOS_RFC_LIST)
+      ? window.RESICO_CONFIG.EFOS_RFC_LIST
+      : [];
     const local = loadLocalEFOSList();
+
     const all = [...cfg, ...local]
       .map(v => String(v || '').trim().toUpperCase())
       .filter(Boolean);
+
     return [...new Set(all)];
   }
 
@@ -189,9 +204,7 @@ const App = (() => {
       <div style="background:${tone.bg};border:1px solid ${tone.bd};padding:12px;border-radius:12px;color:${tone.tx};">
         <div style="font-weight:700;">${esc(result.message)}</div>
         <div style="font-size:13px;margin-top:4px;">${esc(result.type || '')} · ${esc(result.detail || '')}</div>
-        <div style="font-size:13px;margin-top:8px;">
-          ${result.efos ? 'Alerta EFOS en watchlist local/configurada.' : 'Sin coincidencia EFOS en watchlist local/configurada.'}
-        </div>
+        <div style="font-size:13px;margin-top:8px;">${result.efos ? 'Alerta EFOS detectada en watchlist local/configurada.' : 'Sin coincidencia EFOS en watchlist local/configurada.'}</div>
       </div>
     `;
   }
@@ -203,7 +216,6 @@ const App = (() => {
     if (!btn || !inp || !out) return;
 
     const validate = () => renderRFCResult(classifyRFCDeep(inp.value));
-
     btn.addEventListener('click', validate);
     inp.addEventListener('keydown', e => {
       if (e.key === 'Enter') {
@@ -215,13 +227,14 @@ const App = (() => {
 
   function renderKPIs() {
     const metrics = window.Store?.getMetrics?.() || {};
+
     const total = byId('kpi-total');
     const confidence = byId('kpi-confidence');
     const autoRate = byId('kpi-auto-rate');
     const responseTime = byId('kpi-response-time');
 
     if (total) total.textContent = Number(metrics.totalProcessed || 0);
-    if (confidence) confidence.textContent = `${Number(metrics.avgConfidence || 0)}%`;
+    if (confidence) confidence.textContent = Number(metrics.avgConfidence || 0);
     if (autoRate) autoRate.textContent = `${Number(metrics.autoResolutionRate || 92)}%`;
     if (responseTime) responseTime.textContent = `${Number(metrics.avgResponseTime || 2.3)}s`;
   }
@@ -231,7 +244,7 @@ const App = (() => {
     if (!st) return;
 
     const current = Number(st.incomeYTD || 0);
-    const limit = Number(st.fiscalMetrics?.annualLimit || getCfg('INCOME_LIMIT', 3500000));
+    const limit = Number(st.fiscalMetrics?.annualLimit || getCfg('INCOME_LIMIT', RESICO_LIMIT));
     const remaining = Math.max(0, limit - current);
     const risk = st.fiscalMetrics?.riskLevel || 'SEGURO';
     const ratio = limit > 0 ? Math.min(100, Math.max(0, (current / limit) * 100)) : 0;
@@ -251,34 +264,46 @@ const App = (() => {
 
     if (fillEl) {
       fillEl.style.width = `${ratio}%`;
-      fillEl.style.background = risk === 'EXPULSION'
-        ? '#ef4444'
-        : risk === 'RIESGO_ALTO'
-          ? '#f97316'
-          : risk === 'PREVENTIVO'
-            ? '#f59e0b'
-            : '#10b981';
+      fillEl.style.background =
+        risk === 'EXPULSION' ? '#ef4444' :
+        risk === 'RIESGO_ALTO' ? '#f97316' :
+        risk === 'PREVENTIVO' ? '#f59e0b' : '#10b981';
     }
 
     if (badgeEl) {
       badgeEl.textContent = risk;
-      badgeEl.className = risk === 'EXPULSION'
-        ? 'badge-danger'
-        : risk === 'RIESGO_ALTO' || risk === 'PREVENTIVO'
-          ? 'badge-warning'
-          : 'badge-safe';
+      badgeEl.className =
+        risk === 'EXPULSION' ? 'badge-danger' :
+        risk === 'RIESGO_ALTO' ? 'badge-warning' :
+        risk === 'PREVENTIVO' ? 'badge-warning' : 'badge-safe';
     }
 
     if (msgEl) {
-      if (risk === 'EXPULSION') msgEl.innerHTML = '<span style="color:#fecaca;">Riesgo crítico: zona de expulsión del régimen.</span>';
-      else if (risk === 'RIESGO_ALTO') msgEl.innerHTML = '<span style="color:#fdba74;">Riesgo alto: revisa ingresos cobrados y cierre mensual.</span>';
-      else if (risk === 'PREVENTIVO') msgEl.innerHTML = '<span style="color:#fde68a;">Alerta preventiva: ya superaste el 80% del límite anual.</span>';
-      else msgEl.innerHTML = '<span style="color:#86efac;">Sin riesgo actual.</span>';
+      if (risk === 'EXPULSION') {
+        msgEl.innerHTML = `<span style="color:#fecaca;">Riesgo crítico: estás en zona de expulsión del régimen.</span>`;
+      } else if (risk === 'RIESGO_ALTO') {
+        msgEl.innerHTML = `<span style="color:#fdba74;">Riesgo alto: revisa ingresos cobrados y cierre mensual.</span>`;
+      } else if (risk === 'PREVENTIVO') {
+        msgEl.innerHTML = `<span style="color:#fde68a;">Alerta preventiva: ya superaste el 80% del límite anual.</span>`;
+      } else {
+        msgEl.innerHTML = `<span style="color:#86efac;">Sin riesgo actual.</span>`;
+      }
     }
+  }
+
+  function computeDaysRemaining(dateStr) {
+    if (!dateStr || dateStr === 'pendiente') return null;
+    const today = new Date();
+    const target = new Date(dateStr);
+    today.setHours(0, 0, 0, 0);
+    target.setHours(0, 0, 0, 0);
+    return Math.ceil((target.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
   }
 
   function renderHealth() {
     const salud = window.Store?.getSaludFiscal?.() || {};
+    const carpeta = window.Store?.getCarpetaFiscal?.() || {};
+
     const buzonStatus = byId('buzon-status');
     const efirmaStatus = byId('efirma-status');
     const efirmaDays = byId('efirma-days');
@@ -286,35 +311,60 @@ const App = (() => {
     const healthAlert = byId('health-alert');
 
     if (buzonStatus) {
-      buzonStatus.textContent = salud.buzonTributarioActivo === true
-        ? 'Activo'
-        : salud.buzonTributarioActivo === false ? 'Inactivo' : 'Verificando...';
-      buzonStatus.style.color = salud.buzonTributarioActivo === false ? '#f59e0b' : '#10b981';
+      buzonStatus.textContent =
+        salud.buzonTributarioActivo === true ? 'Activo' :
+        salud.buzonTributarioActivo === false ? 'Inactivo' :
+        'Verificando...';
+      buzonStatus.style.color =
+        salud.buzonTributarioActivo === false ? '#ef4444' :
+        salud.buzonTributarioActivo === true ? '#10b981' : '#f59e0b';
     }
+
+    const expiry = salud.eFirmaExpiry || carpeta.efirmaExpiry;
+    const days = computeDaysRemaining(expiry);
 
     if (efirmaStatus) {
-      efirmaStatus.textContent = salud.eFirmaVigente === true
-        ? 'Vigente'
-        : salud.eFirmaVigente === false ? 'Vencida' : 'Verificando...';
-      efirmaStatus.style.color = salud.eFirmaVigente === false ? '#ef4444' : '#10b981';
+      efirmaStatus.textContent =
+        salud.eFirmaVigente === true ? 'VIGENTE' :
+        salud.eFirmaVigente === false ? 'VENCIDA' :
+        'Verificando...';
+      efirmaStatus.style.color =
+        salud.eFirmaVigente === false ? '#ef4444' :
+        salud.eFirmaVigente === true ? '#10b981' : '#f59e0b';
     }
 
-    if (efirmaDays) efirmaDays.textContent = salud.eFirmaExpiry || '-- días restantes';
+    if (efirmaDays) {
+      efirmaDays.textContent =
+        typeof days === 'number'
+          ? `${days} día(s) restantes`
+          : '-- días restantes';
+    }
 
     if (opinionStatus) {
-      opinionStatus.textContent = salud.alertLevel === 'danger'
-        ? 'Revisar urgente'
-        : salud.alertLevel === 'warning' ? 'Pendiente' : 'No consultada';
-      opinionStatus.style.color = salud.alertLevel === 'danger'
-        ? '#ef4444'
-        : salud.alertLevel === 'warning' ? '#f59e0b' : '#94a3b8';
+      const opinionLoaded = carpeta.opinionStatus === 'cargada';
+      opinionStatus.textContent =
+        opinionLoaded ? 'Cargada' :
+        salud.alertLevel === 'danger' ? 'Revisar urgente' :
+        'No consultada';
+      opinionStatus.style.color =
+        opinionLoaded ? '#10b981' :
+        salud.alertLevel === 'danger' ? '#ef4444' : '#94a3b8';
     }
 
     if (healthAlert) {
-      const needsAlert = salud.buzonTributarioActivo === false || salud.eFirmaVigente === false;
-      healthAlert.hidden = !needsAlert;
-      if (needsAlert) {
-        healthAlert.textContent = 'Atención: regulariza Buzón Tributario y e.firma para evitar multas y pérdida de plazos.';
+      const messages = [];
+      if (salud.buzonTributarioActivo === false) {
+        messages.push(`Buzón Tributario inactivo: riesgo de multa de $${BUZON_MULTA.toLocaleString('es-MX')} MXN.`);
+      }
+      if (salud.eFirmaVigente === false) {
+        messages.push('Tu e.firma aparece vencida.');
+      } else if (typeof days === 'number' && days > 0 && days <= 30) {
+        messages.push(`Tu e.firma vence en ${days} día(s).`);
+      }
+
+      healthAlert.hidden = messages.length === 0;
+      if (messages.length) {
+        healthAlert.textContent = messages.join(' ');
       }
     }
   }
@@ -326,13 +376,13 @@ const App = (() => {
     const st = window.Store?.getState?.();
     if (!st) return;
 
-    const conversations = (st.conversations || []).slice(0, 4).map(item => ({
+    const conversations = st.conversations.slice(0, 4).map(item => ({
       at: item.timestamp || Date.now(),
       title: item.intent || 'OTROS',
       detail: item.message_text || item.text || 'Consulta'
     }));
 
-    const documents = (st.documents || []).slice(0, 4).map(item => ({
+    const documents = st.documents.slice(0, 4).map(item => ({
       at: new Date(item.created_at || Date.now()).getTime(),
       title: item.document_type || item.doc_type || 'OTRO',
       detail: item.file_name || 'Documento'
@@ -343,7 +393,7 @@ const App = (() => {
       .slice(0, 6);
 
     if (!items.length) {
-      feed.innerHTML = '<p class="feed-empty" style="color:#94a3b8;">Sin actividad.</p>';
+      feed.innerHTML = `<p class="feed-empty" style="color:#94a3b8;">Sin actividad.</p>`;
       return;
     }
 
@@ -353,13 +403,16 @@ const App = (() => {
           <strong style="color:#e2e8f0;">${esc(item.title)}</strong>
           <span style="color:#94a3b8;font-size:12px;">${new Date(item.at).toLocaleString('es-MX')}</span>
         </div>
-        <div style="color:#94a3b8;font-size:13px;margin-top:4px;">${esc(item.detail).slice(0, 160)}</div>
+        <div style="color:#94a3b8;font-size:13px;margin-top:4px;">${esc(String(item.detail).slice(0, 160))}</div>
       </div>
     `).join('');
   }
 
   function renderCategoryList(items = [], emptyLabel) {
-    if (!items.length) return `<div style="color:#64748b;font-size:13px;">${esc(emptyLabel)}</div>`;
+    if (!items.length) {
+      return `<div style="color:#64748b;font-size:13px;">${esc(emptyLabel)}</div>`;
+    }
+
     return items.map(item => `
       <div style="padding:10px;border-radius:10px;background:rgba(255,255,255,0.04);margin-bottom:8px;">
         <div style="display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap;">
@@ -374,12 +427,19 @@ const App = (() => {
   }
 
   function renderCarpetaFiscal() {
-    const carpeta = window.Store?.getCarpetaFiscal?.() || {};
+    const carpeta = window.Store?.getCarpetaFiscal?.();
     const summaryEl = byId('carpeta-summary');
     const monthsEl = byId('carpeta-months');
-    if (!summaryEl || !monthsEl) return;
+    if (!summaryEl || !monthsEl || !carpeta) return;
 
-    const totals = carpeta.summary || { total: 0, ingresos: 0, gastos_iva: 0, efirma: 0, constancia: 0, opinion: 0 };
+    const totals = carpeta.summary || {
+      total: 0,
+      ingresos: 0,
+      gastos_iva: 0,
+      efirma: 0,
+      constancia: 0,
+      opinion: 0
+    };
 
     summaryEl.innerHTML = `
       <div class="health-grid">
@@ -391,16 +451,14 @@ const App = (() => {
         <div class="health-item"><div style="font-size:12px;color:#94a3b8;">Opinión</div><div style="font-size:22px;color:#e2e8f0;font-weight:700;">${Number(totals.opinion || 0)}</div></div>
       </div>
       <div style="margin-top:16px;color:#94a3b8;font-size:13px;">
-        Última actualización: ${esc(carpeta.lastUpdated || '—')}
+        Última actualización: ${esc(carpeta.lastUpdated || '--')}
       </div>
     `;
 
     const folders = Array.isArray(carpeta.monthlyFolders) ? carpeta.monthlyFolders : [];
     monthsEl.innerHTML = folders.map(folder => `
-      <details style="background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.08);border-radius:14px;padding:14px;margin-bottom:12px;" ${folder.monthNumber === new Date().getMonth() + 1 ? 'open' : ''}>
-        <summary style="cursor:pointer;color:#e2e8f0;font-weight:700;">
-          ${esc(folder.monthName)} ${esc(folder.year)} · ${folder.total} documento(s)
-        </summary>
+      <details style="background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.08);border-radius:14px;padding:14px;margin-bottom:12px;" ${folder.monthNumber === (new Date().getMonth() + 1) ? 'open' : ''}>
+        <summary style="cursor:pointer;color:#e2e8f0;font-weight:700;">${esc(folder.monthName)} ${esc(folder.year)} · ${folder.total} documento(s)</summary>
         <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:14px;margin-top:14px;">
           <div><div style="color:#10b981;font-weight:700;margin-bottom:8px;">Ingresos (${folder.categories.ingresos.length})</div>${renderCategoryList(folder.categories.ingresos, 'Sin documentos de ingreso.')}</div>
           <div><div style="color:#38bdf8;font-weight:700;margin-bottom:8px;">Gastos IVA acreditable (${folder.categories.gastos_iva.length})</div>${renderCategoryList(folder.categories.gastos_iva, 'Sin gastos acreditables.')}</div>
@@ -410,6 +468,21 @@ const App = (() => {
         </div>
       </details>
     `).join('');
+  }
+
+  function normalizeAssistantReply(reply) {
+    if (!reply) return 'Sin respuesta.';
+
+    if (typeof reply === 'string') return reply;
+
+    if (typeof reply === 'object') {
+      const main = reply.respuestaFiscal || reply.reply || reply.message || '';
+      const legal = reply.fundamentoLegal ? ` Fundamento: ${reply.fundamentoLegal}.` : '';
+      const diff = reply.diferenciacionIsrIva ? ` ISR vs IVA: ${reply.diferenciacionIsrIva}.` : '';
+      return `${main}${legal}${diff}`.trim() || 'Sin respuesta.';
+    }
+
+    return 'Sin respuesta.';
   }
 
   function showAnalysis(result) {
@@ -423,14 +496,15 @@ const App = (() => {
     if (empty) empty.hidden = true;
     if (content) content.hidden = false;
     if (intent) intent.textContent = result.intent || 'OTROS';
-    if (conf) conf.textContent = `${Math.round(Number(result.confidence || 0) * 100)}%`;
-    if (keywords) keywords.textContent = (result.keywordsMatched || []).join(', ') || '—';
+    if (conf) conf.textContent = Math.round(Number(result.confidence || 0) * 100);
+    if (keywords) keywords.textContent = Array.isArray(result.keywordsMatched) ? result.keywordsMatched.join(', ') : '';
     if (source) source.textContent = result.source || 'classifier';
   }
 
   function appendChatMessage(text, role = 'bot') {
     const box = byId('chat-messages');
     if (!box) return;
+
     const bubble = document.createElement('div');
     bubble.className = `chat-bubble ${role}`;
     bubble.style.background = role === 'user' ? 'rgba(255,255,255,0.08)' : 'rgba(16,185,129,0.15)';
@@ -439,6 +513,7 @@ const App = (() => {
     bubble.style.color = '#e2e8f0';
     bubble.style.marginBottom = '8px';
     bubble.textContent = text;
+
     box.appendChild(bubble);
     box.scrollTop = box.scrollHeight;
   }
@@ -450,6 +525,7 @@ const App = (() => {
 
     appendChatMessage(text, 'user');
     if (input) input.value = '';
+
     if (submit) {
       submit.disabled = true;
       submit.textContent = 'Procesando...';
@@ -457,12 +533,14 @@ const App = (() => {
 
     try {
       const result = await window.IntentClassifier?.process?.(text);
+
       if (!result) {
         appendChatMessage('No pude procesar la consulta en este momento.', 'bot');
         return;
       }
 
-      appendChatMessage(result.assistantReply || 'Sin respuesta.', 'bot');
+      const assistantText = normalizeAssistantReply(result.assistantReply || result.reply || result.response);
+      appendChatMessage(assistantText, 'bot');
       showAnalysis(result);
 
       window.Store?.addConversation?.({
@@ -494,93 +572,394 @@ const App = (() => {
 
     document.querySelectorAll('.quick-ask[data-prompt]').forEach(btn => {
       btn.addEventListener('click', () => {
-        const prompt = btn.getAttribute('data-prompt') || '';
+        const prompt = btn.getAttribute('data-prompt');
         if (input) input.value = prompt;
         handleClassifierSubmit(prompt);
       });
     });
   }
 
+  function showWizardMessage(text, tone = 'error') {
+    const msg = byId('wizard-msg');
+    if (!msg) return;
+
+    msg.style.display = 'block';
+    msg.style.background = tone === 'success'
+      ? 'rgba(16,185,129,0.12)'
+      : 'rgba(239,68,68,0.12)';
+    msg.style.color = tone === 'success' ? '#d1fae5' : '#fecaca';
+    msg.textContent = text;
+  }
+
+  function hideWizardMessage() {
+    const msg = byId('wizard-msg');
+    if (!msg) return;
+    msg.style.display = 'none';
+    msg.textContent = '';
+  }
+
   function setWizardStep(step) {
-    wizardStep = Math.max(1, Math.min(4, Number(step || 1)));
+    wizardStep = Math.max(1, Math.min(WIZARD_MAX_STEPS, Number(step || 1)));
     document.querySelectorAll('.wizard-step').forEach(el => {
       el.classList.toggle('active', Number(el.dataset.step) === wizardStep);
     });
   }
 
+  function validateStep(step) {
+    const income = Number(byId('wiz-income')?.value || 0);
+    const salarios = Number(byId('wiz-salarios')?.value || 0);
+    const intereses = Number(byId('wiz-intereses')?.value || 0);
+
+    if (step === 1) {
+      if (Number.isNaN(income) || income < 0) {
+        showWizardMessage('Ingresa un monto válido para ingresos estimados.');
+        return false;
+      }
+      if (income > RESICO_LIMIT) {
+        showWizardMessage(`El monto supera el límite RESICO de ${money(RESICO_LIMIT)}.`);
+        return false;
+      }
+    }
+
+    if (step === 3) {
+      if (Number.isNaN(salarios) || salarios < 0) {
+        showWizardMessage('El monto de salarios no es válido.');
+        return false;
+      }
+      if (Number.isNaN(intereses) || intereses < 0) {
+        showWizardMessage('El monto de intereses no es válido.');
+        return false;
+      }
+    }
+
+    hideWizardMessage();
+    return true;
+  }
+
   function evaluateDiagnostic() {
     const income = Number(byId('wiz-income')?.value || 0);
-    const mixtos = (byId('wiz-mixtos')?.value || 'no') === 'si';
-    const socioPM = (byId('wiz-socio')?.value || 'no') === 'si';
-    const cfdiGlobal = (byId('wiz-cfdi')?.value || 'si') === 'si';
+    const mixtos = byId('wiz-mixtos')?.value === 'si';
+    const socioPM = byId('wiz-socio')?.value === 'si';
+    const salarios = Number(byId('wiz-salarios')?.value || 0);
+    const intereses = Number(byId('wiz-intereses')?.value || 0);
+    const cfdiGlobal = byId('wiz-cfdi')?.value === 'si';
+    const buzonActivo = byId('wiz-buzon')?.value === 'si';
 
-    const anualObligatoria = mixtos;
+    const anualPorSalarios = mixtos && salarios > MIXTOS_LIMIT;
+    const anualPorIntereses = intereses > INTERESES_LIMIT;
+    const anualObligatoria = anualPorSalarios || anualPorIntereses || socioPM;
     const riesgoMulta = !cfdiGlobal;
+    const riesgoBuzon = !buzonActivo;
 
-    let recomendacion = 'Mantén monitoreo mensual de ingresos y Buzón Tributario.';
-    if (income >= Number(getCfg('ALERT94', 3290000))) recomendacion = 'Riesgo de expulsión: revisa estrategia de cierre y flujo cobrado.';
-    else if (income >= Number(getCfg('ALERT90', 3150000))) recomendacion = 'Riesgo alto: valida ingresos cobrados y anticipa salida de RESICO.';
-    else if (income >= Number(getCfg('ALERT80', 2800000))) recomendacion = 'Alerta preventiva: ya estás en 80% del límite anual.';
-    if (socioPM) recomendacion += ' Revisa compatibilidad societaria de tu régimen.';
-    if (riesgoMulta) recomendacion += ' Emite CFDI faltantes para reducir riesgo de multa.';
+    let riskLevel = 'SEGURO';
+    if (income >= ALERT_94) riskLevel = 'EXPULSION';
+    else if (income >= ALERT_90) riskLevel = 'RIESGO_ALTO';
+    else if (income >= ALERT_80) riskLevel = 'PREVENTIVO';
 
-    return { income, mixtos, socioPM, cfdiGlobal, anualObligatoria, riesgoMulta, recomendacion };
+    const notas = [];
+    if (anualPorSalarios) notas.push('Salarios mayores a $400,000 MXN: declaración anual obligatoria.');
+    if (anualPorIntereses) notas.push('Intereses reales mayores a $100,000 MXN: declaración anual obligatoria.');
+    if (socioPM) notas.push('Ser socio de Persona Moral requiere revisión de compatibilidad.');
+    if (riesgoBuzon) notas.push(`Buzón inactivo: alerta roja por multa de $${BUZON_MULTA.toLocaleString('es-MX')} MXN.`);
+
+    let recomendacion = 'Mantén monitoreo mensual de ingresos, CFDI y Salud Fiscal.';
+    if (riskLevel === 'PREVENTIVO') recomendacion = 'Semáforo amarillo: ya alcanzaste el 80% del límite anual RESICO.';
+    if (riskLevel === 'RIESGO_ALTO') recomendacion = 'Semáforo naranja: ya superaste el 90% del límite; revisa planeación de cierre.';
+    if (riskLevel === 'EXPULSION') recomendacion = 'Semáforo rojo: ya estás en 94% o más del límite; riesgo de salida de RESICO.';
+    if (anualObligatoria) recomendacion += ' Debes preparar declaración anual con soporte documental.';
+    if (riesgoMulta) recomendacion += ' Emite CFDI faltantes cuanto antes.';
+    if (riesgoBuzon) recomendacion += ' Activa tu Buzón Tributario hoy mismo.';
+
+    return {
+      income,
+      mixtos,
+      socioPM,
+      salarios,
+      intereses,
+      cfdiGlobal,
+      buzonActivo,
+      anualObligatoria,
+      anualPorSalarios,
+      anualPorIntereses,
+      riesgoMulta,
+      riesgoBuzon,
+      riskLevel,
+      notas,
+      recomendacion,
+      pedagogia: 'ISR RESICO se calcula sobre ingresos brutos efectivamente cobrados; el IVA requiere CFDI válido y gastos facturados para acreditamiento.'
+    };
   }
 
   function renderDiagnostic(result) {
-    const resIncome = byId('res-income');
-    const resAnual = byId('res-anual');
-    const resMulta = byId('res-multa');
-    const resRecomendacion = byId('res-recomendacion');
+    const annualColor = result.anualObligatoria ? '#ef4444' : '#10b981';
+    const riskColor =
+      result.riskLevel === 'EXPULSION' ? '#ef4444' :
+      result.riskLevel === 'RIESGO_ALTO' ? '#f97316' :
+      result.riskLevel === 'PREVENTIVO' ? '#f59e0b' : '#10b981';
 
-    if (resIncome) resIncome.textContent = money(result.income || 0);
-    if (resAnual) {
-      resAnual.textContent = result.anualObligatoria ? 'Revisar obligación por ingresos mixtos' : 'No obligatoria por regla base';
-      resAnual.style.color = result.anualObligatoria ? '#f59e0b' : '#10b981';
+    if (byId('res-income')) byId('res-income').textContent = money(result.income || 0);
+    if (byId('res-salarios')) byId('res-salarios').textContent = money(result.salarios || 0);
+    if (byId('res-intereses')) byId('res-intereses').textContent = money(result.intereses || 0);
+
+    if (byId('res-anual')) {
+      byId('res-anual').textContent = result.anualObligatoria
+        ? 'DECLARACIÓN ANUAL OBLIGATORIA'
+        : 'No obligatoria en regla base';
+      byId('res-anual').style.color = annualColor;
     }
-    if (resMulta) {
-      resMulta.textContent = result.riesgoMulta ? 'Riesgo por CFDI faltante' : 'Sin riesgo';
-      resMulta.style.color = result.riesgoMulta ? '#ef4444' : '#10b981';
+
+    if (byId('res-multa')) {
+      byId('res-multa').textContent = result.riesgoMulta
+        ? 'CFDI faltante: riesgo operativo y sancionable'
+        : 'CFDI global al corriente';
+      byId('res-multa').style.color = result.riesgoMulta ? '#ef4444' : '#10b981';
     }
-    if (resRecomendacion) resRecomendacion.textContent = result.recomendacion || '--';
+
+    if (byId('res-buzon')) {
+      byId('res-buzon').textContent = result.riesgoBuzon
+        ? `ALERTA ROJA · Buzón inactivo: multa de $${BUZON_MULTA.toLocaleString('es-MX')} MXN`
+        : 'Buzón Tributario activo';
+      byId('res-buzon').style.color = result.riesgoBuzon ? '#ef4444' : '#10b981';
+    }
+
+    if (byId('res-risk')) {
+      byId('res-risk').textContent = result.riskLevel;
+      byId('res-risk').style.color = riskColor;
+    }
+
+    if (byId('res-pedagogia')) byId('res-pedagogia').textContent = result.pedagogia;
+    if (byId('res-notas')) byId('res-notas').textContent = result.notas.length ? result.notas.join(' ') : 'Sin alertas adicionales.';
+    if (byId('res-recomendacion')) byId('res-recomendacion').textContent = result.recomendacion;
   }
 
   function wizardNext() {
-    if (wizardStep < 4) {
+    if (wizardStep < WIZARD_MAX_STEPS) {
+      if (!validateStep(wizardStep)) return;
       wizardStep += 1;
       setWizardStep(wizardStep);
-      if (wizardStep === 4) renderDiagnostic(evaluateDiagnostic());
+      return;
     }
+
+    const result = evaluateDiagnostic();
+    renderDiagnostic(result);
+    showWizardMessage('Diagnóstico calculado correctamente.', 'success');
   }
 
   function resetWizard() {
     wizardStep = 1;
     setWizardStep(1);
-    ['wiz-income', 'wiz-mixtos', 'wiz-socio', 'wiz-cfdi'].forEach(id => {
+
+    const defaults = {
+      'wiz-income': '',
+      'wiz-mixtos': 'no',
+      'wiz-socio': 'no',
+      'wiz-salarios': '0',
+      'wiz-intereses': '0',
+      'wiz-cfdi': 'si',
+      'wiz-buzon': 'si'
+    };
+
+    Object.entries(defaults).forEach(([id, value]) => {
       const el = byId(id);
       if (!el) return;
-      if (el.tagName === 'INPUT') el.value = '';
-      if (el.tagName === 'SELECT') el.selectedIndex = 0;
+      el.value = value;
     });
 
-    renderDiagnostic({ income: 0, anualObligatoria: false, riesgoMulta: false, recomendacion: '--' });
+    if (byId('res-income')) byId('res-income').textContent = '--';
+    if (byId('res-salarios')) byId('res-salarios').textContent = '--';
+    if (byId('res-intereses')) byId('res-intereses').textContent = '--';
+    if (byId('res-anual')) byId('res-anual').textContent = '--';
+    if (byId('res-multa')) byId('res-multa').textContent = '--';
+    if (byId('res-buzon')) byId('res-buzon').textContent = '--';
+    if (byId('res-risk')) byId('res-risk').textContent = '--';
+    if (byId('res-pedagogia')) byId('res-pedagogia').textContent = '--';
+    if (byId('res-notas')) byId('res-notas').textContent = '--';
+    if (byId('res-recomendacion')) byId('res-recomendacion').textContent = '--';
+
+    hideWizardMessage();
   }
 
   function saveDiagnostic() {
     const result = evaluateDiagnostic();
+
     window.Store?.updateDiagnostic?.({
       income: result.income,
       mixtos: result.mixtos,
       socioPM: result.socioPM,
+      salarios: result.salarios,
+      intereses: result.intereses,
       cfdiGlobal: result.cfdiGlobal,
+      buzonActivo: result.buzonActivo,
       anualObligatoria: result.anualObligatoria,
       riesgoMulta: result.riesgoMulta,
+      riesgoBuzon: result.riesgoBuzon,
+      riskLevel: result.riskLevel,
       recomendacion: result.recomendacion,
       completedAt: new Date().toISOString()
     });
+
     window.Store?.updateIncome?.(result.income);
+    if (result.riesgoBuzon) {
+      window.Store?.updateSaludFiscal?.({
+        buzonTributarioActivo: false,
+        alertLevel: 'danger',
+        lastAuditDate: new Date().toISOString()
+      });
+    } else {
+      window.Store?.updateSaludFiscal?.({
+        buzonTributarioActivo: true,
+        lastAuditDate: new Date().toISOString()
+      });
+    }
+
     syncAndRender();
     navigateTo('dashboard');
+    showWizardMessage('Diagnóstico guardado correctamente.', 'success');
+  }
+
+  function addYears(date, years) {
+    const next = new Date(date);
+    next.setFullYear(next.getFullYear() + years);
+    return next;
+  }
+
+  function setUploadStatus(id, text, color = '#94a3b8') {
+    const el = byId(id);
+    if (!el) return;
+    el.textContent = text;
+    el.style.color = color;
+  }
+
+  function setCarpetaMessage(text, tone = 'success') {
+    const msg = byId('carpeta-fiscal-msg');
+    if (!msg) return;
+    msg.style.display = 'block';
+    msg.style.background = tone === 'error'
+      ? 'rgba(239,68,68,0.12)'
+      : 'rgba(16,185,129,0.12)';
+    msg.style.color = tone === 'error' ? '#fecaca' : '#d1fae5';
+    msg.textContent = text;
+  }
+
+  function fileExt(name) {
+    const parts = String(name || '').split('.');
+    return parts.length > 1 ? parts.pop().toLowerCase() : '';
+  }
+
+  function docTypeFromCategory(category) {
+    if (category === 'efirma') return 'EFIRMA';
+    if (category === 'constancia') return 'CONSTANCIA';
+    if (category === 'opinion') return 'OPINION';
+    return 'OTRO';
+  }
+
+  async function handleCarpetaUpload(file, category) {
+    if (!file) return;
+
+    try {
+      const now = new Date();
+      const extracted = {
+        folder_category: category,
+        fecha: now.toISOString(),
+        original_extension: fileExt(file.name)
+      };
+
+      if (category === 'efirma') {
+        const expiry = addYears(now, EFIRMA_YEARS).toISOString();
+        extracted.fecha_vencimiento = expiry;
+      }
+
+      await window.Store?.saveDocument?.({
+        file_name: file.name,
+        document_type: docTypeFromCategory(category),
+        extracted_data: extracted,
+        source: 'carpeta_upload',
+        confidence: 0.99,
+        validation_status: 'cargado'
+      });
+
+      if (category === 'efirma') {
+        const expiry = extracted.fecha_vencimiento;
+        const days = computeDaysRemaining(expiry);
+
+        window.Store?.updateSaludFiscal?.({
+          eFirmaVigente: true,
+          eFirmaExpiry: expiry,
+          lastAuditDate: new Date().toISOString(),
+          alertLevel: days <= 30 ? 'warning' : 'safe'
+        });
+
+        setUploadStatus('efirma-upload-status', `VIGENTE · ${days} día(s) restantes`, '#10b981');
+      }
+
+      if (category === 'constancia') {
+        setUploadStatus('constancia-upload-status', `Archivo cargado: ${file.name}`, '#10b981');
+      }
+
+      if (category === 'opinion') {
+        setUploadStatus('opinion-upload-status', `Archivo cargado: ${file.name}`, '#10b981');
+      }
+
+      setCarpetaMessage(`Documento cargado correctamente en Mi Carpeta Fiscal: ${file.name}`);
+      syncAndRender();
+    } catch (e) {
+      setCarpetaMessage(`Error al cargar documento: ${e?.message || 'desconocido'}`, 'error');
+    }
+  }
+
+  function bindCarpetaUpload(inputId, category) {
+    const input = byId(inputId);
+    if (!input) return;
+
+    input.addEventListener('change', async e => {
+      const file = e.target.files?.[0];
+      await handleCarpetaUpload(file, category);
+    });
+  }
+
+  function bindDropzone(dropId, inputId) {
+    const zone = byId(dropId);
+    const input = byId(inputId);
+    if (!zone || !input) return;
+
+    zone.addEventListener('click', () => input.click());
+
+    ['dragenter', 'dragover'].forEach(evt => {
+      zone.addEventListener(evt, e => {
+        e.preventDefault();
+        zone.style.borderColor = '#10b981';
+        zone.style.background = 'rgba(16,185,129,0.08)';
+      });
+    });
+
+    ['dragleave', 'drop'].forEach(evt => {
+      zone.addEventListener(evt, e => {
+        e.preventDefault();
+        zone.style.borderColor = 'rgba(255,255,255,0.18)';
+        zone.style.background = 'rgba(255,255,255,0.03)';
+      });
+    });
+
+    zone.addEventListener('drop', async e => {
+      const file = e.dataTransfer?.files?.[0];
+      if (!file) return;
+      const dt = new DataTransfer();
+      dt.items.add(file);
+      input.files = dt.files;
+      input.dispatchEvent(new Event('change', { bubbles: true }));
+    });
+  }
+
+  function initCarpetaFiscalUploads() {
+    bindCarpetaUpload('carpeta-efirma-cer', 'efirma');
+    bindCarpetaUpload('carpeta-efirma-key', 'efirma');
+    bindCarpetaUpload('carpeta-constancia-file', 'constancia');
+    bindCarpetaUpload('carpeta-opinion-file', 'opinion');
+
+    bindDropzone('drop-efirma-cer', 'carpeta-efirma-cer');
+    bindDropzone('drop-efirma-key', 'carpeta-efirma-key');
+    bindDropzone('drop-constancia', 'carpeta-constancia-file');
+    bindDropzone('drop-opinion', 'carpeta-opinion-file');
   }
 
   function syncAndRender() {
@@ -605,7 +984,9 @@ const App = (() => {
     initNavigation();
     initRFC();
     initClassifier();
+    initCarpetaFiscalUploads();
     setWizardStep(1);
+    resetWizard();
 
     window.DocumentsManager?.init?.();
     window.DocumentProcessor?.init?.();
@@ -634,13 +1015,13 @@ const App = (() => {
 })();
 
 window.App = App;
-window.Dashboard = { syncAndRender: () => App.syncAndRender() };
-window.wizardNext = () => App.wizardNext();
-window.resetWizard = () => App.resetWizard();
-window.saveDiagnostic = () => App.saveDiagnostic();
+window.wizardNext = App.wizardNext;
+window.resetWizard = App.resetWizard;
+window.saveDiagnostic = App.saveDiagnostic;
+window.Dashboard = App.syncAndRender;
 
 if (document.readyState === 'loading') {
-  document.addEventListener('DOMContentLoaded', () => App.init());
+  document.addEventListener('DOMContentLoaded', App.init);
 } else {
   App.init();
 }
