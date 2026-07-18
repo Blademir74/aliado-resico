@@ -18,6 +18,132 @@ const Store = (() => {
   let rtChannel = null;
   let authListenerBound = false;
 
+  let fiscalMetricsMode = null;
+
+function metricModeCandidates() {
+  return [
+    {
+      mode: 'income_ytd',
+      select: 'user_id,income_ytd,total_processed,avg_confidence,updated_at',
+      mapRow(row) {
+        return {
+          incomeYTD: Number(row?.income_ytd || 0),
+          annualLimit: Number(state.fiscalMetrics?.annualLimit || DEFAULT_LIMIT),
+          riskLevel: calcRiskLevel(
+            Number(row?.income_ytd || 0),
+            Number(state.fiscalMetrics?.annualLimit || DEFAULT_LIMIT)
+          )
+        };
+      },
+      payload() {
+        return {
+          user_id: usr.id,
+          income_ytd: Number(state.incomeYTD || 0),
+          total_processed: Number(state.metrics?.totalProcessed || state.conversations.length || 0),
+          avg_confidence: Number(state.metrics?.avgConfidence || 0)
+        };
+      }
+    },
+    {
+      mode: 'cumulative_income',
+      select: 'user_id,cumulative_income,annual_limit,risk_level,updated_at',
+      mapRow(row) {
+        return {
+          incomeYTD: Number(row?.cumulative_income || 0),
+          annualLimit: Number(row?.annual_limit || DEFAULT_LIMIT),
+          riskLevel:
+            row?.risk_level ||
+            calcRiskLevel(
+              Number(row?.cumulative_income || 0),
+              Number(row?.annual_limit || DEFAULT_LIMIT)
+            )
+        };
+      },
+      payload() {
+        const annualLimit = Number(state.fiscalMetrics?.annualLimit || DEFAULT_LIMIT);
+        return {
+          user_id: usr.id,
+          cumulative_income: Number(state.incomeYTD || 0),
+          annual_limit: annualLimit,
+          risk_level: String(
+            state.fiscalMetrics?.riskLevel ||
+            calcRiskLevel(Number(state.incomeYTD || 0), annualLimit)
+          )
+        };
+      }
+    }
+  ];
+}
+
+async function detectFiscalMetricsMode() {
+  if (fiscalMetricsMode) return fiscalMetricsMode;
+  if (!db || !usr?.id) return 'income_ytd';
+
+  for (const candidate of metricModeCandidates()) {
+    try {
+      const { error } = await db
+        .from('fiscal_metrics')
+        .select(candidate.select)
+        .eq('user_id', usr.id)
+        .limit(1);
+
+      if (!error) {
+        fiscalMetricsMode = candidate.mode;
+        return fiscalMetricsMode;
+      }
+    } catch {}
+  }
+
+  fiscalMetricsMode = 'income_ytd';
+  return fiscalMetricsMode;
+}
+
+function getMetricCandidate(mode) {
+  return metricModeCandidates().find(c => c.mode === mode) || metricModeCandidates()[0];
+}
+
+async function readFiscalMetricsRow() {
+  const preferredMode = await detectFiscalMetricsMode();
+  const preferred = getMetricCandidate(preferredMode);
+
+  let result = await db
+    .from('fiscal_metrics')
+    .select(preferred.select)
+    .eq('user_id', usr.id)
+    .maybeSingle();
+
+  if (!result.error) {
+    return { ...result, mode: preferred.mode };
+  }
+
+  const fallbackMode = preferred.mode === 'income_ytd' ? 'cumulative_income' : 'income_ytd';
+  const fallback = getMetricCandidate(fallbackMode);
+
+  result = await db
+    .from('fiscal_metrics')
+    .select(fallback.select)
+    .eq('user_id', usr.id)
+    .maybeSingle();
+
+  if (!result.error) {
+    fiscalMetricsMode = fallback.mode;
+    return { ...result, mode: fallback.mode };
+  }
+
+  return { ...result, mode: preferred.mode };
+}
+
+function applyMetricRow(metricRes) {
+  if (!metricRes?.data) return;
+
+  const candidate = getMetricCandidate(metricRes.mode || fiscalMetricsMode || 'income_ytd');
+  const mapped = candidate.mapRow(metricRes.data);
+
+  state.incomeYTD = Number(mapped.incomeYTD || 0);
+  state.fiscalMetrics.annualLimit = Number(mapped.annualLimit || DEFAULT_LIMIT);
+  state.fiscalMetrics.riskLevel = mapped.riskLevel || 'SEGURO';
+}
+
   function buildMonthlyFolders(year = YEAR) {
     return MONTHS.map((monthName, idx) => ({
       year,
@@ -418,11 +544,8 @@ const Store = (() => {
           .order('created_at', { ascending: false })
           .limit(MAX_CONVERSATIONS),
 
-        db
-          .from('fiscal_metrics')
-          .select('user_id,cumulative_income,annual_limit,risk_level,updated_at')
-          .eq('user_id', usr.id)
-          .maybeSingle(),
+        
+          readFiscalMetricsRow(),
 
         db
           .from('documents')
@@ -438,15 +561,8 @@ const Store = (() => {
         console.warn('[Store] conversations sync error:', convRes.error.message);
       }
 
-      if (!metricRes.error && metricRes.data) {
-        state.incomeYTD = Number(metricRes.data.cumulative_income || 0);
-        state.fiscalMetrics.annualLimit = Number(metricRes.data.annual_limit || DEFAULT_LIMIT);
-        state.fiscalMetrics.riskLevel =
-          metricRes.data.risk_level ||
-          calcRiskLevel(
-            Number(metricRes.data.cumulative_income || 0),
-            Number(metricRes.data.annual_limit || DEFAULT_LIMIT)
-          );
+     if (!metricRes.error && metricRes.data) {
+        applyMetricRow(metricRes);
       } else if (metricRes.error) {
         console.warn('[Store] fiscal_metrics sync error:', metricRes.error.message);
       }
@@ -486,31 +602,38 @@ const Store = (() => {
     }
   }
 
-  async function upsertMetrics() {
+ async function upsertMetrics() {
   if (!db || !usr?.id) return;
 
-  const payload = {
-    user_id: usr.id,
-    cumulative_income: Number(state.incomeYTD || 0),
-    annual_limit: Number(state.fiscalMetrics?.annualLimit || DEFAULT_LIMIT),
-    risk_level: String(
-      state.fiscalMetrics?.riskLevel ||
-      calcRiskLevel(
-        Number(state.incomeYTD || 0),
-        Number(state.fiscalMetrics?.annualLimit || DEFAULT_LIMIT)
-      )
-    )
-  };
+  const preferredMode = await detectFiscalMetricsMode();
+  const preferred = getMetricCandidate(preferredMode);
 
   try {
-    const { error } = await db
+    let payload = preferred.payload();
+    let { error } = await db
       .from('fiscal_metrics')
       .upsert(payload, { onConflict: 'user_id' });
 
-    if (error) console.warn('[Store] upsertMetrics:', error.message);
+    if (!error) return;
+
+    const fallbackMode = preferred.mode === 'income_ytd' ? 'cumulative_income' : 'income_ytd';
+    const fallback = getMetricCandidate(fallbackMode);
+
+    payload = fallback.payload();
+    const retry = await db
+      .from('fiscal_metrics')
+      .upsert(payload, { onConflict: 'user_id' });
+
+    if (!retry.error) {
+      fiscalMetricsMode = fallback.mode;
+      return;
+    }
+
+    console.warn('[Store] upsertMetrics:', retry.error.message);
   } catch (e) {
     console.warn('[Store] upsertMetrics:', e.message);
   }
+
 }
 
   async function saveDocumentRemote(doc) {

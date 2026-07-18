@@ -1,12 +1,16 @@
-// api/gemini-proxy.js — Aliado RESICO 2026
-// VERSIÓN PRODUCCIÓN ESTABLE
-// El proxy NO valida JWT aquí — la autenticación la maneja Supabase RLS en el frontend.
-// El proxy es un secreto de backend: la GEMINI_API_KEY nunca se expone al cliente.
+import crypto from 'node:crypto';
 
-const GEMINI_MODEL = 'gemini-2.0-flash';
-const GEMINI_ENDPOINT = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent`;
+export const config = { runtime: 'nodejs' };
 
-// CORS: Lista blanca de orígenes permitidos
+const AI_STUDIO_MODEL = process.env.GEMINI_MODEL || 'gemini-2.0-flash';
+const VERTEX_MODEL = process.env.VERTEX_MODEL || 'gemini-2.0-flash-001';
+const VERTEX_LOCATION = process.env.VERTEX_LOCATION || 'us-central1';
+const VERTEX_PROJECT_ID =
+  process.env.VERTEX_PROJECT_ID ||
+  process.env.GOOGLE_CLOUD_PROJECT ||
+  process.env.GCLOUD_PROJECT ||
+  '';
+
 const ALLOWED_ORIGINS = [
   'https://aliado-resico.vercel.app',
   'https://aliadoresico.com',
@@ -19,39 +23,27 @@ const ALLOWED_ORIGINS = [
   'http://127.0.0.1:5501'
 ];
 
-// Prompt de sistema — RESICO 2026 con formato JSON estructurado
-// FIX: El bot ya NO responde "Consulta recibida" — devuelve análisis fiscal accionable
-const SYSTEM_TEXT = [
-  'Eres el Asistente Fiscal RESICO 2026 de Aliado RESICO.',
-  'Responde SIEMPRE en español mexicano, claro y accionable.',
-  '',
-  'FORMATO OBLIGATORIO DE RESPUESTA (texto plano, no JSON, fácil de leer):',
-  '📋 RESPUESTA FISCAL:',
-  '[Respuesta directa a la consulta del usuario]',
-  '',
-  '⚖️ FUNDAMENTO LEGAL:',
-  '[Artículo exacto: LISR Art. 113-E/F, CFF Art. 17-K, RMF vigente u otro aplicable]',
-  '',
-  '💡 ISR vs IVA:',
-  '• ISR RESICO: tasa fija sobre ingresos BRUTOS efectivamente cobrados, SIN deducciones de gastos.',
-  '• IVA: SOLO acreditable con CFDI válido de proveedor y gasto INDISPENSABLE para la actividad.',
-  '',
-  '✅ ACCIÓN CONCRETA:',
-  '[Paso específico que el usuario debe hacer HOY]',
-  '',
-  'REGLAS ABSOLUTAS (nunca omitir ni contradecir):',
-  '- Límite anual RESICO PF: $3,500,000 MXN (Art. 113-E LISR).',
-  '- Umbrales de alerta: 80% = $2,800,000 MXN (preventivo), 90% = $3,150,000 MXN (riesgo alto), 94% = $3,290,000 MXN (expulsión inminente).',
-  '- Buzón Tributario inactivo: multa hasta $10,260 MXN (Art. 17-K CFF) + pérdida de plazos legales.',
-  '- Declaración Anual OBLIGATORIA si: salarios > $400,000 MXN O intereses reales > $100,000 MXN (Art. 113-F LISR).',
-  '- ISR RESICO: sin deducción de gastos, solo sobre ingresos brutos cobrados.',
-  '- IVA acreditable: requiere CFDI 4.0 válido, gasto indispensable y timbrado correcto.',
-  '- Si faltan datos para concluir: solicita el dato específico antes de dar un dictamen.',
-  '- NUNCA decir "Consulta recibida" como respuesta — siempre dar análisis de valor.',
-  '- NUNCA inventar montos, fechas ni artículos que no existan en la LISR o CFF vigente 2026.'
+const JSON_CONTRACT = [
+  'Responde SOLO JSON válido sin markdown ni texto extra.',
+  'Usa exactamente estas llaves:',
+  '{',
+  '  "respuestaFiscal": "string",',
+  '  "fundamentoLegal": "string",',
+  '  "diferenciacionIsrIva": "string",',
+  '  "accionConcreta": "string",',
+  '  "solicitudDatoFaltante": "string opcional o vacío"',
+  '}',
+  'Reglas obligatorias:',
+  '- Español mexicano claro.',
+  '- Nunca respondas "Consulta recibida".',
+  '- En RESICO PF el límite anual es $3,500,000 MXN.',
+  '- Alerta 80%: $2,800,000 MXN; 90%: $3,150,000 MXN; 94%: $3,290,000 MXN.',
+  '- Declaración anual obligatoria si salarios > $400,000 MXN o intereses reales > $100,000 MXN.',
+  '- ISR RESICO: sobre ingresos brutos efectivamente cobrados, sin deducciones de gastos.',
+  '- IVA: acreditable solo con CFDI válido y gasto indispensable para la actividad.',
+  '- Si faltan datos, usa solicitudDatoFaltante y no inventes hechos.',
+  '- Cita fundamento aplicable: Art. 113-E o 113-F LISR, Art. 17-K CFF u otro aplicable.'
 ].join('\n');
-
-// ── Utilidades ───────────────────────────────────────────────
 
 function resolveOrigin(origin = '') {
   if (!origin) return ALLOWED_ORIGINS[0];
@@ -61,10 +53,12 @@ function resolveOrigin(origin = '') {
 function setSecureHeaders(req, res) {
   const origin = req.headers.origin || '';
   const allowed = resolveOrigin(origin);
+
   if (allowed) {
     res.setHeader('Access-Control-Allow-Origin', allowed);
     res.setHeader('Vary', 'Origin');
   }
+
   res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
   res.setHeader('Access-Control-Max-Age', '86400');
@@ -75,11 +69,101 @@ function setSecureHeaders(req, res) {
 
 function sendJson(res, status, payload, headers = {}) {
   Object.entries(headers).forEach(([k, v]) => res.setHeader(k, v));
-  res.status(status).setHeader('Content-Type', 'application/json; charset=utf-8');
-  return res.end(JSON.stringify(payload));
+  res.statusCode = status;
+  res.setHeader('Content-Type', 'application/json; charset=utf-8');
+  res.end(JSON.stringify(payload));
 }
 
-function extractReply(data) {
+function parseBody(req) {
+  if (req.body && typeof req.body === 'object') return req.body;
+  if (typeof req.body === 'string') {
+    try { return JSON.parse(req.body); } catch { return null; }
+  }
+  return null;
+}
+
+function normalizeText(value) {
+  return String(value || '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .trim()
+    .toLowerCase();
+}
+
+function buildPrompt(body) {
+  const message = String(body?.message || '').trim();
+  if (!message) return null;
+
+  const ctx = body?.context || {};
+  const lines = [
+    ctx?.userEmail ? `Usuario: ${ctx.userEmail}` : '',
+    ctx?.incomeYTD != null ? `Ingresos acumulados actuales: $${Number(ctx.incomeYTD || 0).toLocaleString('es-MX')} MXN` : '',
+    ctx?.annualLimit != null ? `Límite anual: $${Number(ctx.annualLimit || 3500000).toLocaleString('es-MX')} MXN` : '',
+    ctx?.riskLevel ? `Nivel de riesgo actual: ${ctx.riskLevel}` : '',
+    ctx?.isDemo ? 'Modo: DEMO' : 'Modo: PRODUCCIÓN'
+  ].filter(Boolean);
+
+  return [
+    'Eres el Asistente Fiscal RESICO 2026 de Aliado RESICO.',
+    JSON_CONTRACT,
+    '',
+    lines.length ? `Contexto fiscal del usuario:\n${lines.join('\n')}` : '',
+    '',
+    `Consulta del usuario: ${message}`
+  ].filter(Boolean).join('\n\n');
+}
+
+function renderReply(structured) {
+  return [
+    structured.respuestaFiscal || '',
+    structured.fundamentoLegal ? `Fundamento legal: ${structured.fundamentoLegal}` : '',
+    structured.diferenciacionIsrIva ? `ISR vs IVA: ${structured.diferenciacionIsrIva}` : '',
+    structured.accionConcreta ? `Acción concreta: ${structured.accionConcreta}` : '',
+    structured.solicitudDatoFaltante ? `Dato faltante: ${structured.solicitudDatoFaltante}` : ''
+  ].filter(Boolean).join('\n\n').trim();
+}
+
+function fallbackStructured(reason) {
+  if (reason === 'quota_exhausted') {
+    return {
+      respuestaFiscal: 'El servicio de IA está temporalmente limitado, pero tu consulta sí fue recibida y puede seguirse atendiendo con reglas fiscales base.',
+      fundamentoLegal: 'Art. 113-E LISR para límite RESICO y Art. 17-K CFF para Buzón Tributario.',
+      diferenciacionIsrIva: 'ISR RESICO se calcula sobre ingresos brutos efectivamente cobrados; el IVA solo se acredita con CFDI válido y gasto indispensable.',
+      accionConcreta: 'Continúa capturando ingresos, valida tu Buzón Tributario y conserva CFDI de gastos para IVA.',
+      solicitudDatoFaltante: ''
+    };
+  }
+
+  return {
+    respuestaFiscal: 'La IA no está disponible en este momento, pero la operación del sistema debe continuar con reglas fiscales base.',
+    fundamentoLegal: 'Art. 113-E LISR y Art. 17-K CFF.',
+    diferenciacionIsrIva: 'ISR RESICO: ingresos brutos cobrados, sin deducción de gastos. IVA: acreditamiento solo con CFDI válido y gasto indispensable.',
+    accionConcreta: 'Monitorea tus ingresos acumulados, mantén activo el Buzón Tributario y conserva tus CFDI.',
+    solicitudDatoFaltante: ''
+  };
+}
+
+function fallbackPayload(reason, debug = {}, provider = 'fallback', model = null) {
+  const structured = fallbackStructured(reason);
+  return {
+    ok: true,
+    is_fallback: true,
+    fallback_reason: reason,
+    provider,
+    model,
+    structured,
+    respuestaFiscal: structured.respuestaFiscal,
+    fundamentoLegal: structured.fundamentoLegal,
+    diferenciacionIsrIva: structured.diferenciacionIsrIva,
+    accionConcreta: structured.accionConcreta,
+    solicitudDatoFaltante: structured.solicitudDatoFaltante,
+    reply: renderReply(structured),
+    debug,
+    raw: null
+  };
+}
+
+function extractGeminiText(data) {
   return (
     data?.candidates?.[0]?.content?.parts
       ?.map(part => part?.text || '')
@@ -88,198 +172,414 @@ function extractReply(data) {
   );
 }
 
-function fallbackPayload(reason, hint, debug = {}) {
-  const reply =
-    hint ||
-    '📋 RESPUESTA FISCAL:\nEn RESICO 2026 el ISR se aplica sobre ingresos brutos cobrados (sin deducciones). El límite anual es $3,500,000 MXN. La IA no está disponible en este momento.\n\n⚖️ FUNDAMENTO LEGAL:\nArt. 113-E LISR — Régimen Simplificado de Confianza.\n\n💡 ISR vs IVA:\n• ISR RESICO: tasa fija sobre ingresos BRUTOS, sin deducciones.\n• IVA: acreditable SOLO con CFDI válido y gasto indispensable.\n\n✅ ACCIÓN CONCRETA:\nVerifica tu Buzón Tributario activo (Art. 17-K CFF) y monitorea tus ingresos acumulados.';
+function safeJsonParse(text) {
+  try {
+    return JSON.parse(text);
+  } catch {
+    return null;
+  }
+}
+
+function extractJsonBlock(text) {
+  const start = text.indexOf('{');
+  const end = text.lastIndexOf('}');
+  if (start === -1 || end === -1 || end <= start) return null;
+  return text.slice(start, end + 1);
+}
+
+function normalizeStructured(obj, fallbackText = '') {
+  if (!obj || typeof obj !== 'object') {
+    const base = fallbackStructured('empty_response');
+    base.respuestaFiscal = fallbackText || base.respuestaFiscal;
+    return base;
+  }
+
+  const normalized = {
+    respuestaFiscal: String(
+      obj.respuestaFiscal ||
+      obj.respuesta_fiscal ||
+      obj.respuesta ||
+      obj.reply ||
+      ''
+    ).trim(),
+    fundamentoLegal: String(
+      obj.fundamentoLegal ||
+      obj.fundamento_legal ||
+      obj.fundamento ||
+      ''
+    ).trim(),
+    diferenciacionIsrIva: String(
+      obj.diferenciacionIsrIva ||
+      obj.diferenciacion_ISR_IVA ||
+      obj.isrVsIva ||
+      ''
+    ).trim(),
+    accionConcreta: String(
+      obj.accionConcreta ||
+      obj.accion_concreta ||
+      obj.accion ||
+      ''
+    ).trim(),
+    solicitudDatoFaltante: String(
+      obj.solicitudDatoFaltante ||
+      obj.solicitud_dato_faltante ||
+      ''
+    ).trim()
+  };
+
+  if (!normalized.respuestaFiscal) {
+    normalized.respuestaFiscal = fallbackText || fallbackStructured('empty_response').respuestaFiscal;
+  }
+
+  if (!normalized.fundamentoLegal) {
+    normalized.fundamentoLegal = 'Art. 113-E LISR y, en su caso, Art. 17-K CFF.';
+  }
+
+  if (!normalized.diferenciacionIsrIva) {
+    normalized.diferenciacionIsrIva =
+      'ISR RESICO: sobre ingresos brutos cobrados, sin deducción de gastos. IVA: acreditamiento solo con CFDI válido y gasto indispensable.';
+  }
+
+  if (!normalized.accionConcreta) {
+    normalized.accionConcreta = 'Confirma tus ingresos acumulados, tu Buzón Tributario y tus CFDI vigentes.';
+  }
+
+  return normalized;
+}
+
+function parseStructuredModelOutput(text) {
+  if (!text) return fallbackStructured('empty_response');
+
+  const direct = safeJsonParse(text);
+  if (direct) return normalizeStructured(direct, text);
+
+  const block = extractJsonBlock(text);
+  if (block) {
+    const parsed = safeJsonParse(block);
+    if (parsed) return normalizeStructured(parsed, text);
+  }
+
+  return normalizeStructured({ respuestaFiscal: text }, text);
+}
+
+function mapUpstreamReason(status, data) {
+  const code = data?.error?.code || status;
+  if (code === 429) return 'quota_exhausted';
+  if (code === 404) return 'model_unavailable';
+  if (code === 401 || code === 403) return 'auth_error';
+  if (code === 503) return 'service_unavailable';
+  return 'api_error';
+}
+
+async function callWithRetry(doRequest) {
+  const RETRY_DELAY_MS = 1200;
+
+  for (let attempt = 0; attempt <= 1; attempt++) {
+    const result = await doRequest();
+    const status = result?.status || 500;
+
+    if (status >= 200 && status < 300) {
+      return { ...result, retried: attempt > 0 };
+    }
+
+    if ((status === 429 || status === 503) && attempt === 0) {
+      await new Promise(resolve => setTimeout(resolve, RETRY_DELAY_MS));
+      continue;
+    }
+
+    return { ...result, retried: attempt > 0 };
+  }
+
+  return { status: 500, data: {}, retried: false };
+}
+
+function base64url(input) {
+  return Buffer.from(input)
+    .toString('base64')
+    .replace(/\+/g, '-')
+    .replace(/\//g, '_')
+    .replace(/=+$/g, '');
+}
+
+function getServiceAccountEmail() {
+  return (
+    process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL ||
+    process.env.GOOGLE_CLIENT_EMAIL ||
+    ''
+  );
+}
+
+function getServiceAccountPrivateKey() {
+  return (
+    process.env.GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY ||
+    process.env.GOOGLE_PRIVATE_KEY ||
+    ''
+  ).replace(/\\n/g, '\n');
+}
+
+function canUseVertex() {
+  return Boolean(
+    VERTEX_PROJECT_ID &&
+    VERTEX_LOCATION &&
+    getServiceAccountEmail() &&
+    getServiceAccountPrivateKey()
+  );
+}
+
+async function getGoogleAccessToken() {
+  const clientEmail = getServiceAccountEmail();
+  const privateKey = getServiceAccountPrivateKey();
+
+  if (!clientEmail || !privateKey) {
+    throw new Error('missing_service_account_credentials');
+  }
+
+  const now = Math.floor(Date.now() / 1000);
+  const header = { alg: 'RS256', typ: 'JWT' };
+  const claimSet = {
+    iss: clientEmail,
+    scope: 'https://www.googleapis.com/auth/cloud-platform',
+    aud: 'https://oauth2.googleapis.com/token',
+    exp: now + 3600,
+    iat: now
+  };
+
+  const encodedHeader = base64url(JSON.stringify(header));
+  const encodedClaimSet = base64url(JSON.stringify(claimSet));
+  const signingInput = `${encodedHeader}.${encodedClaimSet}`;
+
+  const signer = crypto.createSign('RSA-SHA256');
+  signer.update(signingInput);
+  signer.end();
+  const signature = signer.sign(privateKey, 'base64')
+    .replace(/\+/g, '-')
+    .replace(/\//g, '_')
+    .replace(/=+$/g, '');
+
+  const assertion = `${signingInput}.${signature}`;
+
+  const response = await fetch('https://oauth2.googleapis.com/token', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: new URLSearchParams({
+      grant_type: 'urn:ietf:params:oauth:grant-type:jwt-bearer',
+      assertion
+    })
+  });
+
+  const data = await response.json().catch(() => ({}));
+
+  if (!response.ok || !data?.access_token) {
+    throw new Error(data?.error_description || data?.error || 'oauth_token_error');
+  }
+
+  return data.access_token;
+}
+
+function buildGeminiPayload(prompt) {
   return {
-    ok: true,
-    is_fallback: true,
-    fallback_reason: reason,
-    reply,
-    source: 'gemini-proxy',
-    model: GEMINI_MODEL,
-    debug,
-    raw: {
-      candidates: [
-        {
-          content: { parts: [{ text: reply }] },
-          finishReason: 'FALLBACK'
-        }
-      ]
+    contents: [
+      {
+        role: 'user',
+        parts: [{ text: prompt }]
+      }
+    ],
+    generationConfig: {
+      temperature: 0.2,
+      topP: 0.9,
+      maxOutputTokens: 900,
+      responseMimeType: 'application/json'
     }
   };
 }
 
-function buildContents(body) {
-  if (Array.isArray(body?.contents) && body.contents.length) return body.contents;
+async function callAiStudio(prompt) {
+  const apiKey = process.env.GEMINI_API_KEY;
+  if (!apiKey) {
+    throw new Error('missing_gemini_api_key');
+  }
 
-  const message = String(body?.message || '').trim();
-  if (!message) return null;
+  const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${AI_STUDIO_MODEL}:generateContent?key=${apiKey}`;
+  const payload = buildGeminiPayload(prompt);
 
-  const ctx = body?.context || {};
-  const lines = [
-    ctx?.userEmail ? `Usuario: ${ctx.userEmail}` : '',
-    ctx?.incomeYTD != null ? `Ingresos acumulados: $${Number(ctx.incomeYTD).toLocaleString('es-MX')} MXN` : '',
-    ctx?.annualLimit != null ? `Límite anual: $${Number(ctx.annualLimit).toLocaleString('es-MX')} MXN` : '',
-    ctx?.riskLevel ? `Nivel de riesgo: ${ctx.riskLevel}` : '',
-    ctx?.isDemo ? 'Modo: DEMO' : 'Modo: CUENTA REAL'
-  ].filter(Boolean);
-
-  return [
-    {
-      role: 'user',
-      parts: [
-        {
-          text: [
-            lines.length ? `Contexto fiscal del usuario:\n${lines.join('\n')}\n` : '',
-            `Consulta: ${message}`
-          ].join('\n')
-        }
-      ]
-    }
-  ];
-}
-
-// Retry único ante 429 / 503
-async function callGeminiWithRetry(endpoint, apiKey, payload) {
-  const RETRY_DELAY_MS = 1200;
-
-  for (let attempt = 0; attempt <= 1; attempt++) {
-    const upstream = await fetch(`${endpoint}?key=${apiKey}`, {
+  return callWithRetry(async () => {
+    const upstream = await fetch(endpoint, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload)
     });
 
     const data = await upstream.json().catch(() => ({}));
-
-    if (upstream.ok) return { upstream, data, retried: attempt > 0 };
-
-    const code = data?.error?.code || upstream.status;
-    if ((code === 429 || code === 503) && attempt === 0) {
-      await new Promise(r => setTimeout(r, RETRY_DELAY_MS));
-      continue;
-    }
-
-    return { upstream, data, retried: attempt > 0 };
-  }
+    return { status: upstream.status, data, provider: 'ai-studio', model: AI_STUDIO_MODEL };
+  });
 }
 
-// ── Handler principal ────────────────────────────────────────
+async function callVertex(prompt) {
+  const accessToken = await getGoogleAccessToken();
+  const endpoint =
+    `https://${VERTEX_LOCATION}-aiplatform.googleapis.com/v1/projects/${VERTEX_PROJECT_ID}` +
+    `/locations/${VERTEX_LOCATION}/publishers/google/models/${VERTEX_MODEL}:generateContent`;
+
+  const payload = buildGeminiPayload(prompt);
+
+  return callWithRetry(async () => {
+    const upstream = await fetch(endpoint, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${accessToken}`
+      },
+      body: JSON.stringify(payload)
+    });
+
+    const data = await upstream.json().catch(() => ({}));
+    return { status: upstream.status, data, provider: 'vertex-ai', model: VERTEX_MODEL };
+  });
+}
+
+async function callProvider(prompt) {
+  if (canUseVertex()) {
+    try {
+      return await callVertex(prompt);
+    } catch (err) {
+      if (process.env.GEMINI_API_KEY) {
+        return await callAiStudio(prompt);
+      }
+      throw err;
+    }
+  }
+
+  return await callAiStudio(prompt);
+}
 
 export default async function handler(req, res) {
   setSecureHeaders(req, res);
 
-  if (req.method === 'OPTIONS') return res.status(204).end();
+  if (req.method === 'OPTIONS') {
+    res.statusCode = 204;
+    res.end();
+    return;
+  }
 
   if (req.method !== 'POST') {
-    return sendJson(res, 405, { ok: false, error: 'Method Not Allowed' });
+    sendJson(res, 405, { ok: false, error: 'Method Not Allowed' });
+    return;
   }
 
-  // CORS check — rechazar orígenes no autorizados en producción
   const origin = req.headers.origin || '';
   if (origin && !resolveOrigin(origin)) {
-    return sendJson(res, 403, { ok: false, error: 'Origin no autorizado' });
+    sendJson(res, 403, { ok: false, error: 'Origin no autorizado' });
+    return;
   }
 
-  const apiKey = process.env.GEMINI_API_KEY;
-
-  // Debug solo por variable de entorno
-  const debugEnabled = process.env.ALIADO_AI_DEBUG === 'true';
-
-  if (!apiKey) {
-    const payload = fallbackPayload('missing_api_key', null, { env: 'GEMINI_API_KEY absent' });
-    return sendJson(res, 200, payload, {
-      'x-aliado-ai-status': 'fallback',
-      'x-aliado-fallback-reason': 'missing_api_key'
-    });
-  }
-
-  const body = req.body && typeof req.body === 'object' ? req.body : null;
+  const body = parseBody(req);
   if (!body) {
-    return sendJson(res, 400, { ok: false, error: 'Body inválido: se espera JSON.' });
+    sendJson(res, 400, { ok: false, error: 'Body inválido: se espera JSON.' });
+    return;
   }
 
-  const contents = buildContents(body);
-  if (!contents) {
-    return sendJson(res, 400, { ok: false, error: 'Falta message o contents.' });
+  const prompt = buildPrompt(body);
+  if (!prompt) {
+    sendJson(res, 400, { ok: false, error: 'Falta message.' });
+    return;
   }
 
-  const payload = {
-    contents,
-    system_instruction: {
-      parts: [{ text: SYSTEM_TEXT }]
-    },
-    generationConfig: {
-      temperature: 0.30,
-      topP: 0.9,
-      maxOutputTokens: 900
-    }
-  };
+  const debugEnabled = process.env.ALIADO_AI_DEBUG === 'true';
+  const messageNormalized = normalizeText(body?.message || '');
 
-  try {
-    const { upstream, data, retried } = await callGeminiWithRetry(
-      GEMINI_ENDPOINT,
-      apiKey,
-      payload
-    );
+  if (['hola', 'buenas', 'buen dia', 'buen día', 'gracias', 'ok', 'okay'].includes(messageNormalized)) {
+    const structured = {
+      respuestaFiscal: 'Estoy listo para ayudarte con tu operación fiscal RESICO 2026.',
+      fundamentoLegal: 'Orientación general de cumplimiento RESICO 2026.',
+      diferenciacionIsrIva: 'ISR RESICO: ingresos brutos cobrados. IVA: acreditamiento con CFDI válido y gasto indispensable.',
+      accionConcreta: 'Escribe tu consulta específica sobre ISR, IVA, CFDI, e.firma o declaración anual.',
+      solicitudDatoFaltante: ''
+    };
 
-    if (!upstream.ok) {
-      const code = data?.error?.code || upstream.status;
-      const message = data?.error?.message || `HTTP ${upstream.status}`;
-      const reason =
-        code === 429 ? 'quota_exhausted' :
-        code === 404 ? 'model_unavailable' :
-        code === 503 ? 'service_unavailable' :
-        'api_error';
-
-      const fb = fallbackPayload(
-        reason,
-        null,
-        debugEnabled ? { upstream_status: upstream.status, upstream_code: code, upstream_message: message, retried } : {}
-      );
-      return sendJson(res, 200, fb, {
-        'x-aliado-ai-status': 'fallback',
-        'x-aliado-fallback-reason': reason
-      });
-    }
-
-    const reply = extractReply(data);
-    if (!reply) {
-      const fb = fallbackPayload('empty_response', null, { upstream_status: upstream.status });
-      return sendJson(res, 200, fb, {
-        'x-aliado-ai-status': 'fallback',
-        'x-aliado-fallback-reason': 'empty_response'
-      });
-    }
-
-    return sendJson(
+    sendJson(
       res,
       200,
       {
         ok: true,
         is_fallback: false,
         fallback_reason: null,
-        reply,
-        source: 'gemini-proxy',
-        model: GEMINI_MODEL,
-        debug: debugEnabled ? { upstream_status: upstream.status, retried } : undefined,
-        raw: data
+        provider: 'local-fastpath',
+        model: 'none',
+        structured,
+        respuestaFiscal: structured.respuestaFiscal,
+        fundamentoLegal: structured.fundamentoLegal,
+        diferenciacionIsrIva: structured.diferenciacionIsrIva,
+        accionConcreta: structured.accionConcreta,
+        solicitudDatoFaltante: structured.solicitudDatoFaltante,
+        reply: renderReply(structured),
+        debug: debugEnabled ? { fastPath: true } : undefined,
+        raw: null
       },
       {
-        'x-aliado-ai-status': 'ok'
+        'x-aliado-ai-status': 'ok',
+        'x-aliado-provider': 'local-fastpath'
       }
     );
+    return;
+  }
+
+  try {
+    const result = await callProvider(prompt);
+    const { status, data, retried, provider, model } = result;
+
+    if (!(status >= 200 && status < 300)) {
+      const reason = mapUpstreamReason(status, data);
+      const payload = fallbackPayload(
+        reason,
+        debugEnabled ? { upstream_status: status, upstream_data: data, retried } : {},
+        provider,
+        model
+      );
+
+      sendJson(res, 200, payload, {
+        'x-aliado-ai-status': 'fallback',
+        'x-aliado-fallback-reason': reason,
+        'x-aliado-provider': provider
+      });
+      return;
+    }
+
+    const rawText = extractGeminiText(data);
+    const structured = parseStructuredModelOutput(rawText);
+
+    const payload = {
+      ok: true,
+      is_fallback: false,
+      fallback_reason: null,
+      provider,
+      model,
+      structured,
+      respuestaFiscal: structured.respuestaFiscal,
+      fundamentoLegal: structured.fundamentoLegal,
+      diferenciacionIsrIva: structured.diferenciacionIsrIva,
+      accionConcreta: structured.accionConcreta,
+      solicitudDatoFaltante: structured.solicitudDatoFaltante,
+      reply: renderReply(structured),
+      debug: debugEnabled ? { upstream_status: status, retried } : undefined,
+      raw: data
+    };
+
+    sendJson(res, 200, payload, {
+      'x-aliado-ai-status': 'ok',
+      'x-aliado-provider': provider
+    });
   } catch (err) {
-    const fb = fallbackPayload(
+    const payload = fallbackPayload(
       'network_error',
-      null,
-      debugEnabled ? { error_message: err?.message || 'unknown_network_error' } : {}
+      debugEnabled ? { error_message: err?.message || 'unknown_network_error' } : {},
+      'proxy',
+      null
     );
-    return sendJson(res, 200, fb, {
+
+    sendJson(res, 200, payload, {
       'x-aliado-ai-status': 'fallback',
-      'x-aliado-fallback-reason': 'network_error'
+      'x-aliado-fallback-reason': 'network_error',
+      'x-aliado-provider': 'proxy'
     });
   }
 }
