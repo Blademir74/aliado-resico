@@ -420,7 +420,7 @@ const Store = (() => {
 
         db
           .from('fiscal_metrics')
-          .select('user_id,income_ytd,total_processed,avg_confidence,updated_at')
+          .select('user_id,cumulative_income,annual_limit,risk_level,updated_at')
           .eq('user_id', usr.id)
           .maybeSingle(),
 
@@ -439,12 +439,14 @@ const Store = (() => {
       }
 
       if (!metricRes.error && metricRes.data) {
-        state.incomeYTD = Number(metricRes.data.income_ytd || 0);
-        state.fiscalMetrics.annualLimit = Number(state.fiscalMetrics.annualLimit || DEFAULT_LIMIT);
-        state.fiscalMetrics.riskLevel = calcRiskLevel(
-          Number(metricRes.data.income_ytd || 0),
-          Number(state.fiscalMetrics.annualLimit || DEFAULT_LIMIT)
-        );
+        state.incomeYTD = Number(metricRes.data.cumulative_income || 0);
+        state.fiscalMetrics.annualLimit = Number(metricRes.data.annual_limit || DEFAULT_LIMIT);
+        state.fiscalMetrics.riskLevel =
+          metricRes.data.risk_level ||
+          calcRiskLevel(
+            Number(metricRes.data.cumulative_income || 0),
+            Number(metricRes.data.annual_limit || DEFAULT_LIMIT)
+          );
       } else if (metricRes.error) {
         console.warn('[Store] fiscal_metrics sync error:', metricRes.error.message);
       }
@@ -485,22 +487,31 @@ const Store = (() => {
   }
 
   async function upsertMetrics() {
-    if (!db || !usr?.id) return;
+  if (!db || !usr?.id) return;
 
-    const payload = {
-      user_id: usr.id,
-      income_ytd: Number(state.incomeYTD || 0),
-      total_processed: Number(state.metrics?.totalProcessed || state.conversations.length || 0),
-      avg_confidence: Number(state.metrics?.avgConfidence || 0)
-    };
+  const payload = {
+    user_id: usr.id,
+    cumulative_income: Number(state.incomeYTD || 0),
+    annual_limit: Number(state.fiscalMetrics?.annualLimit || DEFAULT_LIMIT),
+    risk_level: String(
+      state.fiscalMetrics?.riskLevel ||
+      calcRiskLevel(
+        Number(state.incomeYTD || 0),
+        Number(state.fiscalMetrics?.annualLimit || DEFAULT_LIMIT)
+      )
+    )
+  };
 
-    try {
-      const { error } = await db.from('fiscal_metrics').upsert(payload, { onConflict: 'user_id' });
-      if (error) console.warn('[Store] upsertMetrics:', error.message);
-    } catch (e) {
-      console.warn('[Store] upsertMetrics:', e.message);
-    }
+  try {
+    const { error } = await db
+      .from('fiscal_metrics')
+      .upsert(payload, { onConflict: 'user_id' });
+
+    if (error) console.warn('[Store] upsertMetrics:', error.message);
+  } catch (e) {
+    console.warn('[Store] upsertMetrics:', e.message);
   }
+}
 
   async function saveDocumentRemote(doc) {
     if (!db || !usr?.id) return;

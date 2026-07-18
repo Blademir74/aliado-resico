@@ -61,94 +61,106 @@ const IntentClassifier = (() => {
   }
 
   async function askProxy(text) {
-    const response = await fetch('/api/gemini-proxy', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'x-aliado-debug': '1'
-      },
-      body: JSON.stringify({
-        message: text,
-        context: getContext()
-      })
-    });
+  const response = await fetch('/api/gemini-proxy', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify({
+      message: text,
+      context: getContext()
+    })
+  });
 
-    const data = await response.json().catch(() => ({}));
+  const data = await response.json().catch(() => ({}));
 
-    return {
-      httpOk: response.ok,
-      headers: {
-        aiStatus: response.headers.get('x-aliado-ai-status'),
-        fallbackReason: response.headers.get('x-aliado-fallback-reason')
-      },
-      data
-    };
+  return {
+    httpOk: response.ok,
+    headers: {
+      aiStatus: response.headers.get('x-aliado-ai-status'),
+      fallbackReason: response.headers.get('x-aliado-fallback-reason')
+    },
+    data
+  };
+}
+
+ function extractReply(data) {
+  if (typeof data?.reply === 'string' && data.reply.trim()) {
+    return data.reply.trim();
   }
 
-  function extractReply(data) {
-    if (typeof data?.reply === 'string' && data.reply.trim()) {
-      return data.reply.trim();
-    }
-
-    const rawReply = data?.raw?.candidates?.[0]?.content?.parts
-      ?.map(p => p?.text || '')
-      .join('\n')
-      .trim();
-
-    if (rawReply) return rawReply;
-
-    return '';
+  if (data?.respuestaFiscal || data?.fundamentoLegal || data?.diferenciacionIsrIva) {
+    return [
+      data?.respuestaFiscal || '',
+      data?.fundamentoLegal ? `Fundamento legal: ${data.fundamentoLegal}` : '',
+      data?.diferenciacionIsrIva ? `ISR vs IVA: ${data.diferenciacionIsrIva}` : ''
+    ].filter(Boolean).join('\n\n').trim();
   }
+
+  const rawReply = data?.raw?.candidates?.[0]?.content?.parts
+    ?.map(p => p?.text || '')
+    .join('\n')
+    .trim();
+
+  return rawReply || '';
+}
 
   async function process(text) {
-    const local = classifyLocal(text);
+  const local = classifyLocal(text);
 
-    try {
-      const { httpOk, headers, data } = await askProxy(text);
+  try {
+    const { httpOk, headers, data } = await askProxy(text);
+    const fallbackReason = data?.fallback_reason || headers?.fallbackReason || null;
 
-      const assistantReply =
-        extractReply(data) ||
-        'No pude generar una respuesta completa en este momento.';
+    let assistantReply =
+      extractReply(data) ||
+      'No pude generar una respuesta completa en este momento.';
 
-      if (!httpOk) {
-        console.warn('[Classifier] Proxy HTTP error:', data);
-      }
-
-      if (data?.is_fallback || headers?.aiStatus === 'fallback') {
-        console.warn('[Classifier] Gemini fallback:', {
-          reason: data?.fallback_reason || headers?.fallbackReason,
-          debug: data?.debug || null
-        });
-      }
-
-      return {
-        intent: local.intent,
-        confidence: local.confidence,
-        keywordsMatched: local.keywordsMatched,
-        assistantReply,
-        source: data?.is_fallback ? 'gemini-fallback' : (data?.source || 'gemini-proxy'),
-        isFallback: !!data?.is_fallback,
-        fallbackReason: data?.fallback_reason || headers?.fallbackReason || null,
-        debug: data?.debug || null,
-        raw: data
-      };
-    } catch (err) {
-      console.warn('[Classifier] Error consultando proxy:', err);
-
-      return {
-        intent: local.intent,
-        confidence: Math.max(0.5, local.confidence - 0.1),
-        keywordsMatched: local.keywordsMatched,
-        assistantReply:
-          'La consulta fue identificada, pero el proxy de IA no respondió correctamente. Regla base: en RESICO el ISR va sobre ingresos brutos y la anual debe revisarse con ingresos mixtos.',
-        source: 'local-fallback',
-        isFallback: true,
-        fallbackReason: 'proxy_exception',
-        debug: { message: err?.message || 'unknown_error' },
-        raw: { error: err?.message || 'unknown_error' }
-      };
+    if (fallbackReason === 'quota_exhausted') {
+      assistantReply =
+        'En este momento el servicio de IA del asistente está temporalmente limitado. ' +
+        'Tu consulta sí fue identificada correctamente. Regla base: en RESICO el ISR se calcula sobre ingresos brutos y el IVA requiere CFDI válido y gasto facturado para acreditamiento.';
     }
+
+    if (!httpOk) {
+      console.warn('[Classifier] Proxy HTTP error:', data);
+    }
+
+    if (data?.is_fallback || headers?.aiStatus === 'fallback') {
+      console.warn('[Classifier] Gemini fallback:', {
+        reason: fallbackReason,
+        debug: data?.debug || null
+      });
+    }
+
+    return {
+      intent: local.intent,
+      confidence: local.confidence,
+      keywordsMatched: local.keywordsMatched,
+      assistantReply,
+      source: data?.is_fallback ? 'gemini-fallback' : (data?.source || 'gemini-proxy'),
+      isFallback: !!data?.is_fallback,
+      fallbackReason,
+      debug: data?.debug || null,
+      raw: data
+    };
+  } catch (err) {
+    console.warn('[Classifier] Error consultando proxy:', err);
+
+    return {
+      intent: local.intent,
+      confidence: Math.max(0.5, local.confidence - 0.1),
+      keywordsMatched: local.keywordsMatched,
+      assistantReply:
+        'La consulta fue identificada, pero el proxy de IA no respondió correctamente. Regla base: en RESICO el ISR va sobre ingresos brutos y la anual debe revisarse con ingresos mixtos.',
+      source: 'local-fallback',
+      isFallback: true,
+      fallbackReason: 'proxy_exception',
+      debug: { message: err?.message || 'unknown_error' },
+      raw: { error: err?.message || 'unknown_error' }
+    };
   }
+}
 
   return { process };
 })();
