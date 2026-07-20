@@ -1,5 +1,5 @@
 const Store = (() => {
-  const KEY = 'aliado_resico_v8';
+  const KEY = 'aliado_resico_v10';
   const EVT = {};
   const DEFAULT_LIMIT = 3500000;
   const ALERT_80 = 2800000;
@@ -8,6 +8,7 @@ const Store = (() => {
   const MAX_CONVERSATIONS = 200;
   const MAX_DOCUMENTS = 100;
   const YEAR = 2026;
+
   const MONTHS = [
     'Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio',
     'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'
@@ -17,132 +18,6 @@ const Store = (() => {
   let usr = null;
   let rtChannel = null;
   let authListenerBound = false;
-
-  let fiscalMetricsMode = null;
-
-function metricModeCandidates() {
-  return [
-    {
-      mode: 'income_ytd',
-      select: 'user_id,income_ytd,total_processed,avg_confidence,updated_at',
-      mapRow(row) {
-        return {
-          incomeYTD: Number(row?.income_ytd || 0),
-          annualLimit: Number(state.fiscalMetrics?.annualLimit || DEFAULT_LIMIT),
-          riskLevel: calcRiskLevel(
-            Number(row?.income_ytd || 0),
-            Number(state.fiscalMetrics?.annualLimit || DEFAULT_LIMIT)
-          )
-        };
-      },
-      payload() {
-        return {
-          user_id: usr.id,
-          income_ytd: Number(state.incomeYTD || 0),
-          total_processed: Number(state.metrics?.totalProcessed || state.conversations.length || 0),
-          avg_confidence: Number(state.metrics?.avgConfidence || 0)
-        };
-      }
-    },
-    {
-      mode: 'cumulative_income',
-      select: 'user_id,cumulative_income,annual_limit,risk_level,updated_at',
-      mapRow(row) {
-        return {
-          incomeYTD: Number(row?.cumulative_income || 0),
-          annualLimit: Number(row?.annual_limit || DEFAULT_LIMIT),
-          riskLevel:
-            row?.risk_level ||
-            calcRiskLevel(
-              Number(row?.cumulative_income || 0),
-              Number(row?.annual_limit || DEFAULT_LIMIT)
-            )
-        };
-      },
-      payload() {
-        const annualLimit = Number(state.fiscalMetrics?.annualLimit || DEFAULT_LIMIT);
-        return {
-          user_id: usr.id,
-          cumulative_income: Number(state.incomeYTD || 0),
-          annual_limit: annualLimit,
-          risk_level: String(
-            state.fiscalMetrics?.riskLevel ||
-            calcRiskLevel(Number(state.incomeYTD || 0), annualLimit)
-          )
-        };
-      }
-    }
-  ];
-}
-
-async function detectFiscalMetricsMode() {
-  if (fiscalMetricsMode) return fiscalMetricsMode;
-  if (!db || !usr?.id) return 'income_ytd';
-
-  for (const candidate of metricModeCandidates()) {
-    try {
-      const { error } = await db
-        .from('fiscal_metrics')
-        .select(candidate.select)
-        .eq('user_id', usr.id)
-        .limit(1);
-
-      if (!error) {
-        fiscalMetricsMode = candidate.mode;
-        return fiscalMetricsMode;
-      }
-    } catch {}
-  }
-
-  fiscalMetricsMode = 'income_ytd';
-  return fiscalMetricsMode;
-}
-
-function getMetricCandidate(mode) {
-  return metricModeCandidates().find(c => c.mode === mode) || metricModeCandidates()[0];
-}
-
-async function readFiscalMetricsRow() {
-  const preferredMode = await detectFiscalMetricsMode();
-  const preferred = getMetricCandidate(preferredMode);
-
-  let result = await db
-    .from('fiscal_metrics')
-    .select(preferred.select)
-    .eq('user_id', usr.id)
-    .maybeSingle();
-
-  if (!result.error) {
-    return { ...result, mode: preferred.mode };
-  }
-
-  const fallbackMode = preferred.mode === 'income_ytd' ? 'cumulative_income' : 'income_ytd';
-  const fallback = getMetricCandidate(fallbackMode);
-
-  result = await db
-    .from('fiscal_metrics')
-    .select(fallback.select)
-    .eq('user_id', usr.id)
-    .maybeSingle();
-
-  if (!result.error) {
-    fiscalMetricsMode = fallback.mode;
-    return { ...result, mode: fallback.mode };
-  }
-
-  return { ...result, mode: preferred.mode };
-}
-
-function applyMetricRow(metricRes) {
-  if (!metricRes?.data) return;
-
-  const candidate = getMetricCandidate(metricRes.mode || fiscalMetricsMode || 'income_ytd');
-  const mapped = candidate.mapRow(metricRes.data);
-
-  state.incomeYTD = Number(mapped.incomeYTD || 0);
-  state.fiscalMetrics.annualLimit = Number(mapped.annualLimit || DEFAULT_LIMIT);
-  state.fiscalMetrics.riskLevel = mapped.riskLevel || 'SEGURO';
-}
 
   function buildMonthlyFolders(year = YEAR) {
     return MONTHS.map((monthName, idx) => ({
@@ -354,8 +229,19 @@ function applyMetricRow(metricRes) {
 
     state.fiscalMetrics.riskLevel = calcRiskLevel(
       Number(state.incomeYTD || 0),
-      Number(state.fiscalMetrics.annualLimit || DEFAULT_LIMIT)
+      DEFAULT_LIMIT
     );
+  }
+
+  function logSupabaseError(scope, error, payload = null) {
+    if (!error) return;
+    console.warn(`[Store] ${scope}:`, {
+      message: error.message || 'unknown_error',
+      details: error.details || null,
+      hint: error.hint || null,
+      code: error.code || null,
+      payload
+    });
   }
 
   function mapConversation(row) {
@@ -379,7 +265,7 @@ function applyMetricRow(metricRes) {
     return {
       id: row.id,
       file_name: row.file_name || 'archivo',
-      doc_type: normalizeDocumentType(row),
+      doc_type: row.doc_type || normalizeDocumentType(row),
       document_type: normalizeDocumentType(row),
       extracted_data: row.extracted_data || {},
       confidence: Number(row.confidence || 0),
@@ -532,6 +418,13 @@ function applyMetricRow(metricRes) {
     emit('carpetaUpdated', state.carpetaFiscal);
   }
 
+  function applyMetricRow(row) {
+    if (!row) return;
+    state.incomeYTD = Number(row.income_ytd || 0);
+    state.fiscalMetrics.annualLimit = DEFAULT_LIMIT;
+    state.fiscalMetrics.riskLevel = calcRiskLevel(Number(row.income_ytd || 0), DEFAULT_LIMIT);
+  }
+
   async function syncDown() {
     if (!db || !usr?.id) return;
 
@@ -544,12 +437,15 @@ function applyMetricRow(metricRes) {
           .order('created_at', { ascending: false })
           .limit(MAX_CONVERSATIONS),
 
-        
-          readFiscalMetricsRow(),
+        db
+          .from('fiscal_metrics')
+          .select('user_id,income_ytd,total_processed,avg_confidence,updated_at')
+          .eq('user_id', usr.id)
+          .maybeSingle(),
 
         db
           .from('documents')
-          .select('id,user_id,file_name,doc_type,document_type,file_url,extracted_data,confidence,safety_flag,validation_status,needs_review,source,created_at,updated_at')
+          .select('id,user_id,file_name,doc_type,document_type,file_url,folder_category,extracted_data,confidence,safety_flag,validation_status,needs_review,source,created_at,updated_at')
           .eq('user_id', usr.id)
           .order('created_at', { ascending: false })
           .limit(MAX_DOCUMENTS)
@@ -557,20 +453,20 @@ function applyMetricRow(metricRes) {
 
       if (!convRes.error && Array.isArray(convRes.data)) {
         state.conversations = convRes.data.map(mapConversation);
-      } else if (convRes.error) {
-        console.warn('[Store] conversations sync error:', convRes.error.message);
+      } else {
+        logSupabaseError('conversations sync error', convRes.error);
       }
 
-     if (!metricRes.error && metricRes.data) {
-        applyMetricRow(metricRes);
+      if (!metricRes.error && metricRes.data) {
+        applyMetricRow(metricRes.data);
       } else if (metricRes.error) {
-        console.warn('[Store] fiscal_metrics sync error:', metricRes.error.message);
+        logSupabaseError('fiscal_metrics sync error', metricRes.error);
       }
 
       if (!docRes.error && Array.isArray(docRes.data)) {
         state.documents = docRes.data.map(mapDocument);
-      } else if (docRes.error) {
-        console.warn('[Store] documents sync error:', docRes.error.message);
+      } else {
+        logSupabaseError('documents sync error', docRes.error);
       }
 
       recalc();
@@ -578,7 +474,7 @@ function applyMetricRow(metricRes) {
       persist();
       emitAll();
     } catch (e) {
-      console.warn('[Store] syncDown:', e.message);
+      console.warn('[Store] syncDown exception:', e?.message || e);
     }
   }
 
@@ -596,45 +492,32 @@ function applyMetricRow(metricRes) {
 
     try {
       const { error } = await db.from('conversations').upsert(payload, { onConflict: 'id' });
-      if (error) console.warn('[Store] upsertConversation:', error.message);
+      if (error) logSupabaseError('upsertConversation', error, payload);
     } catch (e) {
-      console.warn('[Store] upsertConversation:', e.message);
+      console.warn('[Store] upsertConversation exception:', e?.message || e, payload);
     }
   }
 
- async function upsertMetrics() {
-  if (!db || !usr?.id) return;
+  async function upsertMetrics() {
+    if (!db || !usr?.id) return;
 
-  const preferredMode = await detectFiscalMetricsMode();
-  const preferred = getMetricCandidate(preferredMode);
+    const payload = {
+      user_id: usr.id,
+      income_ytd: Number(state.incomeYTD || 0),
+      total_processed: Number(state.metrics?.totalProcessed || state.conversations.length || 0),
+      avg_confidence: Number(state.metrics?.avgConfidence || 0)
+    };
 
-  try {
-    let payload = preferred.payload();
-    let { error } = await db
-      .from('fiscal_metrics')
-      .upsert(payload, { onConflict: 'user_id' });
+    try {
+      const { error } = await db
+        .from('fiscal_metrics')
+        .upsert(payload, { onConflict: 'user_id' });
 
-    if (!error) return;
-
-    const fallbackMode = preferred.mode === 'income_ytd' ? 'cumulative_income' : 'income_ytd';
-    const fallback = getMetricCandidate(fallbackMode);
-
-    payload = fallback.payload();
-    const retry = await db
-      .from('fiscal_metrics')
-      .upsert(payload, { onConflict: 'user_id' });
-
-    if (!retry.error) {
-      fiscalMetricsMode = fallback.mode;
-      return;
+      if (error) logSupabaseError('upsertMetrics', error, payload);
+    } catch (e) {
+      console.warn('[Store] upsertMetrics exception:', e?.message || e, payload);
     }
-
-    console.warn('[Store] upsertMetrics:', retry.error.message);
-  } catch (e) {
-    console.warn('[Store] upsertMetrics:', e.message);
   }
-
-}
 
   async function saveDocumentRemote(doc) {
     if (!db || !usr?.id) return;
@@ -654,14 +537,15 @@ function applyMetricRow(metricRes) {
       needs_review: !!doc.needs_review || !!doc.safety_flag,
       source: doc.source || 'web_upload',
       file_url: doc.file_url || null,
+      folder_category: doc.folder_category || doc.extracted_data?.folder_category || null,
       updated_at: new Date().toISOString()
     };
 
     try {
       const { error } = await db.from('documents').upsert(payload, { onConflict: 'id' });
-      if (error) console.warn('[Store] saveDocumentRemote:', error.message);
+      if (error) logSupabaseError('saveDocumentRemote', error, payload);
     } catch (e) {
-      console.warn('[Store] saveDocumentRemote:', e.message);
+      console.warn('[Store] saveDocumentRemote exception:', e?.message || e, payload);
     }
   }
 
@@ -674,21 +558,9 @@ function applyMetricRow(metricRes) {
 
     rtChannel = db
       .channel(`aliado_rt_${usr.id}`)
-      .on(
-        'postgres_changes',
-        { event: '*', schema: 'public', table: 'conversations', filter: `user_id=eq.${usr.id}` },
-        () => syncDown()
-      )
-      .on(
-        'postgres_changes',
-        { event: '*', schema: 'public', table: 'fiscal_metrics', filter: `user_id=eq.${usr.id}` },
-        () => syncDown()
-      )
-      .on(
-        'postgres_changes',
-        { event: '*', schema: 'public', table: 'documents', filter: `user_id=eq.${usr.id}` },
-        () => syncDown()
-      )
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'conversations', filter: `user_id=eq.${usr.id}` }, () => syncDown())
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'fiscal_metrics', filter: `user_id=eq.${usr.id}` }, () => syncDown())
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'documents', filter: `user_id=eq.${usr.id}` }, () => syncDown())
       .subscribe(status => {
         if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
           setTimeout(() => subscribeRealtime(), 5000);
@@ -743,7 +615,7 @@ function applyMetricRow(metricRes) {
 
     try {
       const { data, error } = await db.auth.getSession();
-      if (error) console.warn('[Store] getSession:', error.message);
+      if (error) logSupabaseError('getSession', error);
 
       usr = data?.session?.user || null;
       window.APP_STATE.currentUser = usr;
@@ -755,48 +627,22 @@ function applyMetricRow(metricRes) {
 
       return db;
     } catch (e) {
-      console.warn('[Store] initSupabase:', e.message);
+      console.warn('[Store] initSupabase exception:', e?.message || e);
       return db;
     }
   }
 
-  function getState() {
-    return state;
-  }
+  function getState() { return state; }
+  function getMetrics() { return state.metrics; }
+  function getConversations() { return state.conversations; }
+  function getSettings() { return state.settings; }
+  function getDocuments() { return state.documents; }
+  function getSaludFiscal() { return state.saludFiscal; }
+  function getCarpetaFiscal() { return state.carpetaFiscal; }
+  function getDiagnostic() { return state.diagnostic; }
+  function getInvoiceProfiles() { return state.invoiceProfiles; }
 
-  function getMetrics() {
-    return state.metrics;
-  }
-
-  function getConversations() {
-    return state.conversations;
-  }
-
-  function getSettings() {
-    return state.settings;
-  }
-
-  function getDocuments() {
-    return state.documents;
-  }
-
-  function getSaludFiscal() {
-    return state.saludFiscal;
-  }
-
-  function getCarpetaFiscal() {
-    return state.carpetaFiscal;
-  }
-
-  function getDiagnostic() {
-    return state.diagnostic;
-  }
-
-  function getInvoiceProfiles() {
-    return state.invoiceProfiles;
-  }
-
-  function setState(partial) {
+  function setState(partial = {}) {
     state = {
       ...state,
       ...partial,
@@ -811,9 +657,7 @@ function applyMetricRow(metricRes) {
           partial.carpetaFiscal?.monthlyFolders || state.carpetaFiscal.monthlyFolders
         )
       },
-      invoiceProfiles: Array.isArray(partial.invoiceProfiles)
-        ? partial.invoiceProfiles
-        : state.invoiceProfiles,
+      invoiceProfiles: Array.isArray(partial.invoiceProfiles) ? partial.invoiceProfiles : state.invoiceProfiles,
       diagnostic: { ...state.diagnostic, ...(partial.diagnostic || {}) }
     };
 
@@ -851,10 +695,7 @@ function applyMetricRow(metricRes) {
 
   function updateIncome(amount) {
     state.incomeYTD = Number(amount || 0);
-    state.fiscalMetrics.riskLevel = calcRiskLevel(
-      state.incomeYTD,
-      Number(state.fiscalMetrics.annualLimit || DEFAULT_LIMIT)
-    );
+    state.fiscalMetrics.riskLevel = calcRiskLevel(state.incomeYTD, DEFAULT_LIMIT);
     persist();
     emitAll();
     upsertMetrics();
@@ -863,13 +704,9 @@ function applyMetricRow(metricRes) {
   function updateAnnualLimit(amount) {
     const nextLimit = Number(amount || DEFAULT_LIMIT);
     state.fiscalMetrics.annualLimit = nextLimit > 0 ? nextLimit : DEFAULT_LIMIT;
-    state.fiscalMetrics.riskLevel = calcRiskLevel(
-      state.incomeYTD,
-      state.fiscalMetrics.annualLimit
-    );
+    state.fiscalMetrics.riskLevel = calcRiskLevel(state.incomeYTD, state.fiscalMetrics.annualLimit);
     persist();
     emitAll();
-    upsertMetrics();
   }
 
   function updateSaludFiscal(data) {
@@ -930,9 +767,7 @@ function applyMetricRow(metricRes) {
     state.carpetaFiscal = {
       ...state.carpetaFiscal,
       ...data,
-      monthlyFolders: normalizeMonthlyFolders(
-        data?.monthlyFolders || state.carpetaFiscal.monthlyFolders
-      ),
+      monthlyFolders: normalizeMonthlyFolders(data?.monthlyFolders || state.carpetaFiscal.monthlyFolders),
       lastUpdated: new Date().toISOString()
     };
 

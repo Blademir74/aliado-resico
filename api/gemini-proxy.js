@@ -77,7 +77,11 @@ function sendJson(res, status, payload, headers = {}) {
 function parseBody(req) {
   if (req.body && typeof req.body === 'object') return req.body;
   if (typeof req.body === 'string') {
-    try { return JSON.parse(req.body); } catch { return null; }
+    try {
+      return JSON.parse(req.body);
+    } catch {
+      return null;
+    }
   }
   return null;
 }
@@ -106,9 +110,7 @@ function buildPrompt(body) {
   return [
     'Eres el Asistente Fiscal RESICO 2026 de Aliado RESICO.',
     JSON_CONTRACT,
-    '',
     lines.length ? `Contexto fiscal del usuario:\n${lines.join('\n')}` : '',
-    '',
     `Consulta del usuario: ${message}`
   ].filter(Boolean).join('\n\n');
 }
@@ -126,7 +128,7 @@ function renderReply(structured) {
 function fallbackStructured(reason) {
   if (reason === 'quota_exhausted') {
     return {
-      respuestaFiscal: 'El servicio de IA está temporalmente limitado, pero tu consulta sí fue recibida y puede seguirse atendiendo con reglas fiscales base.',
+      respuestaFiscal: 'El servicio de IA está temporalmente limitado, pero el sistema puede seguir operando con reglas fiscales base.',
       fundamentoLegal: 'Art. 113-E LISR para límite RESICO y Art. 17-K CFF para Buzón Tributario.',
       diferenciacionIsrIva: 'ISR RESICO se calcula sobre ingresos brutos efectivamente cobrados; el IVA solo se acredita con CFDI válido y gasto indispensable.',
       accionConcreta: 'Continúa capturando ingresos, valida tu Buzón Tributario y conserva CFDI de gastos para IVA.',
@@ -135,10 +137,10 @@ function fallbackStructured(reason) {
   }
 
   return {
-    respuestaFiscal: 'La IA no está disponible en este momento, pero la operación del sistema debe continuar con reglas fiscales base.',
+    respuestaFiscal: 'La IA no está disponible en este momento, pero la operación fiscal puede continuar en modo de contingencia.',
     fundamentoLegal: 'Art. 113-E LISR y Art. 17-K CFF.',
     diferenciacionIsrIva: 'ISR RESICO: ingresos brutos cobrados, sin deducción de gastos. IVA: acreditamiento solo con CFDI válido y gasto indispensable.',
-    accionConcreta: 'Monitorea tus ingresos acumulados, mantén activo el Buzón Tributario y conserva tus CFDI.',
+    accionConcreta: 'Monitorea tus ingresos acumulados y mantén vigente tu expediente fiscal.',
     solicitudDatoFaltante: ''
   };
 }
@@ -195,51 +197,23 @@ function normalizeStructured(obj, fallbackText = '') {
   }
 
   const normalized = {
-    respuestaFiscal: String(
-      obj.respuestaFiscal ||
-      obj.respuesta_fiscal ||
-      obj.respuesta ||
-      obj.reply ||
-      ''
-    ).trim(),
-    fundamentoLegal: String(
-      obj.fundamentoLegal ||
-      obj.fundamento_legal ||
-      obj.fundamento ||
-      ''
-    ).trim(),
-    diferenciacionIsrIva: String(
-      obj.diferenciacionIsrIva ||
-      obj.diferenciacion_ISR_IVA ||
-      obj.isrVsIva ||
-      ''
-    ).trim(),
-    accionConcreta: String(
-      obj.accionConcreta ||
-      obj.accion_concreta ||
-      obj.accion ||
-      ''
-    ).trim(),
-    solicitudDatoFaltante: String(
-      obj.solicitudDatoFaltante ||
-      obj.solicitud_dato_faltante ||
-      ''
-    ).trim()
+    respuestaFiscal: String(obj.respuestaFiscal || obj.respuesta_fiscal || obj.respuesta || obj.reply || '').trim(),
+    fundamentoLegal: String(obj.fundamentoLegal || obj.fundamento_legal || obj.fundamento || '').trim(),
+    diferenciacionIsrIva: String(obj.diferenciacionIsrIva || obj.diferenciacion_ISR_IVA || obj.isrVsIva || '').trim(),
+    accionConcreta: String(obj.accionConcreta || obj.accion_concreta || obj.accion || '').trim(),
+    solicitudDatoFaltante: String(obj.solicitudDatoFaltante || obj.solicitud_dato_faltante || '').trim()
   };
 
   if (!normalized.respuestaFiscal) {
     normalized.respuestaFiscal = fallbackText || fallbackStructured('empty_response').respuestaFiscal;
   }
-
   if (!normalized.fundamentoLegal) {
     normalized.fundamentoLegal = 'Art. 113-E LISR y, en su caso, Art. 17-K CFF.';
   }
-
   if (!normalized.diferenciacionIsrIva) {
     normalized.diferenciacionIsrIva =
       'ISR RESICO: sobre ingresos brutos cobrados, sin deducción de gastos. IVA: acreditamiento solo con CFDI válido y gasto indispensable.';
   }
-
   if (!normalized.accionConcreta) {
     normalized.accionConcreta = 'Confirma tus ingresos acumulados, tu Buzón Tributario y tus CFDI vigentes.';
   }
@@ -290,7 +264,7 @@ async function callWithRetry(doRequest) {
     return { ...result, retried: attempt > 0 };
   }
 
-  return { status: 500, data: {}, retried: false };
+  return { status: 500, data: {}, retried: false, provider: 'unknown', model: null };
 }
 
 function base64url(input) {
@@ -302,19 +276,12 @@ function base64url(input) {
 }
 
 function getServiceAccountEmail() {
-  return (
-    process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL ||
-    process.env.GOOGLE_CLIENT_EMAIL ||
-    ''
-  );
+  return process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL || process.env.GOOGLE_CLIENT_EMAIL || '';
 }
 
 function getServiceAccountPrivateKey() {
-  return (
-    process.env.GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY ||
-    process.env.GOOGLE_PRIVATE_KEY ||
-    ''
-  ).replace(/\\n/g, '\n');
+  return (process.env.GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY || process.env.GOOGLE_PRIVATE_KEY || '')
+    .replace(/\\n/g, '\n');
 }
 
 function canUseVertex() {
@@ -351,6 +318,7 @@ async function getGoogleAccessToken() {
   const signer = crypto.createSign('RSA-SHA256');
   signer.update(signingInput);
   signer.end();
+
   const signature = signer.sign(privateKey, 'base64')
     .replace(/\+/g, '-')
     .replace(/\//g, '_')
@@ -395,11 +363,11 @@ function buildGeminiPayload(prompt) {
 
 async function callAiStudio(prompt) {
   const apiKey = process.env.GEMINI_API_KEY;
-  if (!apiKey) {
-    throw new Error('missing_gemini_api_key');
-  }
+  if (!apiKey) throw new Error('missing_gemini_api_key');
 
-  const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${AI_STUDIO_MODEL}:generateContent?key=${apiKey}`;
+  const endpoint =
+    `https://generativelanguage.googleapis.com/v1beta/models/${AI_STUDIO_MODEL}:generateContent?key=${apiKey}`;
+
   const payload = buildGeminiPayload(prompt);
 
   return callWithRetry(async () => {
@@ -547,27 +515,30 @@ export default async function handler(req, res) {
     const rawText = extractGeminiText(data);
     const structured = parseStructuredModelOutput(rawText);
 
-    const payload = {
-      ok: true,
-      is_fallback: false,
-      fallback_reason: null,
-      provider,
-      model,
-      structured,
-      respuestaFiscal: structured.respuestaFiscal,
-      fundamentoLegal: structured.fundamentoLegal,
-      diferenciacionIsrIva: structured.diferenciacionIsrIva,
-      accionConcreta: structured.accionConcreta,
-      solicitudDatoFaltante: structured.solicitudDatoFaltante,
-      reply: renderReply(structured),
-      debug: debugEnabled ? { upstream_status: status, retried } : undefined,
-      raw: data
-    };
-
-    sendJson(res, 200, payload, {
-      'x-aliado-ai-status': 'ok',
-      'x-aliado-provider': provider
-    });
+    sendJson(
+      res,
+      200,
+      {
+        ok: true,
+        is_fallback: false,
+        fallback_reason: null,
+        provider,
+        model,
+        structured,
+        respuestaFiscal: structured.respuestaFiscal,
+        fundamentoLegal: structured.fundamentoLegal,
+        diferenciacionIsrIva: structured.diferenciacionIsrIva,
+        accionConcreta: structured.accionConcreta,
+        solicitudDatoFaltante: structured.solicitudDatoFaltante,
+        reply: renderReply(structured),
+        debug: debugEnabled ? { upstream_status: status, retried } : undefined,
+        raw: data
+      },
+      {
+        'x-aliado-ai-status': 'ok',
+        'x-aliado-provider': provider
+      }
+    );
   } catch (err) {
     const payload = fallbackPayload(
       'network_error',
