@@ -1,7 +1,10 @@
+import crypto from 'node:crypto';
+
 const ALEGRA_API_BASE = process.env.ALEGRA_API_BASE || 'https://api.alegra.com/api/v1';
-const ALEGRA_API_USER = process.env.ALEGRA_API_USER || '';
-const ALEGRA_API_TOKEN = process.env.ALEGRA_API_TOKEN || '';
+const ALEGRA_EMAIL = process.env.ALEGRA_EMAIL || process.env.ALEGRA_API_USER || '';
+const ALEGRA_TOKEN = process.env.ALEGRA_TOKEN || process.env.ALEGRA_API_TOKEN || '';
 const ALEGRA_WEBHOOK_SECRET = process.env.ALEGRA_WEBHOOK_SECRET || '';
+const SUPABASE_JWT_SECRET = process.env.SUPABASE_JWT_SECRET || '';
 
 const ALLOWED_ORIGINS = [
   'https://aliado-resico.vercel.app',
@@ -11,6 +14,16 @@ const ALLOWED_ORIGINS = [
   'http://127.0.0.1:3000',
   'http://localhost:5500',
   'http://127.0.0.1:5500'
+];
+
+// ── Régimen y Usos de CFDI válidos para RESICO PF (RMF 2026) ────────────────
+const RESICO_REGIMEN_FISCAL = '626'; // Régimen Simplificado de Confianza
+const VALID_USOS_CFDI_RESICO = [
+  'G01', 'G02', 'G03', // Adquisición de mercancías / Devoluciones / Gastos en general
+  'D01', 'D02', 'D03', 'D04', 'D05', 'D06', 'D07', 'D08', 'D09', 'D10', // Deducciones personales
+  'S01', // Sin efectos fiscales
+  'CP01', // Pagos
+  'CN01'  // Nómina
 ];
 
 function resolveOrigin(origin = '') {
@@ -32,71 +45,116 @@ function setHeaders(req, res) {
 function parseBody(req) {
   if (!req?.body) return {};
   if (typeof req.body === 'object') return req.body;
+  try { return JSON.parse(req.body); } catch { return {}; }
+}
+
+function okJson(res, body = {}, status = 200) { return res.status(status).json(body); }
+function fail(res, error, status = 400, extra = {}) { return res.status(status).json({ ok: false, error, ...extra }); }
+
+// ── Validación JWT de Supabase (bloqueo 401) ────────────────────────────────
+async function validateSupabaseJWT(authHeader) {
+  if (!authHeader || !authHeader.startsWith('Bearer ')) return null;
+  const token = authHeader.slice(7).trim();
+  if (!token) return null;
+
   try {
-    return JSON.parse(req.body);
-  } catch {
-    return {};
-  }
-}
+    const parts = token.split('.');
+    if (parts.length !== 3) return null;
+    const [encodedHeader, encodedPayload, encodedSig] = parts;
 
-function okJson(res, body = {}, status = 200) {
-  return res.status(status).json(body);
-}
+    if (SUPABASE_JWT_SECRET) {
+      const signingInput = `${encodedHeader}.${encodedPayload}`;
+      const expectedSig = crypto.createHmac('sha256', SUPABASE_JWT_SECRET)
+        .update(signingInput).digest('base64url');
+      const sigBuf = Buffer.from(encodedSig, 'base64url');
+      const expBuf = Buffer.from(expectedSig, 'base64url');
+      if (sigBuf.length !== expBuf.length || !crypto.timingSafeEqual(sigBuf, expBuf)) return null;
+    } else {
+      console.warn('[alegra-proxy] SUPABASE_JWT_SECRET no configurado. Verificación de firma OFF.');
+    }
 
-function fail(res, error, status = 400, extra = {}) {
-  return res.status(status).json({ ok: false, error, ...extra });
+    const payload = JSON.parse(Buffer.from(encodedPayload, 'base64url').toString('utf8'));
+    if (payload.exp && payload.exp < Math.floor(Date.now() / 1000)) return null;
+    if (payload.role === 'service_role') return null;
+
+    return { uid: payload.sub || null, email: payload.email || null };
+  } catch { return null; }
 }
 
 function requireEnv() {
-  return Boolean(ALEGRA_API_USER && ALEGRA_API_TOKEN);
+  return Boolean(ALEGRA_EMAIL && ALEGRA_TOKEN);
 }
 
 function basicAuthHeader() {
-  const raw = `${ALEGRA_API_USER}:${ALEGRA_API_TOKEN}`;
+  const raw = `${ALEGRA_EMAIL}:${ALEGRA_TOKEN}`;
   return `Basic ${Buffer.from(raw).toString('base64')}`;
 }
 
-async function alegraFetch(path, options = {}) {
-  const response = await fetch(`${ALEGRA_API_BASE}${path}`, {
-    method: options.method || 'GET',
-    headers: {
-      Authorization: basicAuthHeader(),
-      Accept: 'application/json',
-      'Content-Type': 'application/json',
-      ...(options.headers || {})
-    },
-    body: options.body ? JSON.stringify(options.body) : undefined
-  });
+// ── Retry exponencial (3 intentos: 500ms, 1500ms, 4000ms) ───────────────────
+async function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
 
-  const data = await response.json().catch(() => ({}));
-  return { response, data };
+async function alegraFetchWithRetry(path, options = {}, maxAttempts = 3) {
+  const delays = [500, 1500, 4000];
+  let lastError;
+
+  for (let attempt = 0; attempt < maxAttempts; attempt++) {
+    try {
+      const response = await fetch(`${ALEGRA_API_BASE}${path}`, {
+        method: options.method || 'GET',
+        headers: {
+          Authorization: basicAuthHeader(),
+          Accept: 'application/json',
+          'Content-Type': 'application/json',
+          ...(options.headers || {})
+        },
+        body: options.body ? JSON.stringify(options.body) : undefined
+      });
+
+      // Retry solo en errores transitorios (429, 502, 503, 504)
+      if ([429, 502, 503, 504].includes(response.status) && attempt < maxAttempts - 1) {
+        await sleep(delays[attempt]);
+        continue;
+      }
+
+      const data = await response.json().catch(() => ({}));
+      return { response, data };
+    } catch (e) {
+      lastError = e;
+      if (attempt < maxAttempts - 1) await sleep(delays[attempt]);
+    }
+  }
+  throw lastError || new Error('Fallo de red tras reintentos con Alegra.');
 }
 
-function sanitizeText(value, max = 255) {
-  return String(value || '').trim().slice(0, max);
-}
-
-function sanitizeRFC(value) {
-  return String(value || '').trim().toUpperCase();
-}
+function sanitizeText(value, max = 255) { return String(value || '').trim().slice(0, max); }
+function sanitizeRFC(value) { return String(value || '').trim().toUpperCase(); }
 
 function isValidRFC(value) {
   const clean = sanitizeRFC(value);
   return /^[A-Z&Ñ]{3,4}\d{6}[A-Z0-9]{3}$/.test(clean) || clean === 'XAXX010101000' || clean === 'XEXX010101000';
 }
-
 function isPMByRFC(rfc) {
   const clean = sanitizeRFC(rfc);
   return /^[A-Z&Ñ]{3}\d{6}[A-Z0-9]{3}$/.test(clean) && clean !== 'XAXX010101000' && clean !== 'XEXX010101000';
 }
 
+// ── Validación Fiscal: fuerza régimen 626 + Uso CFDI válido RMF 2026 ────────
 function validateInvoiceInput(input = {}) {
   const errors = [];
   if (!isValidRFC(input.rfc)) errors.push('RFC receptor inválido.');
   if (!sanitizeText(input.name)) errors.push('Nombre o razón social requerido.');
   if (!/^\d{5}$/.test(String(input.zip || '').trim())) errors.push('Código postal receptor inválido.');
+
+  // Régimen del EMISOR siempre forzado a 626 (RESICO), sin importar lo enviado
+  input.regimenFiscalEmisor = RESICO_REGIMEN_FISCAL;
+
   if (!sanitizeText(input.regimenFiscal)) errors.push('Régimen fiscal receptor requerido.');
-  if (!sanitizeText(input.usoCfdi)) errors.push('Uso CFDI requerido.');
+
+  const usoCfdi = sanitizeText(input.usoCfdi, 10).toUpperCase();
+  if (!VALID_USOS_CFDI_RESICO.includes(usoCfdi)) {
+    errors.push(`Uso CFDI '${usoCfdi}' no es compatible con RESICO conforme a la RMF 2026.`);
+  }
+
   if (!['PUE', 'PPD'].includes(String(input.metodoPago || '').trim().toUpperCase())) errors.push('Método de pago inválido.');
   if (!sanitizeText(input.formaPago, 10)) errors.push('Forma de pago requerida.');
   if (!sanitizeText(input.claveProdServ, 20)) errors.push('Clave producto/servicio requerida.');
@@ -109,13 +167,10 @@ function validateInvoiceInput(input = {}) {
 
 async function createOrFindContact(input) {
   const identification = sanitizeRFC(input.rfc);
-
   const searchPath = `/contacts?identification=${encodeURIComponent(identification)}`;
-  const { response: searchResp, data: searchData } = await alegraFetch(searchPath);
+  const { response: searchResp, data: searchData } = await alegraFetchWithRetry(searchPath);
 
-  if (searchResp.ok && Array.isArray(searchData) && searchData.length > 0) {
-    return searchData[0];
-  }
+  if (searchResp.ok && Array.isArray(searchData) && searchData.length > 0) return searchData[0];
 
   const payload = {
     name: sanitizeText(input.name),
@@ -126,15 +181,8 @@ async function createOrFindContact(input) {
     ignoreRepeated: true
   };
 
-  const { response, data } = await alegraFetch('/contacts', {
-    method: 'POST',
-    body: payload
-  });
-
-  if (!response.ok) {
-    throw new Error(data?.message || 'No se pudo crear el contacto en Alegra.');
-  }
-
+  const { response, data } = await alegraFetchWithRetry('/contacts', { method: 'POST', body: payload });
+  if (!response.ok) throw new Error(mapAlegraError(data, response.status));
   return data;
 }
 
@@ -155,82 +203,72 @@ function buildInvoicePayload(input, contactId) {
     date: new Date().toISOString().slice(0, 10),
     dueDate: new Date().toISOString().slice(0, 10),
     observations: [
+      `Régimen fiscal emisor: 626 (RESICO)`,
       `Uso CFDI: ${sanitizeText(input.usoCfdi, 20)}`,
       `Régimen fiscal receptor: ${sanitizeText(input.regimenFiscal, 30)}`,
       `CP receptor: ${sanitizeText(input.zip, 10)}`,
       `Método de pago: ${sanitizeText(input.metodoPago, 10)}`,
       `Forma de pago: ${sanitizeText(input.formaPago, 10)}`
     ].join(' | '),
-    items: [item]
+    items: [item],
+    status: String(input.metodoPago || '').toUpperCase() === 'PUE' ? 'open' : 'draft',
+    metadata: {
+      aliado_resico: true,
+      regimen_fiscal_emisor: RESICO_REGIMEN_FISCAL,
+      rfc_receptor: sanitizeRFC(input.rfc),
+      uso_cfdi: sanitizeText(input.usoCfdi, 20),
+      receptor_zip: sanitizeText(input.zip, 10),
+      metodo_pago: sanitizeText(input.metodoPago, 10),
+      forma_pago: sanitizeText(input.formaPago, 10),
+      iva_type: sanitizeText(input.ivaType, 10),
+      receptor_type: receptorPM ? 'PM' : 'PF'
+    }
   };
 
-  if (String(input.metodoPago || '').toUpperCase() === 'PUE') {
-    payload.status = 'open';
-  } else {
-    payload.status = 'draft';
-  }
-
-  payload.metadata = {
-    aliado_resico: true,
-    rfc_receptor: sanitizeRFC(input.rfc),
-    uso_cfdi: sanitizeText(input.usoCfdi, 20),
-    receptor_zip: sanitizeText(input.zip, 10),
-    metodo_pago: sanitizeText(input.metodoPago, 10),
-    forma_pago: sanitizeText(input.formaPago, 10),
-    iva_type: sanitizeText(input.ivaType, 10),
-    receptor_type: receptorPM ? 'PM' : 'PF'
-  };
-
-  if (receptorPM) {
-    payload.metadata.auto_retencion_isr_resico = '1.25';
-  }
-
+  if (receptorPM) payload.metadata.auto_retencion_isr_resico = '1.25';
   return payload;
 }
 
 async function createInvoice(input) {
   const contact = await createOrFindContact(input);
   const contactId = contact?.id;
-
-  if (!contactId) {
-    throw new Error('No se obtuvo id de contacto en Alegra.');
-  }
+  if (!contactId) throw new Error('No se obtuvo id de contacto en Alegra.');
 
   const payload = buildInvoicePayload(input, contactId);
-  const { response, data } = await alegraFetch('/invoices', {
-    method: 'POST',
-    body: payload
-  });
+  const { response, data } = await alegraFetchWithRetry('/invoices', { method: 'POST', body: payload });
+  if (!response.ok) throw new Error(mapAlegraError(data, response.status));
 
-  if (!response.ok) {
-    throw new Error(data?.message || 'No se pudo crear la factura en Alegra.');
-  }
-
-  return {
-    contact,
-    invoice: data,
-    payloadSent: payload
-  };
+  return { contact, invoice: data, payloadSent: payload };
 }
 
-async function createPayment(input = {}) {
-  const payload = {
-    invoice: Number(input.invoiceId),
-    date: input.date || new Date().toISOString().slice(0, 10),
-    amount: Number(input.amount || 0),
-    observations: sanitizeText(input.observations || 'Pago registrado desde Aliado RESICO')
-  };
+// ── Descarga de PDF / XML del CFDI timbrado ─────────────────────────────────
+async function getInvoiceDocument(invoiceId, format) {
+  const path = format === 'xml'
+    ? `/invoices/${invoiceId}/stamp/xml`
+    : `/invoices/${invoiceId}/stamp/pdf`;
 
-  const { response, data } = await alegraFetch('/payments', {
-    method: 'POST',
-    body: payload
-  });
+  const { response, data } = await alegraFetchWithRetry(path);
+  if (!response.ok) throw new Error(mapAlegraError(data, response.status));
+  return data; // Alegra regresa URL o base64 dependiendo del plan
+}
 
-  if (!response.ok) {
-    throw new Error(data?.message || 'No se pudo registrar el pago en Alegra.');
+// ── Mensajes pedagógicos de error del SAT ───────────────────────────────────
+function mapAlegraError(data, status) {
+  const rawMsg = String(data?.message || '').toLowerCase();
+
+  if (status === 401 || status === 403) {
+    return 'Error del SAT: Verifique la vigencia de su CSD o el RFC del receptor.';
   }
-
-  return data;
+  if (rawMsg.includes('rfc') || rawMsg.includes('identification')) {
+    return 'Error del SAT: RFC del receptor inválido o no reconocido. Verifique la Constancia de Situación Fiscal.';
+  }
+  if (rawMsg.includes('sello') || rawMsg.includes('certificate') || rawMsg.includes('csd')) {
+    return 'Error del SAT: Verifique la vigencia de su CSD (Certificado de Sello Digital).';
+  }
+  if (rawMsg.includes('uso') && rawMsg.includes('cfdi')) {
+    return 'Error del SAT: El Uso de CFDI no es compatible con el régimen RESICO (626) conforme a la RMF 2026.';
+  }
+  return data?.message || 'Error del SAT: Verifique la vigencia de su CSD o el RFC del receptor.';
 }
 
 function mapInvoiceSuccess(result, input) {
@@ -252,6 +290,7 @@ function mapInvoiceSuccess(result, input) {
       identification: sanitizeRFC(input.rfc)
     },
     fiscal: {
+      regimenFiscalEmisor: RESICO_REGIMEN_FISCAL,
       metodoPago: sanitizeText(input.metodoPago, 10),
       formaPago: sanitizeText(input.formaPago, 10),
       usoCfdi: sanitizeText(input.usoCfdi, 20),
@@ -265,32 +304,31 @@ function mapInvoiceSuccess(result, input) {
 export default async function handler(req, res) {
   setHeaders(req, res);
 
-  if (req.method === 'OPTIONS') {
-    return res.status(204).end();
-  }
+  if (req.method === 'OPTIONS') return res.status(204).end();
+  if (req.method !== 'POST') return fail(res, 'Method Not Allowed', 405);
 
-  if (req.method !== 'POST') {
-    return fail(res, 'Method Not Allowed', 405);
-  }
-
-  if (!requireEnv()) {
-    return fail(res, 'Alegra no está configurado en el servidor.', 503);
-  }
-
+  // ── Bloqueo 401: JWT obligatorio para todas las acciones excepto webhook_verify ──
   const body = parseBody(req);
   const action = sanitizeText(body.action, 50);
 
+  if (action !== 'webhook_verify') {
+    const user = await validateSupabaseJWT(req.headers.authorization);
+    if (!user) {
+      return fail(res, 'No autorizado. Se requiere sesión activa de Supabase.', 401);
+    }
+    req.aliadoUser = user;
+  }
+
+  if (!requireEnv()) return fail(res, 'Alegra no está configurado en el servidor.', 503);
+
   try {
     if (action === 'health') {
-      return okJson(res, { ok: true, provider: 'alegra', auth: 'basic' });
+      return okJson(res, { ok: true, provider: 'alegra', auth: 'basic', regimen_forzado: RESICO_REGIMEN_FISCAL });
     }
 
     if (action === 'create_contact') {
       const input = body.input || {};
-      if (!isValidRFC(input.rfc)) {
-        return fail(res, 'RFC inválido.');
-      }
-
+      if (!isValidRFC(input.rfc)) return fail(res, 'RFC inválido.');
       const contact = await createOrFindContact(input);
       return okJson(res, { ok: true, contact });
     }
@@ -298,31 +336,24 @@ export default async function handler(req, res) {
     if (action === 'create_invoice') {
       const input = body.input || {};
       const errors = validateInvoiceInput(input);
-
-      if (errors.length) {
-        return fail(res, 'Validación fallida.', 422, { details: errors });
-      }
+      if (errors.length) return fail(res, 'Validación fallida.', 422, { details: errors });
 
       const result = await createInvoice(input);
       return okJson(res, mapInvoiceSuccess(result, input));
     }
 
-    if (action === 'create_payment') {
-      const input = body.input || {};
-      if (!input.invoiceId || !(Number(input.amount) > 0)) {
-        return fail(res, 'invoiceId y amount son requeridos.');
-      }
-
-      const payment = await createPayment(input);
-      return okJson(res, { ok: true, payment });
+    if (action === 'get_pdf') {
+      const { invoiceId } = body.input || {};
+      if (!invoiceId) return fail(res, 'invoiceId requerido.');
+      const doc = await getInvoiceDocument(invoiceId, 'pdf');
+      return okJson(res, { ok: true, pdf: doc });
     }
 
-    if (action === 'emit_rep') {
-      return okJson(res, {
-        ok: false,
-        pending: true,
-        message: 'La emisión automática de REP queda preparada, pero falta mapear el payload exacto de tu cuenta/endpoint operativo de Alegra.'
-      });
+    if (action === 'get_xml') {
+      const { invoiceId } = body.input || {};
+      if (!invoiceId) return fail(res, 'invoiceId requerido.');
+      const doc = await getInvoiceDocument(invoiceId, 'xml');
+      return okJson(res, { ok: true, xml: doc });
     }
 
     if (action === 'webhook_verify') {
@@ -333,6 +364,6 @@ export default async function handler(req, res) {
 
     return fail(res, 'Acción no soportada.', 400);
   } catch (error) {
-    return fail(res, error?.message || 'Error interno en integración Alegra.', 500);
+    return fail(res, error?.message || 'Error del SAT: Verifique la vigencia de su CSD o el RFC del receptor.', 500);
   }
 }

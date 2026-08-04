@@ -174,6 +174,60 @@
     @media (max-width: 920px) {
       .grid-2 { grid-template-columns: 1fr; }
     }
+    .progress-fill {
+    height: 12px;
+    width: 0;
+    transition: width 0.4s ease, background-color 0.4s ease;
+  }
+
+  .progress-fill.risk-safe {
+    background: linear-gradient(90deg, #10b981, #34d399);
+  }
+
+  .progress-fill.risk-preventivo {
+    background: linear-gradient(90deg, #f59e0b, #fbbf24);
+  }
+
+  .progress-fill.risk-alto {
+    background: linear-gradient(90deg, #f97316, #fb923c);
+  }
+
+  .progress-fill.risk-expulsion {
+    background: linear-gradient(90deg, #ef4444, #dc2626);
+    animation: pulse-danger 1.5s ease-in-out infinite;
+  }
+
+  @keyframes pulse-danger {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.7; }
+  }
+
+  .badge-safe {
+    background: #10b981;
+    color: white;
+  }
+
+  .badge-warning {
+    background: #f59e0b;
+    color: #111827;
+  }
+
+  .badge-danger {
+    background: #f97316;
+    color: white;
+  }
+
+  .badge-critical {
+    background: #ef4444;
+    color: white;
+    animation: pulse-danger 1.2s ease-in-out infinite;
+  }
+
+  #efirma-alert-banner,
+  #buzon-audit-alert {
+    font-size: 13px;
+    line-height: 1.5;
+  }
   </style>
 </head>
 <body>
@@ -280,7 +334,7 @@
           </div>
 
           <div class="progress-bar-bg" style="margin:16px 0;">
-            <div id="income-progress-fill" class="progress-fill"></div>
+            <div id="income-progress-fill" class="progress-fill risk-safe"></div>
           </div>
 
           <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:16px;">
@@ -449,26 +503,74 @@
       </section>
 
       <section id="documents-tab" class="tab-view" role="tabpanel" hidden>
-        <div class="grid-2">
-          <article class="glass card">
-            <h3 style="margin-top:0;">Procesar Documento Fiscal</h3>
-            <p style="color:#94a3b8;">Sube una factura, ticket o CFDI para extraer RFC, subtotal, IVA, total, fecha y folio.</p>
-            <input id="file-input" type="file" accept="image/*,.pdf,application/pdf" />
-            <button id="ocr-process-btn" class="primary-btn" style="margin-top:12px;">Analizar documento</button>
-            <div id="ocr-output" style="margin-top:12px;color:#94a3b8;">
-              <p>El IVA desglosado es indispensable para acreditamiento; el ISR RESICO no deduce este gasto.</p>
-            </div>
-          </article>
+        <div class="card" id="ocr-capture-card">
+          <h3>Procesar Documento Fiscal</h3>
+          <p class="text-muted">
+            Escanea con tu cámara o sube una factura, ticket o CFDI para extraer
+            RFC, subtotal, IVA, total, fecha y folio.
+          </p>
+          <p class="text-muted" style="font-size:13px;">
+            El IVA desglosado es indispensable para acreditamiento; el ISR RESICO no deduce este gasto.
+          </p>
 
-          <article class="glass card">
-            <h3 style="margin-top:0;">Validador RFC Deep-Dive</h3>
-            <div style="display:flex;gap:8px;">
-              <input type="text" id="rfc-input" placeholder="Ej. GOPE820731RFA" maxlength="13" />
-              <button id="rfc-validate-btn" class="primary-btn">Validar</button>
-            </div>
-            <div id="rfc-result" style="margin-top:12px;"></div>
-            <p style="font-size:12px;color:#64748b;">RFC genérico nacional: XAXX010101000 · Extranjero: XEXX010101000 · EFOS via watchlist configurable.</p>
-          </article>
+          <!-- Input dual: cámara en móvil, selector de archivo en desktop -->
+          <div class="ocr-input-row" style="display:flex;gap:10px;flex-wrap:wrap;margin:12px 0;">
+            <label for="ocr-file-input" class="btn-scan-primary"
+                  style="display:flex;align-items:center;gap:8px;padding:12px 20px;
+                          background:#10b981;color:#fff;border-radius:8px;cursor:pointer;
+                          font-weight:600;flex:1;justify-content:center;min-width:160px;">
+              📷 Escanear con cámara
+            </label>
+            <input
+              type="file"
+              id="ocr-file-input"
+              accept="image/*,application/pdf"
+              capture="environment"
+              style="display:none;"
+            />
+
+            <label for="ocr-file-input-gallery" class="btn-scan-secondary"
+                  style="display:flex;align-items:center;gap:8px;padding:12px 20px;
+                          background:transparent;border:1px solid #10b981;color:#10b981;
+                          border-radius:8px;cursor:pointer;font-weight:600;flex:1;
+                          justify-content:center;min-width:160px;">
+              📁 Subir desde galería/PC
+            </label>
+            <input
+              type="file"
+              id="ocr-file-input-gallery"
+              accept="image/*,application/pdf"
+              style="display:none;"
+            />
+          </div>
+
+          <!-- Vista previa del archivo seleccionado -->
+          <div id="ocr-file-preview" hidden style="margin:10px 0;font-size:13px;color:#94a3b8;">
+            Archivo seleccionado: <span id="ocr-file-name"></span>
+          </div>
+
+          <button id="ocr-analyze-btn" class="btn-primary" style="width:100%;">
+            Analizar con IA
+          </button>
+
+          <!-- Indicador visual de procesamiento IA (oculto por defecto) -->
+          <div id="ocr-processing-indicator" hidden
+              style="display:flex;align-items:center;gap:10px;margin-top:14px;
+                      padding:14px;background:rgba(16,185,129,0.1);border:1px solid #10b981;
+                      border-radius:8px;">
+            <div class="ocr-spinner" style="width:20px;height:20px;border:3px solid #10b981;
+                        border-top-color:transparent;border-radius:50%;
+                        animation:ocr-spin 0.8s linear infinite;"></div>
+            <span style="color:#10b981;font-weight:600;">
+              🧠 Procesando con IA... Extrayendo RFC, montos e IVA
+            </span>
+          </div>
+
+          <style>
+            @keyframes ocr-spin { to { transform: rotate(360deg); } }
+          </style>
+
+          <div id="ocr-result-output" style="margin-top:14px;"></div>
         </div>
       </section>
 

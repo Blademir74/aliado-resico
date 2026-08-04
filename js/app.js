@@ -10,6 +10,8 @@ const App = (() => {
   const BUZON_MULTA = 10260;
   const EFIRMA_YEARS = 4;
   const WIZARD_MAX_STEPS = 5;
+  const EFIRMA_ALERT_90_DAYS = 90;
+  const EFIRMA_ALERT_30_DAYS = 30;
 
   let booted = false;
   let wizardStep = 1;
@@ -301,72 +303,124 @@ const App = (() => {
   }
 
   function renderHealth() {
-    const salud = window.Store?.getSaludFiscal?.() || {};
+    const salud   = window.Store?.getSaludFiscal?.()   || {};
     const carpeta = window.Store?.getCarpetaFiscal?.() || {};
 
     const buzonStatus = byId('buzon-status');
     const efirmaStatus = byId('efirma-status');
-    const efirmaDays = byId('efirma-days');
+    const efirmaDays   = byId('efirma-days');
     const opinionStatus = byId('opinion-status');
-    const healthAlert = byId('health-alert');
+    const healthAlert  = byId('health-alert');
 
-    if (buzonStatus) {
-      buzonStatus.textContent =
-        salud.buzonTributarioActivo === true ? 'Activo' :
-        salud.buzonTributarioActivo === false ? 'Inactivo' :
-        'Verificando...';
-      buzonStatus.style.color =
-        salud.buzonTributarioActivo === false ? '#ef4444' :
-        salud.buzonTributarioActivo === true ? '#10b981' : '#f59e0b';
-    }
+    // ── Activación inteligente de Salud Fiscal desde documentos de Carpeta ──
+    // Si hay documentos de e.firma cargados, pasar de 'Verificando...' a datos reales.
+    // Art. 17-D CFF: e.firma vigente; Art. 17-K CFF: Buzón Tributario activo.
+    const hasEFirmaDoc   = (carpeta.summary?.efirma || 0) > 0;
+    const hasOpinionDoc  = carpeta.opinionStatus === 'cargada';
+    const hasConstanciaDoc = carpeta.constanciaStatus === 'actualizada';
 
+    // Derivar éxpiry y days desde la carpeta si no hay estado explícito
     const expiry = salud.eFirmaExpiry || carpeta.efirmaExpiry;
-    const days = computeDaysRemaining(expiry);
+    const days   = computeDaysRemaining(expiry);
 
+    // Búzón Tributario (Art. 17-K CFF)
+    if (buzonStatus) {
+      let buzonText  = 'Verificando...';
+      let buzonColor = '#f59e0b';
+
+      if (salud.buzonTributarioActivo === true) {
+        buzonText  = 'Activo';
+        buzonColor = '#10b981';
+      } else if (salud.buzonTributarioActivo === false) {
+        buzonText  = 'Inactivo — Riesgo multa Art. 17-K CFF';
+        buzonColor = '#ef4444';
+      } else if (hasConstanciaDoc || hasOpinionDoc) {
+        // Si hay documentos de constancia/opinión cargados, inferir actividad básica
+        buzonText  = 'Con documentos fiscales cargados';
+        buzonColor = '#38bdf8';
+      }
+
+      buzonStatus.textContent = buzonText;
+      buzonStatus.style.color = buzonColor;
+    }
+
+    // e.firma (Art. 17-D CFF)
     if (efirmaStatus) {
-      efirmaStatus.textContent =
-        salud.eFirmaVigente === true ? 'VIGENTE' :
-        salud.eFirmaVigente === false ? 'VENCIDA' :
-        'Verificando...';
-      efirmaStatus.style.color =
-        salud.eFirmaVigente === false ? '#ef4444' :
-        salud.eFirmaVigente === true ? '#10b981' : '#f59e0b';
+      let efirmaText  = 'Verificando...';
+      let efirmaColor = '#f59e0b';
+
+      if (salud.eFirmaVigente === true || (hasEFirmaDoc && days !== null && days > 0)) {
+        efirmaText  = 'VIGENTE';
+        efirmaColor = '#10b981';
+      } else if (salud.eFirmaVigente === false || (days !== null && days <= 0)) {
+        efirmaText  = 'VENCIDA — Tramitar renovación SAT';
+        efirmaColor = '#ef4444';
+      } else if (hasEFirmaDoc && days === null) {
+        // Archivo cargado pero sin fecha de vencimiento detectada
+        efirmaText  = 'Cargada — Verificar fecha de vencimiento';
+        efirmaColor = '#f59e0b';
+      }
+
+      efirmaStatus.textContent = efirmaText;
+      efirmaStatus.style.color = efirmaColor;
     }
 
+    // Días restantes de e.firma
     if (efirmaDays) {
-      efirmaDays.textContent =
-        typeof days === 'number'
-          ? `${days} día(s) restantes`
-          : '-- días restantes';
+      if (typeof days === 'number' && hasEFirmaDoc) {
+        efirmaDays.textContent = days > 0
+          ? `${days} día(s) restantes (Art. 17-D CFF)`
+          : 'VENCIDA — Renueva en portal SAT';
+        efirmaDays.style.color = days > 30 ? '#10b981' : days > 0 ? '#f59e0b' : '#ef4444';
+      } else if (hasEFirmaDoc) {
+        efirmaDays.textContent = 'Archivo cargado — fecha no detectada';
+        efirmaDays.style.color = '#f59e0b';
+      } else {
+        efirmaDays.textContent = '-- días restantes';
+        efirmaDays.style.color = '#94a3b8';
+      }
     }
 
+    // Opinión de cumplimiento
     if (opinionStatus) {
-      const opinionLoaded = carpeta.opinionStatus === 'cargada';
-      opinionStatus.textContent =
-        opinionLoaded ? 'Cargada' :
-        salud.alertLevel === 'danger' ? 'Revisar urgente' :
-        'No consultada';
-      opinionStatus.style.color =
-        opinionLoaded ? '#10b981' :
+      const loaded = hasOpinionDoc;
+      opinionStatus.textContent = loaded ? 'Cargada' :
+        salud.alertLevel === 'danger' ? 'Revisar urgente' : 'No consultada';
+      opinionStatus.style.color = loaded ? '#10b981' :
         salud.alertLevel === 'danger' ? '#ef4444' : '#94a3b8';
     }
 
+    // Panel de alertas de salud fiscal
     if (healthAlert) {
       const messages = [];
       if (salud.buzonTributarioActivo === false) {
-        messages.push(`Buzón Tributario inactivo: riesgo de multa de $${BUZON_MULTA.toLocaleString('es-MX')} MXN.`);
+        messages.push(`Buzón Tributario inactivo: riesgo de multa de $${BUZON_MULTA.toLocaleString('es-MX')} MXN (Art. 17-K CFF).`);
       }
-      if (salud.eFirmaVigente === false) {
-        messages.push('Tu e.firma aparece vencida.');
+      if (salud.eFirmaVigente === false || (days !== null && days <= 0)) {
+        messages.push('Tu e.firma está vencida. Renueva en el portal SAT (Art. 17-D CFF).');
       } else if (typeof days === 'number' && days > 0 && days <= 30) {
-        messages.push(`Tu e.firma vence en ${days} día(s).`);
+        messages.push(`Tu e.firma vence en ${days} día(s). Renueva antes del vencimiento (Art. 17-D CFF).`);
       }
 
       healthAlert.hidden = messages.length === 0;
-      if (messages.length) {
-        healthAlert.textContent = messages.join(' ');
-      }
+      if (messages.length) healthAlert.textContent = messages.join(' ');
     }
+  }
+
+    function renderHealthExtended() {
+    const carpeta = window.Store?.getCarpetaFiscal?.();
+    const expiry = window.Store?.getSaludFiscal?.()?.eFirmaExpiry || carpeta?.efirmaExpiry;
+
+    // Alerta de vigencia de e.firma (90/30 días)
+    const efirmaAlert = computeEFirmaExpiryAlert(
+      expiry && expiry !== 'pendiente'
+        ? addYears(new Date(expiry), -EFIRMA_YEARS).toISOString() // reconstruye fecha de emisión aproximada
+        : null
+    );
+    renderEFirmaAlertBanner(efirmaAlert);
+
+    // Auditoría permanente de Buzón Tributario
+    renderBuzonAuditAlert();
   }
 
   function renderFeed() {
@@ -426,49 +480,82 @@ const App = (() => {
     `).join('');
   }
 
-  function renderCarpetaFiscal() {
-    const carpeta = window.Store?.getCarpetaFiscal?.();
-    const summaryEl = byId('carpeta-summary');
-    const monthsEl = byId('carpeta-months');
-    if (!summaryEl || !monthsEl || !carpeta) return;
+  const CATEGORY_LABELS = {
+  ingresos:   { label: '💰 Ingresos',              color: '#10b981' },
+  gastos_iva: { label: '🧾 Gastos (IVA)',          color: '#3b82f6' },
+  efirma:     { label: '🔐 e.firma SAT',           color: '#8b5cf6' },
+  constancia: { label: '📄 Constancia Fiscal',     color: '#f59e0b' },
+  opinion:    { label: '✅ Opinión de Cumplimiento', color: '#06b6d4' }
+};
 
-    const totals = carpeta.summary || {
-      total: 0,
-      ingresos: 0,
-      gastos_iva: 0,
-      efirma: 0,
-      constancia: 0,
-      opinion: 0
-    };
+function renderCarpetaFiscal() {
+  const container = byId('carpeta-fiscal-content');
+  if (!container) return;
 
-    summaryEl.innerHTML = `
-      <div class="health-grid">
-        <div class="health-item"><div style="font-size:12px;color:#94a3b8;">Total documentos</div><div style="font-size:22px;color:#e2e8f0;font-weight:700;">${Number(totals.total || 0)}</div></div>
-        <div class="health-item"><div style="font-size:12px;color:#94a3b8;">Ingresos</div><div style="font-size:22px;color:#e2e8f0;font-weight:700;">${Number(totals.ingresos || 0)}</div></div>
-        <div class="health-item"><div style="font-size:12px;color:#94a3b8;">Gastos IVA</div><div style="font-size:22px;color:#e2e8f0;font-weight:700;">${Number(totals.gastos_iva || 0)}</div></div>
-        <div class="health-item"><div style="font-size:12px;color:#94a3b8;">e.firma</div><div style="font-size:22px;color:#e2e8f0;font-weight:700;">${Number(totals.efirma || 0)}</div></div>
-        <div class="health-item"><div style="font-size:12px;color:#94a3b8;">Constancia</div><div style="font-size:22px;color:#e2e8f0;font-weight:700;">${Number(totals.constancia || 0)}</div></div>
-        <div class="health-item"><div style="font-size:12px;color:#94a3b8;">Opinión</div><div style="font-size:22px;color:#e2e8f0;font-weight:700;">${Number(totals.opinion || 0)}</div></div>
-      </div>
-      <div style="margin-top:16px;color:#94a3b8;font-size:13px;">
-        Última actualización: ${esc(carpeta.lastUpdated || '--')}
+  const carpeta = window.Store?.getCarpetaFiscal?.();
+  if (!carpeta) return;
+
+  const currentMonthIdx = new Date().getMonth();
+
+  // Tabs de meses (Enero-Diciembre 2026)
+  const monthTabs = carpeta.monthlyFolders.map((folder, idx) => {
+    const isActive = idx === (window.__carpetaActiveMonth ?? currentMonthIdx);
+    return `
+      <button class="carpeta-month-tab" data-month-idx="${idx}"
+              style="padding:8px 14px;border-radius:6px;border:1px solid ${isActive ? '#10b981' : '#334155'};
+                     background:${isActive ? 'rgba(16,185,129,0.15)' : 'transparent'};
+                     color:${isActive ? '#10b981' : '#94a3b8'};cursor:pointer;font-size:13px;
+                     white-space:nowrap;">
+        ${folder.monthName} ${folder.total > 0 ? `<span style="opacity:.7;">(${folder.total})</span>` : ''}
+      </button>
+    `;
+  }).join('');
+
+  const activeIdx = window.__carpetaActiveMonth ?? currentMonthIdx;
+  const activeFolder = carpeta.monthlyFolders[activeIdx];
+
+  const categoryBlocks = Object.entries(CATEGORY_LABELS).map(([key, meta]) => {
+    const docs = activeFolder?.categories?.[key] || [];
+    const items = docs.length
+      ? docs.map(d => `
+          <div style="display:flex;justify-content:space-between;align-items:center;
+                      padding:8px 10px;border-bottom:1px solid #1e293b;font-size:13px;">
+            <span>${esc(d.file_name)}</span>
+            <span style="color:${d.needs_review ? '#f59e0b' : '#10b981'};font-size:11px;">
+              ${d.needs_review ? '⚠️ Revisar' : '✅ OK'}
+            </span>
+          </div>
+        `).join('')
+      : `<p style="color:#64748b;font-size:12px;padding:8px 10px;">Sin documentos este mes.</p>`;
+
+    return `
+      <div style="border:1px solid #1e293b;border-radius:8px;margin-bottom:10px;overflow:hidden;">
+        <div style="padding:8px 12px;background:rgba(255,255,255,0.03);
+                    border-left:3px solid ${meta.color};font-weight:600;font-size:13px;">
+          ${meta.label} <span style="opacity:.6;">(${docs.length})</span>
+        </div>
+        ${items}
       </div>
     `;
+  }).join('');
 
-    const folders = Array.isArray(carpeta.monthlyFolders) ? carpeta.monthlyFolders : [];
-    monthsEl.innerHTML = folders.map(folder => `
-      <details style="background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.08);border-radius:14px;padding:14px;margin-bottom:12px;" ${folder.monthNumber === (new Date().getMonth() + 1) ? 'open' : ''}>
-        <summary style="cursor:pointer;color:#e2e8f0;font-weight:700;">${esc(folder.monthName)} ${esc(folder.year)} · ${folder.total} documento(s)</summary>
-        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:14px;margin-top:14px;">
-          <div><div style="color:#10b981;font-weight:700;margin-bottom:8px;">Ingresos (${folder.categories.ingresos.length})</div>${renderCategoryList(folder.categories.ingresos, 'Sin documentos de ingreso.')}</div>
-          <div><div style="color:#38bdf8;font-weight:700;margin-bottom:8px;">Gastos IVA acreditable (${folder.categories.gastos_iva.length})</div>${renderCategoryList(folder.categories.gastos_iva, 'Sin gastos acreditables.')}</div>
-          <div><div style="color:#f59e0b;font-weight:700;margin-bottom:8px;">e.firma (${folder.categories.efirma.length})</div>${renderCategoryList(folder.categories.efirma, 'Sin archivos de e.firma.')}</div>
-          <div><div style="color:#a78bfa;font-weight:700;margin-bottom:8px;">Constancia (${folder.categories.constancia.length})</div>${renderCategoryList(folder.categories.constancia, 'Sin constancia cargada.')}</div>
-          <div><div style="color:#f472b6;font-weight:700;margin-bottom:8px;">Opinión (${folder.categories.opinion.length})</div>${renderCategoryList(folder.categories.opinion, 'Sin opinión cargada.')}</div>
-        </div>
-      </details>
-    `).join('');
-  }
+  container.innerHTML = `
+    <div style="display:flex;gap:6px;overflow-x:auto;padding-bottom:8px;margin-bottom:14px;">
+      ${monthTabs}
+    </div>
+    <h4 style="margin:0 0 10px;color:#e2e8f0;">
+      ${activeFolder?.monthName || ''} ${carpeta.year} — ${activeFolder?.total || 0} documentos
+    </h4>
+    ${categoryBlocks}
+  `;
+
+  container.querySelectorAll('.carpeta-month-tab').forEach(btn => {
+    btn.addEventListener('click', () => {
+      window.__carpetaActiveMonth = Number(btn.getAttribute('data-month-idx'));
+      renderCarpetaFiscal();
+    });
+  });
+}
 
   function normalizeAssistantReply(reply) {
     if (!reply) return 'Sin respuesta.';
@@ -636,114 +723,164 @@ const App = (() => {
     return true;
   }
 
-  function evaluateDiagnostic() {
-    const income = Number(byId('wiz-income')?.value || 0);
-    const mixtos = byId('wiz-mixtos')?.value === 'si';
-    const socioPM = byId('wiz-socio')?.value === 'si';
-    const salarios = Number(byId('wiz-salarios')?.value || 0);
-    const intereses = Number(byId('wiz-intereses')?.value || 0);
-    const cfdiGlobal = byId('wiz-cfdi')?.value === 'si';
-    const buzonActivo = byId('wiz-buzon')?.value === 'si';
+function computeWizardDiagnosis(inputs) {
+  const income    = Number(inputs.income    || 0);
+  const salarios  = Number(inputs.salarios  || 0);
+  const intereses = Number(inputs.intereses || 0);
 
-    const anualPorSalarios = mixtos && salarios > MIXTOS_LIMIT;
-    const anualPorIntereses = intereses > INTERESES_LIMIT;
-    const anualObligatoria = anualPorSalarios || anualPorIntereses || socioPM;
-    const riesgoMulta = !cfdiGlobal;
-    const riesgoBuzon = !buzonActivo;
+  // ── Regla Art. 113-F LISR: Declaración Anual Obligatoria ──────────────
+  // Condición 1: Ingresos por salarios/sueldos > $400,000 MXN
+  const superaSalarios  = salarios  > MIXTOS_LIMIT;
+  // Condición 2: Intereses reales acreditables > $100,000 MXN
+  const superaIntereses = intereses > INTERESES_LIMIT;
+  // Condición 3: Socio de PM o ingresos mixtos (por definición obliga anual)
+  const ingresosMixtos  = !!inputs.socioPM || !!inputs.mixtos;
 
-    let riskLevel = 'SEGURO';
-    if (income >= ALERT_94) riskLevel = 'EXPULSION';
-    else if (income >= ALERT_90) riskLevel = 'RIESGO_ALTO';
-    else if (income >= ALERT_80) riskLevel = 'PREVENTIVO';
+  const anualObligatoria = superaSalarios || superaIntereses || ingresosMixtos;
 
-    const notas = [];
-    if (anualPorSalarios) notas.push('Salarios mayores a $400,000 MXN: declaración anual obligatoria.');
-    if (anualPorIntereses) notas.push('Intereses reales mayores a $100,000 MXN: declaración anual obligatoria.');
-    if (socioPM) notas.push('Ser socio de Persona Moral requiere revisión de compatibilidad.');
-    if (riesgoBuzon) notas.push(`Buzón inactivo: alerta roja por multa de $${BUZON_MULTA.toLocaleString('es-MX')} MXN.`);
+  // ── Alerta Art. 17-K CFF: Buzón Tributario ────────────────────────────
+  const riesgoBuzon = inputs.buzonActivo === false || inputs.buzonActivo === 'false';
 
-    let recomendacion = 'Mantén monitoreo mensual de ingresos, CFDI y Salud Fiscal.';
-    if (riskLevel === 'PREVENTIVO') recomendacion = 'Semáforo amarillo: ya alcanzaste el 80% del límite anual RESICO.';
-    if (riskLevel === 'RIESGO_ALTO') recomendacion = 'Semáforo naranja: ya superaste el 90% del límite; revisa planeación de cierre.';
-    if (riskLevel === 'EXPULSION') recomendacion = 'Semáforo rojo: ya estás en 94% o más del límite; riesgo de salida de RESICO.';
-    if (anualObligatoria) recomendacion += ' Debes preparar declaración anual con soporte documental.';
-    if (riesgoMulta) recomendacion += ' Emite CFDI faltantes cuanto antes.';
-    if (riesgoBuzon) recomendacion += ' Activa tu Buzón Tributario hoy mismo.';
+  // ── Alerta de proximidad al límite RESICO (Art. 113-E LISR) ───────────
+  const riskLevel   = calcRiskLevelWizard(income);
+  const riesgoMulta = riskLevel === 'EXPULSION' || riskLevel === 'RIESGO_ALTO';
 
-    return {
-      income,
-      mixtos,
-      socioPM,
-      salarios,
-      intereses,
-      cfdiGlobal,
-      buzonActivo,
-      anualObligatoria,
-      anualPorSalarios,
-      anualPorIntereses,
-      riesgoMulta,
-      riesgoBuzon,
-      riskLevel,
-      notas,
-      recomendacion,
-      pedagogia: 'ISR RESICO se calcula sobre ingresos brutos efectivamente cobrados; el IVA requiere CFDI válido y gastos facturados para acreditamiento.'
-    };
+  // ── Construcción de la recomendación pedagógica ────────────────────────
+  const recomendaciones = [];
+
+  if (anualObligatoria) {
+    recomendaciones.push(
+      '📋 DECLARACIÓN ANUAL OBLIGATORIA (Art. 113-F LISR): ' +
+      'La combinación de ingresos mixtos en RESICO obliga a presentar la declaración anual, ' +
+      'aunque estés en el régimen simplificado. ' +
+      (superaSalarios  ? `Tus ingresos por salarios ($${salarios.toLocaleString('es-MX')} MXN) superan el umbral de $400,000 MXN. ` : '') +
+      (superaIntereses ? `Tus intereses reales ($${intereses.toLocaleString('es-MX')} MXN) superan el umbral de $100,000 MXN. ` : '') +
+      (ingresosMixtos  ? 'Tienes ingresos de fuente mixta que no aplican la exención del Art. 113-E. ' : '')
+    );
+  } else {
+    recomendaciones.push(
+      '✅ Sin obligación de declaración anual bajo Art. 113-F LISR por el momento. ' +
+      'Monitorea tus ingresos mensualmente para detectar cambios.'
+    );
   }
 
-  function renderDiagnostic(result) {
-    const annualColor = result.anualObligatoria ? '#ef4444' : '#10b981';
-    const riskColor =
-      result.riskLevel === 'EXPULSION' ? '#ef4444' :
-      result.riskLevel === 'RIESGO_ALTO' ? '#f97316' :
-      result.riskLevel === 'PREVENTIVO' ? '#f59e0b' : '#10b981';
-
-    if (byId('res-income')) byId('res-income').textContent = money(result.income || 0);
-    if (byId('res-salarios')) byId('res-salarios').textContent = money(result.salarios || 0);
-    if (byId('res-intereses')) byId('res-intereses').textContent = money(result.intereses || 0);
-
-    if (byId('res-anual')) {
-      byId('res-anual').textContent = result.anualObligatoria
-        ? 'DECLARACIÓN ANUAL OBLIGATORIA'
-        : 'No obligatoria en regla base';
-      byId('res-anual').style.color = annualColor;
-    }
-
-    if (byId('res-multa')) {
-      byId('res-multa').textContent = result.riesgoMulta
-        ? 'CFDI faltante: riesgo operativo y sancionable'
-        : 'CFDI global al corriente';
-      byId('res-multa').style.color = result.riesgoMulta ? '#ef4444' : '#10b981';
-    }
-
-    if (byId('res-buzon')) {
-      byId('res-buzon').textContent = result.riesgoBuzon
-        ? `ALERTA ROJA · Buzón inactivo: multa de $${BUZON_MULTA.toLocaleString('es-MX')} MXN`
-        : 'Buzón Tributario activo';
-      byId('res-buzon').style.color = result.riesgoBuzon ? '#ef4444' : '#10b981';
-    }
-
-    if (byId('res-risk')) {
-      byId('res-risk').textContent = result.riskLevel;
-      byId('res-risk').style.color = riskColor;
-    }
-
-    if (byId('res-pedagogia')) byId('res-pedagogia').textContent = result.pedagogia;
-    if (byId('res-notas')) byId('res-notas').textContent = result.notas.length ? result.notas.join(' ') : 'Sin alertas adicionales.';
-    if (byId('res-recomendacion')) byId('res-recomendacion').textContent = result.recomendacion;
+  if (riesgoBuzon) {
+    recomendaciones.push(
+      `⚠️ ALERTA BUZÓN TRIBUTARIO (Art. 17-K CFF): ` +
+      `Tu Buzón Tributario no está activo. Riesgo de multa de ` +
+      `$${BUZON_MULTA.toLocaleString('es-MX')} MXN. ` +
+      `Actívalo en sat.gob.mx → Mi Portal → Buzón Tributario.`
+    );
   }
 
-  function wizardNext() {
-    if (wizardStep < WIZARD_MAX_STEPS) {
-      if (!validateStep(wizardStep)) return;
-      wizardStep += 1;
-      setWizardStep(wizardStep);
-      return;
-    }
-
-    const result = evaluateDiagnostic();
-    renderDiagnostic(result);
-    showWizardMessage('Diagnóstico calculado correctamente.', 'success');
+  if (riesgoMulta) {
+    recomendaciones.push(
+      `🚨 ALERTA LÍMITE RESICO (Art. 113-E LISR): ` +
+      `Tus ingresos de $${income.toLocaleString('es-MX')} MXN superan el ` +
+      (riskLevel === 'EXPULSION' ? '94%' : '90%') +
+      ` del límite de $3,500,000 MXN. Riesgo de expulsión del régimen.`
+    );
   }
+
+  if (!!inputs.cfdiGlobal) {
+    recomendaciones.push(
+      '📄 Usas CFDI Global: Recuerda que el CFDI global es válido solo para ' +
+      'operaciones con público en general (RFC XAXX010101000). ' +
+      'No es válido para acreditamiento de IVA entre contribuyentes registrados.'
+    );
+  }
+
+  return {
+    income,
+    salarios,
+    intereses,
+    mixtos:          !!inputs.mixtos,
+    socioPM:         !!inputs.socioPM,
+    cfdiGlobal:      !!inputs.cfdiGlobal,
+    buzonActivo:     !riesgoBuzon,
+    anualObligatoria,
+    riesgoMulta,
+    riesgoBuzon,
+    riskLevel,
+    recomendacion:   recomendaciones.join('\n\n'),
+    completedAt:     new Date().toISOString()
+  };
+}
+
+// ── Helper: calcular nivel de riesgo para el wizard (sin depender de Store) ─
+function calcRiskLevelWizard(income) {
+  const v = Number(income || 0);
+  if (v >= ALERT_94) return 'EXPULSION';
+  if (v >= ALERT_90) return 'RIESGO_ALTO';
+  if (v >= ALERT_80) return 'PREVENTIVO';
+  return 'SEGURO';
+}
+
+// ── Renderizado del resultado en el DOM del wizard ────────────────────────
+function renderWizardResult(diagnosis) {
+  const out = byId('wiz-result') || byId('wizard-result');
+  if (!out) return;
+
+  const colorMap = {
+    SEGURO:      '#10b981',
+    PREVENTIVO:  '#f59e0b',
+    RIESGO_ALTO: '#ef4444',
+    EXPULSION:   '#dc2626'
+  };
+
+  const color       = colorMap[diagnosis.riskLevel] || '#10b981';
+  const anualBadge  = diagnosis.anualObligatoria
+    ? `<span style="background:#ef4444;color:#fff;padding:2px 8px;border-radius:4px;font-size:12px;">
+         DECLARACIÓN ANUAL OBLIGATORIA — Art. 113-F LISR
+       </span>`
+    : `<span style="background:#10b981;color:#fff;padding:2px 8px;border-radius:4px;font-size:12px;">
+         Sin obligación de anual
+       </span>`;
+
+  const buzonBadge  = diagnosis.riesgoBuzon
+    ? `<span style="background:#f59e0b;color:#000;padding:2px 8px;border-radius:4px;font-size:12px;">
+         ⚠️ Multa Buzón: $${BUZON_MULTA.toLocaleString('es-MX')} MXN — Art. 17-K CFF
+       </span>`
+    : '';
+
+  out.innerHTML = `
+    <div style="border:1px solid ${color};border-radius:8px;padding:16px;margin-top:12px;">
+      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px;">
+        ${anualBadge} ${buzonBadge}
+      </div>
+      <p style="color:${color};font-weight:bold;margin:0 0 8px;">
+        Riesgo RESICO: ${diagnosis.riskLevel}
+      </p>
+      <pre style="white-space:pre-wrap;font-size:13px;color:#e2e8f0;line-height:1.6;">
+${esc(diagnosis.recomendacion)}
+      </pre>
+    </div>
+  `;
+}
+ 
+function completeWizard() {
+  // Leer inputs del DOM
+  const income    = Number((byId('wiz-income')    || {}).value || 0);
+  const salarios  = Number((byId('wiz-salarios')  || {}).value || 0);
+  const intereses = Number((byId('wiz-intereses') || {}).value || 0);
+  const socioPM   = !!(byId('wiz-socio-pm')   || {}).checked;
+  const mixtos    = !!(byId('wiz-mixtos')      || {}).checked;
+  const cfdiGlobal= !!(byId('wiz-cfdi-global') || {}).checked;
+  const buzonActivo = (byId('wiz-buzon')       || {}).value !== 'false';
+
+  const diagnosis = computeWizardDiagnosis({
+    income, salarios, intereses, socioPM, mixtos, cfdiGlobal, buzonActivo
+  });
+
+  // Persistir en Store y Supabase
+  Store.updateDiagnostic(diagnosis);
+
+  // Renderizar resultado
+  renderWizardResult(diagnosis);
+
+  // Navegar a la vista de resultado
+  navigateTo('dashboard');
+}
 
   function resetWizard() {
     wizardStep = 1;
@@ -962,19 +1099,529 @@ const App = (() => {
     bindDropzone('drop-opinion', 'carpeta-opinion-file');
   }
 
-  function syncAndRender() {
-    renderKPIs();
-    renderIncome();
-    renderHealth();
-    renderFeed();
-    renderCarpetaFiscal();
-    window.DocumentsManager?.renderDocuments?.();
+    function syncAndRender() {
+      renderKPIs();
+      renderIncomeWithCssClasses(); // reemplaza la llamada inline a renderIncome()
+      renderHealth();
+      renderHealthExtended();       // NUEVO: alertas de e.firma y buzón
+      renderFeed();
+      renderCarpetaFiscal();
+      window.DocumentsManager?.renderDocuments?.();
+    }
+
+    function computeEFirmaExpiryAlert(issuedDateStr) {
+  if (!issuedDateStr) {
+    return { hasData: false, level: 'unknown', message: null, diasRestantes: null, expiryDate: null };
   }
+
+  const issued = new Date(issuedDateStr);
+  if (Number.isNaN(issued.getTime())) {
+    return { hasData: false, level: 'unknown', message: null, diasRestantes: null, expiryDate: null };
+  }
+
+  const expiryDate = addYears(issued, EFIRMA_YEARS); // Art. 17-D CFF — 4 años exactos
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  expiryDate.setHours(0, 0, 0, 0);
+
+  const diasRestantes = Math.ceil((expiryDate.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
+
+  let level = 'safe';
+  let message = null;
+
+  if (diasRestantes <= 0) {
+    level = 'expired';
+    message = `Tu e.firma venció hace ${Math.abs(diasRestantes)} días. Debes renovarla de inmediato en el SAT (Art. 17-D CFF). No podrás timbrar CFDIs ni firmar declaraciones.`;
+  } else if (diasRestantes <= EFIRMA_ALERT_30_DAYS) {
+    level = 'critical';
+    message = `⚠️ ¡CRÍTICO! Su e.firma vence en menos de 30 días (${diasRestantes} días). Riesgo de bloqueo de facturación.`;
+  } else if (diasRestantes <= EFIRMA_ALERT_90_DAYS) {
+    level = 'warning';
+    message = `Su e.firma vence en 3 meses. Programe su cita en el SAT.`;
+  } else {
+    level = 'safe';
+    message = `e.firma vigente hasta ${expiryDate.toLocaleDateString('es-MX')} (${diasRestantes} días restantes). Cumple con Art. 17-D CFF.`;
+  }
+
+  return {
+    hasData: true,
+    level,
+    message,
+    diasRestantes,
+    expiryDate: expiryDate.toISOString().split('T')[0],
+    issuedDate: issued.toISOString().split('T')[0]
+  };
+}
+
+/**
+ * renderEFirmaAlertBanner — Inyecta el banner visual en el Dashboard
+ * según el nivel de alerta calculado.
+ */
+function renderEFirmaAlertBanner(alertData) {
+  const container = byId('efirma-alert-banner') || createEFirmaAlertContainer();
+  if (!container) return;
+
+  if (!alertData.hasData) {
+    container.hidden = true;
+    return;
+  }
+
+  const styles = {
+    safe:     { bg: 'rgba(16,185,129,0.12)', border: '#10b981', color: '#d1fae5' },
+    warning:  { bg: 'rgba(245,158,11,0.14)', border: '#f59e0b', color: '#fde68a' },
+    critical: { bg: 'rgba(239,68,68,0.16)',  border: '#ef4444', color: '#fecaca' },
+    expired:  { bg: 'rgba(220,38,38,0.20)',  border: '#dc2626', color: '#fecaca' }
+  };
+  const s = styles[alertData.level] || styles.safe;
+
+  container.hidden = alertData.level === 'safe';
+  container.style.background = s.bg;
+  container.style.border = `1px solid ${s.border}`;
+  container.style.color = s.color;
+  container.style.padding = '12px 16px';
+  container.style.borderRadius = '10px';
+  container.style.marginTop = '10px';
+  container.style.fontWeight = alertData.level === 'critical' || alertData.level === 'expired' ? '700' : '500';
+  container.textContent = alertData.message;
+}
+
+function createEFirmaAlertContainer() {
+  const healthCard = byId('efirma-days')?.closest('.health-item')?.parentElement?.parentElement;
+  if (!healthCard) return null;
+  const div = document.createElement('div');
+  div.id = 'efirma-alert-banner';
+  div.hidden = true;
+  healthCard.appendChild(div);
+  return div;
+}
+
+/**
+ * renderBuzonAuditAlert — Auditoría de Salud Fiscal Activa.
+ * Mientras el Buzón Tributario no esté explícitamente 'Validado' (true),
+ * mantiene la alerta roja permanente citando la multa (Art. 17-K y 86-C CFF).
+ */
+function renderBuzonAuditAlert() {
+  const salud = window.Store?.getSaludFiscal?.();
+  const container = byId('buzon-audit-alert') || createBuzonAuditContainer();
+  if (!container) return;
+
+  const isValidado = salud?.buzonTributarioActivo === true;
+
+  if (isValidado) {
+    container.hidden = true;
+    return;
+  }
+
+  container.hidden = false;
+  container.style.background = 'rgba(239,68,68,0.16)';
+  container.style.border = '1px solid #ef4444';
+  container.style.color = '#fecaca';
+  container.style.padding = '12px 16px';
+  container.style.borderRadius = '10px';
+  container.style.marginTop = '10px';
+  container.style.fontWeight = '700';
+  container.textContent =
+    `🔴 ALERTA PERMANENTE: Buzón Tributario no validado. Multa de hasta ${money(BUZON_MULTA)} ` +
+    `conforme a los Art. 17-K y 86-C CFF. Valida tu Buzón en sat.gob.mx → Mi Portal.`;
+}
+
+function createBuzonAuditContainer() {
+  const healthCard = byId('buzon-status')?.closest('.health-item')?.parentElement?.parentElement;
+  if (!healthCard) return null;
+  const div = document.createElement('div');
+  div.id = 'buzon-audit-alert';
+  div.hidden = true;
+  healthCard.appendChild(div);
+  return div;
+}
+
+// ── renderHealth() extendido para invocar ambas auditorías ──────────────────
+function renderHealthExtended() {
+  const carpeta = window.Store?.getCarpetaFiscal?.();
+  const expiry = window.Store?.getSaludFiscal?.()?.eFirmaExpiry || carpeta?.efirmaExpiry;
+
+  // Alerta de vigencia de e.firma (90/30 días)
+  const efirmaAlert = computeEFirmaExpiryAlert(
+    expiry && expiry !== 'pendiente'
+      ? addYears(new Date(expiry), -EFIRMA_YEARS).toISOString() // reconstruye fecha de emisión aproximada
+      : null
+  );
+  renderEFirmaAlertBanner(efirmaAlert);
+
+  // Auditoría permanente de Buzón Tributario
+  renderBuzonAuditAlert();
+}
+
+// ── Actualizar el semáforo con CLASES CSS dinámicas (no solo inline) ────────
+function renderIncomeWithCssClasses() {
+  const st = window.Store?.getState?.();
+  if (!st) return;
+
+  const current = Number(st.incomeYTD || 0);
+  const limit = Number(st.fiscalMetrics?.annualLimit || getCfg('INCOME_LIMIT', RESICO_LIMIT));
+  const risk = st.fiscalMetrics?.riskLevel || 'SEGURO';
+  const ratio = limit > 0 ? Math.min(100, Math.max(0, (current / limit) * 100)) : 0;
+
+  const fillEl = byId('income-progress-fill');
+  const badgeEl = byId('income-alert-badge');
+
+  const CSS_CLASS_MAP = {
+    SEGURO: 'risk-safe',
+    PREVENTIVO: 'risk-preventivo',
+    RIESGO_ALTO: 'risk-alto',
+    EXPULSION: 'risk-expulsion'
+  };
+
+  if (fillEl) {
+    fillEl.style.width = `${ratio}%`;
+    // Remover clases previas y aplicar la clase correspondiente al nivel actual
+    fillEl.classList.remove('risk-safe', 'risk-preventivo', 'risk-alto', 'risk-expulsion');
+    fillEl.classList.add(CSS_CLASS_MAP[risk] || 'risk-safe');
+  }
+
+  if (badgeEl) {
+    badgeEl.textContent = risk.replace('_', ' ');
+    badgeEl.classList.remove('badge-safe', 'badge-warning', 'badge-danger', 'badge-critical');
+    if (risk === 'EXPULSION') badgeEl.classList.add('badge-critical');
+    else if (risk === 'RIESGO_ALTO') badgeEl.classList.add('badge-danger');
+    else if (risk === 'PREVENTIVO') badgeEl.classList.add('badge-warning');
+    else badgeEl.classList.add('badge-safe');
+  }
+}
+
+// ── Suscripción al evento de cruce de umbral (preparación WhatsApp/n8n) ─────
+function initRiskAlertListener() {
+  window.Store?.on?.('riskThresholdCrossed', (payload) => {
+    console.info('[App] Umbral cruzado — payload listo para n8n:', payload);
+    // Cuando el proxy /api/n8n-notify-proxy esté activo, aquí se llamará:
+    // fetch('/api/n8n-notify-proxy', { method: 'POST', body: JSON.stringify(payload) });
+    // Por ahora solo se persiste el payload para trazabilidad/depuración.
+    window.__lastWhatsAppAlertPayload = payload;
+  });
+}
 
   async function initCore() {
     await window.AppConfig?.loadServerConfig?.();
     await window.Store?.initSupabase?.();
   }
+
+  async function syncMonitorPostLogin() {
+  const state = Store.getState();
+
+  // El Monitor de Supervivencia usa el valor que syncDown() ya hidrata.
+  // Forzar un re-render inmediato con el valor en memoria.
+  const income    = Number(state.incomeYTD || 0);
+  const limit     = Number(state.fiscalMetrics?.annualLimit || RESICO_LIMIT);
+  const pct       = limit > 0 ? (income / limit) * 100 : 0;
+  const riskLevel = state.fiscalMetrics?.riskLevel || 'SEGURO';
+
+  // Actualizar el DOM del monitor
+  const monitorIncome  = byId('monitor-income');
+  const monitorPct     = byId('monitor-pct');
+  const monitorBar     = byId('monitor-bar');
+  const monitorStatus  = byId('monitor-status');
+
+  if (monitorIncome)  monitorIncome.textContent  = money(income);
+  if (monitorPct)     monitorPct.textContent      = `${pct.toFixed(1)}%`;
+  if (monitorBar)     monitorBar.style.width       = `${Math.min(pct, 100)}%`;
+
+  if (monitorStatus) {
+    const labels = {
+      SEGURO:      { text: '✅ Régimen Seguro',     color: '#10b981' },
+      PREVENTIVO:  { text: '⚠️ Zona Preventiva',   color: '#f59e0b' },
+      RIESGO_ALTO: { text: '🔴 Riesgo Alto',        color: '#ef4444' },
+      EXPULSION:   { text: '🚨 Peligro de Expulsión', color: '#dc2626' }
+    };
+    const label = labels[riskLevel] || labels.SEGURO;
+    monitorStatus.textContent  = label.text;
+    monitorStatus.style.color  = label.color;
+
+    // Alerta crítica al 94% — Art. 113-E LISR
+    if (riskLevel === 'EXPULSION' || riskLevel === 'RIESGO_ALTO') {
+      console.warn(
+        `[Monitor] ⚠️ ALERTA FISCAL: Ingresos ${money(income)} ` +
+        `= ${pct.toFixed(1)}% del límite RESICO. Nivel: ${riskLevel}`
+      );
+    }
+  }
+}
+
+function validateEFirmaVigencia(issuedAt, expiresAt = null) {
+  const MULTA_BUZON = BUZON_MULTA; // $10,260 MXN — Art. 17-K CFF
+
+  const issued  = issuedAt  ? new Date(issuedAt)  : null;
+  const expires = expiresAt
+    ? new Date(expiresAt)
+    : issued
+      ? new Date(new Date(issued).setFullYear(issued.getFullYear() + EFIRMA_YEARS))
+      : null;
+
+  if (!expires) {
+    return {
+      vigente: null,
+      diasRestantes: null,
+      alertLevel: 'warning',
+      mensaje: '⚠️ No se pudo determinar la vigencia de tu e.firma. Verifica el archivo .cer.'
+    };
+  }
+
+  const today        = new Date();
+  today.setHours(0, 0, 0, 0);
+  expires.setHours(0, 0, 0, 0);
+
+  const msDay        = 1000 * 60 * 60 * 24;
+  const diasRestantes = Math.ceil((expires - today) / msDay);
+  const vigente       = diasRestantes > 0;
+
+  let alertLevel = 'safe';
+  let mensaje;
+
+  if (!vigente) {
+    alertLevel = 'danger';
+    mensaje = `🚨 Tu e.firma venció hace ${Math.abs(diasRestantes)} días. ` +
+              `Debes renovarla en el SAT (Art. 17-D CFF). ` +
+              `Sin ella no puedes timbrar CFDIs ni firmar declaraciones.`;
+  } else if (diasRestantes <= 30) {
+    alertLevel = 'warning';
+    mensaje = `⚠️ Tu e.firma vence en ${diasRestantes} días (${expires.toLocaleDateString('es-MX')}). ` +
+              `Renueva antes de que expire para evitar interrupción operativa. ` +
+              `Posible multa: $${MULTA_BUZON.toLocaleString('es-MX')} MXN por Buzón inactivo.`;
+  } else if (diasRestantes <= 90) {
+    alertLevel = 'warning';
+    mensaje = `📅 Tu e.firma vence el ${expires.toLocaleDateString('es-MX')} ` +
+              `(en ${diasRestantes} días). Programa tu renovación en SAT ID o módulo.`;
+  } else {
+    mensaje = `✅ e.firma vigente hasta ${expires.toLocaleDateString('es-MX')} ` +
+              `(${diasRestantes} días restantes). Cumple con Art. 17-D CFF.`;
+  }
+
+  // Persistir en Store para que el Monitor de Salud Fiscal lo muestre
+  Store.updateSaludFiscal({
+    eFirmaVigente:  vigente,
+    eFirmaExpiry:   expires.toISOString().split('T')[0],
+    lastAuditDate:  new Date().toISOString(),
+    alertLevel
+  });
+
+  return { vigente, diasRestantes, alertLevel, mensaje };
+}
+
+// ============================================================
+// PATCH app.js — Fase de Conexión: Timbrado CFDI vía Alegra
+// ============================================================
+
+const RESICO_VALID_USOS_CFDI = ['G01','G02','G03','D01','D02','D03','D04','D05','D06','D07','D08','D09','D10','S01','CP01','CN01'];
+
+function showTimbradoLoader(show) {
+  let loader = byId('timbrado-loader');
+  if (!loader) {
+    loader = document.createElement('div');
+    loader.id = 'timbrado-loader';
+    loader.style.cssText = `
+      position:fixed;inset:0;background:rgba(0,0,0,0.7);z-index:9999;
+      display:flex;align-items:center;justify-content:center;flex-direction:column;gap:14px;`;
+    loader.innerHTML = `
+      <div style="width:48px;height:48px;border:4px solid #10b981;border-top-color:transparent;
+                  border-radius:50%;animation:timbrado-spin 0.9s linear infinite;"></div>
+      <p style="color:#e2e8f0;font-weight:600;font-size:15px;">Timbrando con el SAT vía Alegra...</p>
+      <style>@keyframes timbrado-spin{to{transform:rotate(360deg);}}</style>
+    `;
+    document.body.appendChild(loader);
+  }
+  loader.hidden = !show;
+  loader.style.display = show ? 'flex' : 'none';
+}
+
+function showTimbradoErrorModal(message) {
+  const modal = document.createElement('div');
+  modal.style.cssText = `
+    position:fixed;inset:0;background:rgba(0,0,0,0.7);z-index:9999;
+    display:flex;align-items:center;justify-content:center;`;
+  modal.innerHTML = `
+    <div style="background:#1e293b;border:1px solid #ef4444;border-radius:12px;
+                padding:24px;max-width:420px;text-align:center;">
+      <div style="font-size:32px;margin-bottom:10px;">⚠️</div>
+      <h3 style="color:#ef4444;margin:0 0 10px;">Error de Timbrado</h3>
+      <p style="color:#e2e8f0;font-size:14px;margin-bottom:18px;">${esc(message)}</p>
+      <button id="timbrado-error-close" class="btn-primary" style="width:100%;">Entendido</button>
+    </div>
+  `;
+  document.body.appendChild(modal);
+  modal.querySelector('#timbrado-error-close')?.addEventListener('click', () => modal.remove());
+}
+
+function showTimbradoSuccessModal(result, invoiceId) {
+  const modal = document.createElement('div');
+  modal.id = 'timbrado-success-modal';
+  modal.style.cssText = `
+    position:fixed;inset:0;background:rgba(0,0,0,0.7);z-index:9999;
+    display:flex;align-items:center;justify-content:center;`;
+  modal.innerHTML = `
+    <div style="background:#1e293b;border:1px solid #10b981;border-radius:12px;
+                padding:24px;max-width:440px;width:90%;text-align:center;">
+      <div style="font-size:36px;margin-bottom:10px;">✅</div>
+      <h3 style="color:#10b981;margin:0 0 6px;">Factura Timbrada con Éxito</h3>
+      <p style="color:#94a3b8;font-size:13px;margin-bottom:6px;">
+        Folio: ${esc(result?.invoice?.number || '—')}
+      </p>
+      <p style="color:#94a3b8;font-size:13px;margin-bottom:18px;">
+        Total: $${Number(result?.invoice?.total || 0).toLocaleString('es-MX')} MXN
+      </p>
+      <div style="display:flex;gap:10px;">
+        <button id="btn-download-pdf" class="btn-primary" style="flex:1;">📄 Descargar PDF</button>
+        <button id="btn-download-xml" class="btn-secondary" style="flex:1;">🧾 Descargar XML</button>
+      </div>
+      <button id="timbrado-success-close" style="margin-top:14px;background:none;border:none;
+              color:#64748b;cursor:pointer;font-size:13px;">Cerrar</button>
+    </div>
+  `;
+  document.body.appendChild(modal);
+
+  modal.querySelector('#btn-download-pdf')?.addEventListener('click', () => downloadInvoiceFile(invoiceId, 'pdf'));
+  modal.querySelector('#btn-download-xml')?.addEventListener('click', () => downloadInvoiceFile(invoiceId, 'xml'));
+  modal.querySelector('#timbrado-success-close')?.addEventListener('click', () => modal.remove());
+}
+
+async function downloadInvoiceFile(invoiceId, format) {
+  try {
+    const session = await window.APP_STATE?.supabase?.auth?.getSession?.();
+    const token = session?.data?.session?.access_token;
+    const headers = { 'Content-Type': 'application/json' };
+    if (token) headers.Authorization = `Bearer ${token}`;
+
+    const response = await fetch('/api/alegra-proxy', {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({ action: format === 'pdf' ? 'get_pdf' : 'get_xml', input: { invoiceId } })
+    });
+
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok || !payload?.ok) {
+      throw new Error(payload?.error || `No se pudo descargar el ${format.toUpperCase()}.`);
+    }
+
+    const fileUrl = payload.pdf?.url || payload.xml?.url || payload.pdf || payload.xml;
+    if (fileUrl) window.open(fileUrl, '_blank');
+  } catch (error) {
+    showTimbradoErrorModal(error?.message || `Error al descargar ${format.toUpperCase()}.`);
+  }
+}
+
+/**
+ * handleTimbrado — Se dispara cuando el usuario aprueba los datos extraídos
+ * por el OCR y confirma la emisión del CFDI.
+ */
+async function handleTimbrado(ocrData) {
+  const usoCfdi = String(ocrData?.uso_cfdi || 'G03').toUpperCase();
+  if (!RESICO_VALID_USOS_CFDI.includes(usoCfdi)) {
+    showTimbradoErrorModal(
+      `El Uso de CFDI '${usoCfdi}' no es compatible con RESICO (Régimen 626) conforme a la RMF 2026.`
+    );
+    return;
+  }
+
+  const input = {
+    rfc: ocrData?.rfc_receptor || ocrData?.rfc,
+    name: ocrData?.nombre_receptor || ocrData?.nombre_emisor || '',
+    zip: ocrData?.cp_receptor || ocrData?.zip || '',
+    regimenFiscal: ocrData?.regimen_fiscal_receptor || '616',
+    usoCfdi,
+    metodoPago: ocrData?.metodo_pago || 'PUE',
+    formaPago: ocrData?.forma_pago || '01',
+    claveProdServ: ocrData?.clave_prod_serv || '84111506',
+    description: ocrData?.descripcion || ocrData?.concepto || 'Servicios profesionales',
+    quantity: ocrData?.cantidad || 1,
+    unitPrice: ocrData?.subtotal || ocrData?.unitPrice || 0,
+    ivaType: ocrData?.iva_type || '16',
+    receptorType: ocrData?.receptor_type || 'PF'
+  };
+
+  showTimbradoLoader(true);
+
+  try {
+    const session = await window.APP_STATE?.supabase?.auth?.getSession?.();
+    const token = session?.data?.session?.access_token;
+
+    const headers = { 'Content-Type': 'application/json' };
+    if (token) headers.Authorization = `Bearer ${token}`;
+
+    const response = await fetch('/api/alegra-proxy', {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({ action: 'create_invoice', input })
+    });
+
+    const payload = await response.json().catch(() => ({}));
+
+    if (!response.ok || !payload?.ok) {
+      const details = Array.isArray(payload?.details) ? payload.details.join(' ') : '';
+      throw new Error(
+        payload?.error
+          ? `${payload.error} ${details}`.trim()
+          : 'Error del SAT: Verifique la vigencia de su CSD o el RFC del receptor.'
+      );
+    }
+
+    // ── Persistir la factura timbrada y sumar al Monitor de Ingresos ──────
+    await window.Store?.saveInvoiceDocument?.({
+      invoice_id: payload.invoice?.id,
+      invoice_number: payload.invoice?.number,
+      status: 'TIMBRADO',
+      total: Number(payload.invoice?.total || 0),
+      rfc_receptor: input.rfc,
+      uso_cfdi: usoCfdi,
+      regimen_fiscal_emisor: payload.fiscal?.regimenFiscalEmisor || '626',
+      fecha: payload.invoice?.date || new Date().toISOString().slice(0, 10)
+    });
+
+    showTimbradoSuccessModal(payload, payload.invoice?.id);
+
+  } catch (error) {
+    showTimbradoErrorModal(error?.message || 'Error del SAT: Verifique la vigencia de su CSD o el RFC del receptor.');
+  } finally {
+    showTimbradoLoader(false);
+  }
+}
+
+window.App = window.App || {};
+window.App.handleTimbrado = handleTimbrado;
+
+
+/**
+ * Handler para el evento de carga de archivos de e.firma (.cer / .key).
+ * PLACEHOLDER: Conectar al input file del módulo Carpeta Fiscal.
+ *
+ * Uso:
+ *   document.getElementById('efirma-upload').addEventListener('change', onEFirmaUpload);
+ */
+async function onEFirmaUpload(event) {
+  const file = event?.target?.files?.[0];
+  if (!file) return;
+
+  const ext = file.name.split('.').pop()?.toLowerCase();
+  if (!['cer', 'key'].includes(ext)) {
+    console.warn('[e.firma] Archivo no reconocido. Se esperaba .cer o .key');
+    return;
+  }
+
+  // TODO: Extraer fecha de emisión del certificado .cer via SubtleCrypto o
+  //       enviar al proxy /api/gemini-proxy.js con el binario para extracción OCR.
+  // Por ahora se usa la fecha de modificación del archivo como aproximación.
+  const issuedAt = new Date(file.lastModified);
+
+  const result = validateEFirmaVigencia(issuedAt);
+
+  // Mostrar resultado en el UI (adaptar IDs según tu HTML)
+  const alertEl = byId('efirma-alert') || byId('salud-fiscal-alert');
+  if (alertEl) {
+    alertEl.textContent  = result.mensaje;
+    alertEl.className    = `alert alert-${result.alertLevel}`;
+    alertEl.hidden       = false;
+  }
+
+  console.info('[e.firma] Validación Art. 17-D CFF:', result);
+  return result;
+}
 
   async function init() {
     if (booted) return;
@@ -1000,6 +1647,9 @@ const App = (() => {
     window.Store?.on?.('carpetaUpdated', renderCarpetaFiscal);
 
     syncAndRender();
+
+    initRiskAlertListener();
+    
     window.AuthManager?.init?.();
   }
 
@@ -1019,6 +1669,25 @@ window.wizardNext = App.wizardNext;
 window.resetWizard = App.resetWizard;
 window.saveDiagnostic = App.saveDiagnostic;
 window.Dashboard = App.syncAndRender;
+
+// ────────────────────────────────────────────────────────────
+// HOOK DE INICIALIZACIÓN — Conectar al flujo post-login
+// Agregar al final de la función boot() en app.js
+// ────────────────────────────────────────────────────────────
+
+// Escuchar cuando Store termine de sincronizar con Supabase
+Store.on('store:updated', () => {
+  // Actualizar monitor cada vez que lleguen datos de Supabase
+  syncMonitorPostLogin();
+});
+
+// Registrar handler de e.firma si existe el input en el DOM
+document.addEventListener('DOMContentLoaded', () => {
+  const efirmaInput = byId('efirma-upload');
+  if (efirmaInput) {
+    efirmaInput.addEventListener('change', onEFirmaUpload);
+  }
+});
 
 if (document.readyState === 'loading') {
   document.addEventListener('DOMContentLoaded', App.init);

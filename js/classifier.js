@@ -134,11 +134,20 @@ const IntentClassifier = (() => {
   }
 
   async function askProxy(text) {
+    // Obtener el JWT de Supabase para validación en el proxy (v3.0).
+    // El proxy rechaza peticiones sin sesión activa (401) para blindar la cuota de Vertex AI.
+    let supabaseToken = '';
+    try {
+      const session = await window.APP_STATE?.supabase?.auth?.getSession?.();
+      supabaseToken = session?.data?.session?.access_token || '';
+    } catch (_) { /* silent — el proxy usa fallback si no hay token en dev */ }
+
+    const headers = { 'Content-Type': 'application/json' };
+    if (supabaseToken) headers['Authorization'] = `Bearer ${supabaseToken}`;
+
     const response = await fetch('/api/gemini-proxy', {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json'
-      },
+      headers,
       body: JSON.stringify({
         message: text,
         context: getContext()

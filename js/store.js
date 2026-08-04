@@ -9,6 +9,13 @@ const Store = (() => {
   const MAX_DOCUMENTS = 100;
   const YEAR = 2026;
 
+  const RISK_THRESHOLDS = [
+    { level: 'EXPULSION',  min: ALERT_94, ratio: 0.94 },
+    { level: 'RIESGO_ALTO', min: ALERT_90, ratio: 0.90 },
+    { level: 'PREVENTIVO', min: ALERT_80, ratio: 0.80 },
+    { level: 'SEGURO',     min: 0,        ratio: 0 }
+  ];
+
   const MONTHS = [
     'Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio',
     'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'
@@ -201,37 +208,119 @@ const Store = (() => {
     const max = Number(limit || DEFAULT_LIMIT);
     const ratio = max > 0 ? value / max : 0;
 
-    if (value >= ALERT_94 || ratio >= 0.94) return 'EXPULSION';
-    if (value >= ALERT_90 || ratio >= 0.90) return 'RIESGO_ALTO';
-    if (value >= ALERT_80 || ratio >= 0.80) return 'PREVENTIVO';
+    for (const t of RISK_THRESHOLDS) {
+      if (value >= t.min || ratio >= t.ratio) return t.level;
+    }
     return 'SEGURO';
   }
 
-  function recalc() {
-    state.metrics.totalProcessed = state.conversations.length;
+  const RISK_SEVERITY = { SEGURO: 0, PREVENTIVO: 1, RIESGO_ALTO: 2, EXPULSION: 3 };
 
-    Object.keys(state.metrics.byCategory).forEach(k => {
-      state.metrics.byCategory[k] = 0;
-    });
+  function buildWhatsAppAlertPayload(previousLevel, newLevel, income, limit) {
+  const messages = {
+    PREVENTIVO: `⚠️ Alerta RESICO: Has superado el 80% de tu límite anual ($2,800,000 MXN). Ingreso actual: $${Number(income).toLocaleString('es-MX')} MXN. Monitorea tu facturación.`,
+    RIESGO_ALTO: `🟠 Riesgo Alto RESICO: Estás en el 90% de tu límite anual ($3,150,000 MXN). Ingreso actual: $${Number(income).toLocaleString('es-MX')} MXN. Revisa tu proyección de cierre.`,
+    EXPULSION: `🔴 CRÍTICO: Superaste el 94% del límite RESICO ($3,290,000 MXN). Riesgo inminente de expulsión del régimen. Ingreso actual: $${Number(income).toLocaleString('es-MX')} MXN.`
+  };
 
-    let confidenceSum = 0;
+  return {
+    channel: 'whatsapp',
+    template_type: 'utility_message', // ~$0.17 MXN por mensaje (Meta Business pricing)
+    trigger: 'risk_threshold_crossed',
+    previous_level: previousLevel,
+    new_level: newLevel,
+    income_ytd: Number(income || 0),
+    annual_limit: Number(limit || DEFAULT_LIMIT),
+    ratio_pct: limit > 0 ? Number(((income / limit) * 100).toFixed(2)) : 0,
+    message_body: messages[newLevel] || 'Actualización de tu estatus fiscal RESICO.',
+    user_id: usr?.id || null,
+    user_phone: usr?.phone || usr?.user_metadata?.phone || null,
+    timestamp: new Date().toISOString(),
+    // Endpoint destino, aún no invocado — preparado para integración futura
+    target_endpoint: '/api/n8n-notify-proxy'
+  };
+}
 
-    state.conversations.forEach(c => {
-      const intent = c.intent || 'OTROS';
-      if (intent in state.metrics.byCategory) state.metrics.byCategory[intent]++;
-      else state.metrics.byCategory.OTROS++;
-      confidenceSum += Number(c.confidence || 0);
-    });
-
-    state.metrics.avgConfidence = state.conversations.length
-      ? Math.round((confidenceSum / state.conversations.length) * 100)
-      : 0;
-
-    state.fiscalMetrics.riskLevel = calcRiskLevel(
-      Number(state.incomeYTD || 0),
-      DEFAULT_LIMIT
-    );
+function evaluateRiskLevelChange(previousLevel, newLevel, income, limit) {
+  const wasWorse = RISK_SEVERITY[newLevel] > RISK_SEVERITY[previousLevel || 'SEGURO'];
+  if (wasWorse && newLevel !== 'SEGURO') {
+    const payload = buildWhatsAppAlertPayload(previousLevel, newLevel, income, limit);
+    emit('riskThresholdCrossed', payload);
+    console.info('[Store] Umbral de riesgo cruzado — payload WhatsApp listo:', payload);
+    return payload;
   }
+  return null;
+}
+
+// ── updateIncome() extendido con detección de cruce ─────────────────────────
+function updateIncome(amount) {
+  const previousLevel = state.fiscalMetrics.riskLevel;
+  state.incomeYTD = Number(amount || 0);
+  const newLevel = calcRiskLevel(state.incomeYTD, state.fiscalMetrics.annualLimit || DEFAULT_LIMIT);
+  state.fiscalMetrics.riskLevel = newLevel;
+
+  evaluateRiskLevelChange(previousLevel, newLevel, state.incomeYTD, state.fiscalMetrics.annualLimit);
+
+  persist();
+  emitAll();
+  upsertMetrics();
+}
+
+// ── applyMetricRow() también debe detectar cruces al sincronizar desde Supabase ──
+function applyMetricRow(row) {
+  if (!row) return;
+
+  const previousLevel = state.fiscalMetrics.riskLevel;
+  const remoteIncome = Number(row.income_ytd ?? 0);
+
+  if (remoteIncome === 0 && state.incomeYTD > 0) {
+    console.info('[Store] applyMetricRow: valor remoto 0 ignorado, conservando local:', state.incomeYTD);
+  } else {
+    state.incomeYTD = remoteIncome;
+  }
+
+  state.fiscalMetrics.annualLimit = DEFAULT_LIMIT;
+  const newLevel = calcRiskLevel(Number(state.incomeYTD || 0), DEFAULT_LIMIT);
+  state.fiscalMetrics.riskLevel = newLevel;
+
+  evaluateRiskLevelChange(previousLevel, newLevel, state.incomeYTD, DEFAULT_LIMIT);
+}
+  // ============================================================
+// PATCH store.js — Fix amnesia fiscal + recalc() blindado
+// Reemplazar las funciones recalc() y upsertMetrics() existentes
+// ============================================================
+
+// ────────────────────────────────────────────────────────────
+// FUNCIÓN 1: recalc() — NUNCA sobrescribe income histórico
+// ────────────────────────────────────────────────────────────
+function recalc() {
+  // Métricas de conversaciones (siempre recalcular)
+  state.metrics.totalProcessed = state.conversations.length;
+
+  Object.keys(state.metrics.byCategory).forEach(k => {
+    state.metrics.byCategory[k] = 0;
+  });
+
+  let confidenceSum = 0;
+  state.conversations.forEach(c => {
+    const intent = c.intent || 'OTROS';
+    if (intent in state.metrics.byCategory) state.metrics.byCategory[intent]++;
+    else state.metrics.byCategory.OTROS++;
+    confidenceSum += Number(c.confidence || 0);
+  });
+
+  state.metrics.avgConfidence = state.conversations.length
+    ? Math.round((confidenceSum / state.conversations.length) * 100)
+    : 0;
+
+  // ⚠️  BLINDAJE CRÍTICO: No recalcular incomeYTD desde conversaciones locales.
+  // El valor SIEMPRE viene de Supabase vía applyMetricRow() / syncDown().
+  // recalc() solo actualiza el riskLevel usando el valor ya existente en state.
+  state.fiscalMetrics.riskLevel = calcRiskLevel(
+    Number(state.incomeYTD || 0),
+    DEFAULT_LIMIT
+  );
+}
 
   function logSupabaseError(scope, error, payload = null) {
     if (!error) return;
@@ -420,9 +509,22 @@ const Store = (() => {
 
   function applyMetricRow(row) {
     if (!row) return;
-    state.incomeYTD = Number(row.income_ytd || 0);
+
+    const remoteIncome = Number(row.income_ytd || 0);
+
+    // PROTECCIÓN: no sobrescribir con cero si ya tenemos un valor local mayor.
+    // Evita que un modo de espera / IA fallback limpie el monitor de ingresos.
+    if (remoteIncome === 0 && state.incomeYTD > 0) {
+      // Conservar el valor local; solo actualizar métricas de procesamiento.
+    } else {
+      state.incomeYTD = remoteIncome;
+    }
+
     state.fiscalMetrics.annualLimit = DEFAULT_LIMIT;
-    state.fiscalMetrics.riskLevel = calcRiskLevel(Number(row.income_ytd || 0), DEFAULT_LIMIT);
+    state.fiscalMetrics.riskLevel = calcRiskLevel(
+      Number(state.incomeYTD || 0),
+      DEFAULT_LIMIT
+    );
   }
 
   async function syncDown() {
@@ -498,26 +600,58 @@ const Store = (() => {
     }
   }
 
-  async function upsertMetrics() {
-    if (!db || !usr?.id) return;
+  // ────────────────────────────────────────────────────────────
+// FUNCIÓN 2: upsertMetrics() — Payload estricto (4 campos)
+// Fix error 428C9: income_ytd ya NO es generated column
+// ────────────────────────────────────────────────────────────
+async function upsertMetrics() {
+  if (!db || !usr?.id) return;
 
-    const payload = {
-      user_id: usr.id,
-      income_ytd: Number(state.incomeYTD || 0),
-      total_processed: Number(state.metrics?.totalProcessed || state.conversations.length || 0),
-      avg_confidence: Number(state.metrics?.avgConfidence || 0)
-    };
+  // PAYLOAD ESTRICTO: exactamente los 4 campos escritos en fiscal_metrics.
+  // NO incluir annual_limit, risk_level ni campos calculados por el servidor.
+  const payload = {
+    user_id:         usr.id,
+    income_ytd:      Number(state.incomeYTD || 0),
+    total_processed: Number(state.metrics?.totalProcessed || state.conversations.length || 0),
+    avg_confidence:  Number(state.metrics?.avgConfidence  || 0)
+  };
 
-    try {
-      const { error } = await db
-        .from('fiscal_metrics')
-        .upsert(payload, { onConflict: 'user_id' });
+  try {
+    const { error } = await db
+      .from('fiscal_metrics')
+      .upsert(payload, { onConflict: 'user_id' }); // UNIQUE en user_id habilitado por el SQL
 
-      if (error) logSupabaseError('upsertMetrics', error, payload);
-    } catch (e) {
-      console.warn('[Store] upsertMetrics exception:', e?.message || e, payload);
-    }
+    if (error) logSupabaseError('upsertMetrics', error, payload);
+  } catch (e) {
+    console.warn('[Store] upsertMetrics exception:', e?.message || e, payload);
   }
+}
+
+// ────────────────────────────────────────────────────────────
+// FUNCIÓN 3: applyMetricRow() — Reforzar blindaje contra cero
+// Esta función ya existe en store.js; verifica que tenga esta lógica:
+// ────────────────────────────────────────────────────────────
+function applyMetricRow(row) {
+  if (!row) return;
+
+  const remoteIncome = Number(row.income_ytd ?? 0);
+
+  // REGLA DE ORO: Un valor 0 remoto solo se acepta si el estado local
+  // también es 0. Nunca limpiar un ingreso histórico ya registrado.
+  if (remoteIncome === 0 && state.incomeYTD > 0) {
+    // Mantener valor local; el cero puede ser un registro nuevo vacío.
+    console.info('[Store] applyMetricRow: valor remoto 0 ignorado, conservando local:', state.incomeYTD);
+  } else {
+    state.incomeYTD = remoteIncome;
+  }
+
+  // El annual_limit es constante normativa, NO viene de la DB
+  state.fiscalMetrics.annualLimit = DEFAULT_LIMIT;
+  state.fiscalMetrics.riskLevel = calcRiskLevel(
+    Number(state.incomeYTD || 0),
+    DEFAULT_LIMIT
+  );
+}
 
   async function saveDocumentRemote(doc) {
     if (!db || !usr?.id) return;
@@ -728,40 +862,94 @@ const Store = (() => {
     emitAll();
   }
 
-  async function saveDocument(doc) {
-    const normalizedType = doc.document_type || doc.doc_type || 'OTRO';
 
-    const localDoc = {
-      id: doc.id || safeUUID(),
-      file_name: doc.file_name || 'unnamed_file',
-      doc_type: normalizedType,
-      document_type: normalizedType,
-      extracted_data: doc.extracted_data || {},
-      confidence: Number(doc.confidence || 0),
-      safety_flag: !!doc.safety_flag,
-      validation_status: doc.validation_status || 'pendiente',
-      needs_review: !!doc.needs_review || !!doc.safety_flag,
-      source: doc.source || 'local',
-      file_url: doc.file_url || null,
-      created_at: doc.created_at || new Date().toISOString(),
-      updated_at: doc.updated_at || new Date().toISOString(),
-      folder_category: doc.folder_category || doc.extracted_data?.folder_category || null
-    };
 
-    state.documents.unshift(localDoc);
-    if (state.documents.length > MAX_DOCUMENTS) {
-      state.documents = state.documents.slice(0, MAX_DOCUMENTS);
-    }
+const EFIRMA_VALIDITY_YEARS = 4; // Art. 17-D CFF
 
-    rebuildCarpetaFiscal();
-    persist();
-    emit('documentAdded', localDoc);
-    emit('documentadded', localDoc);
-    emitAll();
+function computeEFirmaVigencia(extractedData) {
+  const fechaEmision = extractedData?.fecha || extractedData?.fecha_emision;
+  if (!fechaEmision) return null;
 
-    await saveDocumentRemote(localDoc);
-    return localDoc;
+  const issued = new Date(fechaEmision);
+  if (Number.isNaN(issued.getTime())) return null;
+
+  const expires = new Date(issued);
+  expires.setFullYear(expires.getFullYear() + EFIRMA_VALIDITY_YEARS);
+
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  expires.setHours(0, 0, 0, 0);
+
+  const diasRestantes = Math.ceil((expires - today) / (1000 * 60 * 60 * 24));
+
+  return {
+    fechaEmision: issued.toISOString().split('T')[0],
+    fechaVencimiento: expires.toISOString().split('T')[0],
+    diasRestantes,
+    vigente: diasRestantes > 0
+  };
+}
+
+// ── saveDocument() extendido con trigger de e.firma ────────────────────────
+async function saveDocument(doc) {
+  const normalizedType = doc.document_type || doc.doc_type || 'OTRO';
+
+  const localDoc = {
+    id: doc.id || safeUUID(),
+    file_name: doc.file_name || 'unnamed_file',
+    doc_type: normalizedType,
+    document_type: normalizedType,
+    extracted_data: doc.extracted_data || {},
+    confidence: Number(doc.confidence || 0),
+    safety_flag: !!doc.safety_flag,
+    validation_status: doc.validation_status || 'pendiente',
+    needs_review: !!doc.needs_review || !!doc.safety_flag,
+    source: doc.source || 'local',
+    file_url: doc.file_url || null,
+    created_at: doc.created_at || new Date().toISOString(),
+    updated_at: doc.updated_at || new Date().toISOString(),
+    folder_category: doc.folder_category || doc.extracted_data?.folder_category || null
+  };
+
+  state.documents.unshift(localDoc);
+  if (state.documents.length > MAX_DOCUMENTS) {
+    state.documents = state.documents.slice(0, MAX_DOCUMENTS);
   }
+
+  // ── TRIGGER: Si es e.firma, calcular vigencia de 4 años ────────────────
+  if (normalizedType === 'EFIRMA') {
+    const vigencia = computeEFirmaVigencia(localDoc.extracted_data);
+    if (vigencia) {
+      state.saludFiscal = {
+        ...state.saludFiscal,
+        eFirmaVigente: vigencia.vigente,
+        eFirmaExpiry: vigencia.fechaVencimiento,
+        lastAuditDate: new Date().toISOString(),
+        alertLevel: vigencia.diasRestantes <= 0 ? 'danger'
+                   : vigencia.diasRestantes <= 30 ? 'warning' : 'safe'
+      };
+      state.carpetaFiscal = {
+        ...state.carpetaFiscal,
+        efirmaExpiry: vigencia.fechaVencimiento
+      };
+
+      emit('efirmaVigenciaCalculada', vigencia);
+      console.info(
+        `[Store] e.firma: vence ${vigencia.fechaVencimiento} ` +
+        `(${vigencia.diasRestantes} días restantes)`
+      );
+    }
+  }
+
+  rebuildCarpetaFiscal();
+  persist();
+  emit('documentAdded', localDoc);
+  emit('documentadded', localDoc);
+  emitAll();
+
+  await saveDocumentRemote(localDoc);
+  return localDoc;
+}
 
   function updateCarpetaFiscal(data) {
     state.carpetaFiscal = {
@@ -829,10 +1017,61 @@ const Store = (() => {
     updateAnnualLimit,
     updateSaludFiscal,
     saveDocument,
+    saveInvoiceDocument,
     updateCarpetaFiscal,
     updateDiagnostic,
     reset
+    buildWhatsAppAlertPayload,
+    evaluateRiskLevelChange
   };
 })();
+
+async function saveInvoiceDocument(invoiceData) {
+  const totalFactura = Number(invoiceData?.total || 0);
+
+  const doc = {
+    id: safeUUID(),
+    file_name: `CFDI_${invoiceData?.invoice_number || invoiceData?.invoice_id || 'sin_folio'}.xml`,
+    document_type: 'CFDI',
+    doc_type: 'CFDI',
+    extracted_data: {
+      alegra_invoice_id: invoiceData?.invoice_id || null,
+      invoice_number: invoiceData?.invoice_number || null,
+      rfc_receptor: invoiceData?.rfc_receptor || null,
+      uso_cfdi: invoiceData?.uso_cfdi || null,
+      regimen_fiscal_emisor: invoiceData?.regimen_fiscal_emisor || '626',
+      total: totalFactura,
+      fecha: invoiceData?.fecha || new Date().toISOString().slice(0, 10),
+      tax_usefulness: 'ISR',
+      folder_category: 'ingresos'
+    },
+    confidence: 1,
+    safety_flag: false,
+    validation_status: 'TIMBRADO',
+    needs_review: false,
+    source: 'alegra_invoice',
+    folder_category: 'ingresos',
+    created_at: new Date().toISOString()
+  };
+
+  // Reutiliza saveDocument() → sincroniza a Supabase 'documents' y rearma carpeta fiscal
+  const savedDoc = await saveDocument(doc);
+
+  // ── Suma al Monitor de Ingresos y recalcula el semáforo RESICO en vivo ────
+  const nuevoIncomeYTD = Number(state.incomeYTD || 0) + totalFactura;
+  state.incomeYTD = nuevoIncomeYTD;
+  state.fiscalMetrics.riskLevel = calcRiskLevel(nuevoIncomeYTD, state.fiscalMetrics.annualLimit || DEFAULT_LIMIT);
+
+  persist();
+  emit('income:updated', state.incomeYTD);
+  emit('incomeUpdated', state.incomeYTD);
+  emit('invoiceTimbrada', { ...invoiceData, savedDoc });
+  emitAll();
+
+  // Sincroniza el nuevo income_ytd a Supabase (fiscal_metrics)
+  await upsertMetrics();
+
+  return savedDoc;
+}
 
 window.Store = Store;

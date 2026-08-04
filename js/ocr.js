@@ -1,5 +1,6 @@
 const DocumentProcessor = (() => {
   let booted = false;
+  const SAFETY_THRESHOLD = 0.85; // 85% — Umbral Safety Flag (DOC02 TRD)
 
   function esc(value) {
     return String(value ?? '')
@@ -15,7 +16,7 @@ const DocumentProcessor = (() => {
       const reader = new FileReader();
       reader.onload = () => {
         const result = String(reader.result || '');
-        const base64 = result.includes(',') ? result.split(',') : result;[6]
+        const base64 = result.includes(',') ? result.split(',')[1] : result;
         resolve(base64);
       };
       reader.onerror = reject;
@@ -23,63 +24,115 @@ const DocumentProcessor = (() => {
     });
   }
 
+  // ── Detección de tipo de documento (ticket de gasto vs CFDI vs otro) ─────
+  function detectTicketType(extractedData, fileName = '') {
+    const emisor = String(extractedData?.rfc_emisor || '').toUpperCase();
+    const nombreComercial = String(extractedData?.nombre_emisor || '').toUpperCase();
+    const combined = `${emisor} ${nombreComercial} ${fileName}`.toUpperCase();
+
+    const isGasStation = /GASOLIN|PEMEX|OXXO GAS|SHELL|BP\b|MOBIL|G500|GNP GAS/.test(combined);
+    const isOxxo = /OXXO(?!\s*GAS)/.test(combined);
+    const isTicket = isGasStation || isOxxo || extractedData?.tipo_comprobante === 'TICKET';
+
+    return { isTicket, isGasStation, isOxxo };
+  }
+
+  // ── Nota pedagógica RESICO: ISR no deducible, IVA sí acreditable ─────────
+  function buildFiscalNote(extractedData, fileName) {
+    const { isTicket, isGasStation, isOxxo } = detectTicketType(extractedData, fileName);
+
+    if (isTicket) {
+      const origen = isGasStation ? 'gasolina' : isOxxo ? 'OXXO' : 'gasto general';
+      return {
+        applies: true,
+        origen,
+        mensaje:
+          `📌 Nota RESICO: Este ticket de ${origen} — ` +
+          `Para ISR no es deducible (RESICO tributa sobre ingresos brutos sin deducciones), ` +
+          `pero para IVA es indispensable para tu acreditamiento conforme a la Ley del IVA. ` +
+          `Conserva el CFDI con desglose de IVA, no solo el ticket físico.`
+      };
+    }
+    return { applies: false, origen: null, mensaje: '' };
+  }
+
+  // ── Safety Flag: Verificación Humana si confianza < 85% ──────────────────
+  function computeSafetyFlag(confidence) {
+    const conf = Number(confidence || 0);
+    const normalizedConf = conf > 1 ? conf / 100 : conf; // soporta 0-1 o 0-100
+    const needsReview = normalizedConf < SAFETY_THRESHOLD;
+
+    return {
+      safety_flag: needsReview,
+      needs_review: needsReview,
+      validation_status: needsReview ? 'Verificación Humana Requerida' : 'validado_ia',
+      confidence_pct: Math.round(normalizedConf * 100)
+    };
+  }
+
+  // ── Indicador visual de procesamiento IA ──────────────────────────────────
+  function showProcessingIndicator(show) {
+    const indicator = document.getElementById('ocr-processing-indicator');
+    const button = document.getElementById('ocr-analyze-btn');
+    if (indicator) indicator.hidden = !show;
+    if (button) {
+      button.disabled = show;
+      button.textContent = show ? 'Analizando...' : 'Analizar con IA';
+    }
+  }
+
   function renderResult(payload) {
     const doc = payload?.document || {};
     const data = doc.extracted_data || {};
-    const review = !!payload?.needsHumanReview || !!doc?.needs_review || !!doc?.safety_flag;
+    const safety = computeSafetyFlag(doc.confidence);
+    const fiscalNote = buildFiscalNote(data, doc.file_name);
+
+    const reviewBadge = safety.needs_review
+      ? `<span style="background:#f59e0b;color:#000;padding:3px 10px;border-radius:6px;
+                       font-size:12px;font-weight:700;">
+           ⚠️ Verificación Humana Requerida (${safety.confidence_pct}% confianza)
+         </span>`
+      : `<span style="background:#10b981;color:#fff;padding:3px 10px;border-radius:6px;
+                       font-size:12px;font-weight:700;">
+           ✅ Validado IA (${safety.confidence_pct}% confianza)
+         </span>`;
+
+    const noteBlock = fiscalNote.applies
+      ? `<div style="margin-top:10px;padding:10px;background:rgba(16,185,129,0.1);
+                     border-left:3px solid #10b981;border-radius:4px;font-size:13px;">
+           ${esc(fiscalNote.mensaje)}
+         </div>`
+      : '';
 
     return `
-      <div style="background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.08);border-radius:16px;padding:16px;color:#e2e8f0;">
-        <div style="display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap;align-items:flex-start;">
-          <div>
-            <div style="font-weight:700;">${esc(doc.file_name || 'documento')}</div>
-            <div style="color:#94a3b8;font-size:13px;margin-top:4px;">
-              ${esc(doc.document_type || doc.doc_type || 'OTRO')} · Confianza ${Math.round(Number(doc.confidence || 0) * 100)}%
-            </div>
-          </div>
-          <span class="${review ? 'badge-warning' : 'badge-safe'}" style="padding:6px 10px;border-radius:999px;">
-            ${review ? 'Verificación humana obligatoria' : 'Procesado'}
-          </span>
-        </div>
-
-        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:10px;margin-top:12px;">
-          <div><strong>RFC emisor:</strong><br>${esc(data.rfc_emisor || '—')}</div>
-          <div><strong>RFC receptor:</strong><br>${esc(data.rfc_receptor || '—')}</div>
-          <div><strong>Subtotal:</strong><br>${esc(data.subtotal ?? '—')}</div>
-          <div><strong>IVA:</strong><br>${esc(data.iva ?? '—')}</div>
-          <div><strong>Total:</strong><br>${esc(data.total ?? '—')}</div>
-          <div><strong>Folio:</strong><br>${esc(data.folio || '—')}</div>
-          <div><strong>Fecha:</strong><br>${esc(data.fecha || '—')}</div>
-          <div><strong>Utilidad fiscal:</strong><br>${esc(data.tax_usefulness || '—')}</div>
-        </div>
-
-        <div style="margin-top:12px;color:#94a3b8;font-size:13px;">
-          ${esc(doc.pedagogical_note || 'ISR RESICO no deduce gastos; IVA requiere CFDI válido y gasto indispensable.')}
-        </div>
+      <div style="border:1px solid #334155;border-radius:8px;padding:16px;">
+        <div style="margin-bottom:10px;">${reviewBadge}</div>
+        <table style="width:100%;font-size:13px;border-collapse:collapse;">
+          <tr><td style="padding:4px 0;color:#94a3b8;">RFC Emisor:</td><td>${esc(data.rfc_emisor || '—')}</td></tr>
+          <tr><td style="padding:4px 0;color:#94a3b8;">RFC Receptor:</td><td>${esc(data.rfc_receptor || '—')}</td></tr>
+          <tr><td style="padding:4px 0;color:#94a3b8;">Fecha:</td><td>${esc(data.fecha || '—')}</td></tr>
+          <tr><td style="padding:4px 0;color:#94a3b8;">Folio/Autorización:</td><td>${esc(data.folio || data.autorizacion || '—')}</td></tr>
+          <tr><td style="padding:4px 0;color:#94a3b8;">Subtotal:</td><td>$${Number(data.subtotal || 0).toLocaleString('es-MX')}</td></tr>
+          <tr><td style="padding:4px 0;color:#94a3b8;">IVA:</td><td>$${Number(data.iva || 0).toLocaleString('es-MX')}</td></tr>
+          <tr><td style="padding:4px 0;color:#94a3b8;font-weight:700;">Total:</td><td style="font-weight:700;">$${Number(data.total || 0).toLocaleString('es-MX')}</td></tr>
+        </table>
+        ${noteBlock}
       </div>
     `;
   }
 
-  async function processSelectedFile() {
-    const input = document.getElementById('file-input');
-    const output = document.getElementById('ocr-output');
-    const button = document.getElementById('ocr-process-btn');
-
-    if (!input || !output || !button) return;
-
-    const file = input.files?.;
+  async function analyzeFile(file) {
+    const output = document.getElementById('ocr-result-output');
     if (!file) {
-      output.innerHTML = '<p style="color:#f59e0b;">Selecciona un archivo antes de analizar.</p>';
+      if (output) output.innerHTML = '<p class="text-muted">Selecciona un archivo antes de analizar.</p>';
       return;
     }
 
-    button.disabled = true;
-    button.textContent = 'Analizando...';
-    output.innerHTML = '<p style="color:#94a3b8;">Extrayendo datos fiscales…</p>';
+    showProcessingIndicator(true);
+    if (output) output.innerHTML = '';
 
     try {
       const base64Data = await fileToBase64(file);
-
       const session = await window.APP_STATE?.supabase?.auth?.getSession?.();
       const token = session?.data?.session?.access_token;
 
@@ -92,58 +145,103 @@ const DocumentProcessor = (() => {
         body: JSON.stringify({
           fileName: file.name,
           mimeType: file.type || 'application/octet-stream',
-          base64Data
+          base64Data,
+          // Prompt estructurado — extracción con precisión objetivo 97%
+          extractionSchema: {
+            rfc_emisor: 'string',
+            rfc_receptor: 'string',
+            nombre_emisor: 'string',
+            fecha: 'YYYY-MM-DD',
+            folio: 'string',
+            autorizacion: 'string',
+            subtotal: 'number',
+            iva: 'number',
+            total: 'number',
+            tipo_comprobante: 'CFDI | TICKET | EFIRMA | CONSTANCIA | OPINION | OTRO',
+            tax_usefulness: 'ISR | IVA | AMBOS | NINGUNO'
+          },
+          instructions:
+            'Extrae los datos fiscales del documento con precisión del 97%. ' +
+            'Identifica si es un ticket de gasto (OXXO, gasolinera) para marcar tax_usefulness=IVA. ' +
+            'Si es un CFDI de ingreso propio, marca tax_usefulness=ISR. ' +
+            'Si detectas archivo .cer o .key de e.firma, marca tipo_comprobante=EFIRMA y ' +
+            'busca fecha_emision para calcular vigencia de 4 años (Art. 17-D CFF).'
         })
       });
 
       const payload = await response.json().catch(() => ({}));
-
       if (!response.ok || !payload?.document) {
         throw new Error(payload?.error || `OCR HTTP ${response.status}`);
       }
 
-      output.innerHTML = renderResult(payload);
+      const safety = computeSafetyFlag(payload.document.confidence);
+
+      if (output) output.innerHTML = renderResult(payload);
+
+      // Enriquecer el documento antes de guardarlo
+      const extractedData = payload.document.extracted_data || {};
+      const fiscalNote = buildFiscalNote(extractedData, file.name);
 
       await window.Store?.saveDocument?.({
         ...payload.document,
         file_name: payload.document.file_name || file.name,
         document_type: payload.document.document_type || payload.document.doc_type || 'OTRO',
-        extracted_data: payload.document.extracted_data || {},
+        extracted_data: {
+          ...extractedData,
+          fiscal_note: fiscalNote.applies ? fiscalNote.mensaje : null
+        },
         confidence: Number(payload.document.confidence || 0),
-        safety_flag: !!payload.document.safety_flag,
-        validation_status: payload.document.validation_status || 'pendiente',
-        needs_review: !!payload.document.needs_review || !!payload.needsHumanReview,
+        safety_flag: safety.safety_flag,
+        validation_status: safety.validation_status,
+        needs_review: safety.needs_review,
         source: payload.document.source || 'ocr_ai',
         created_at: new Date().toISOString()
       });
 
       window.DocumentsManager?.renderDocuments?.();
+      window.App?.renderCarpetaFiscal?.(); // refrescar carpeta fiscal si está montada
+
     } catch (error) {
-      output.innerHTML = `
-        <div style="background:rgba(239,68,68,0.12);border:1px solid rgba(239,68,68,0.4);border-radius:12px;padding:14px;color:#fecaca;">
-          Error procesando documento: ${esc(error?.message || 'Error desconocido')}
-        </div>
-      `;
+      if (output) {
+        output.innerHTML = `
+          <div style="color:#ef4444;padding:10px;border:1px solid #ef4444;border-radius:6px;">
+            Error al procesar: ${esc(error?.message || 'desconocido')}
+          </div>`;
+      }
+      console.warn('[OCR] analyzeFile error:', error);
     } finally {
-      button.disabled = false;
-      button.textContent = 'Analizar documento';
+      showProcessingIndicator(false);
     }
   }
 
-  function init() {
+  function bindInputPreview(inputId) {
+    const input = document.getElementById(inputId);
+    input?.addEventListener('change', () => {
+      const file = input.files?.[0];
+      const preview = document.getElementById('ocr-file-preview');
+      const nameEl = document.getElementById('ocr-file-name');
+      if (file && preview && nameEl) {
+        nameEl.textContent = file.name;
+        preview.hidden = false;
+      }
+      window.__ocrSelectedFile = file || null;
+    });
+  }
+
+  function boot() {
     if (booted) return;
     booted = true;
 
-    const button = document.getElementById('ocr-process-btn');
-    if (button) {
-      button.addEventListener('click', processSelectedFile);
-    }
+    bindInputPreview('ocr-file-input');
+    bindInputPreview('ocr-file-input-gallery');
+
+    document.getElementById('ocr-analyze-btn')?.addEventListener('click', () => {
+      analyzeFile(window.__ocrSelectedFile);
+    });
   }
 
-  return {
-    init,
-    processSelectedFile
-  };
+  return { boot, analyzeFile, computeSafetyFlag, buildFiscalNote };
 })();
 
 window.DocumentProcessor = DocumentProcessor;
+document.addEventListener('DOMContentLoaded', () => window.DocumentProcessor.boot());
