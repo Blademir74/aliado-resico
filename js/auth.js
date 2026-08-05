@@ -354,37 +354,45 @@ const AuthManager = (() => {
   }
 
   function bindEvents() {
-    if (_eventsBound) return;
-    _eventsBound = true;
+  const submitBtn = document.getElementById('auth-submit');
+  const demoBtn = document.getElementById('auth-demo');
+  const msgEl = document.getElementById('auth-msg');
+  const emailInput = document.getElementById('auth-email');
+  const passInput = document.getElementById('auth-password');
+  const logoutBtn = document.getElementById('logout-btn');
+  const tabLogin = document.getElementById('tab-login');
+  const tabRegister = document.getElementById('tab-register');
+  const forgotBtn = document.getElementById('auth-forgot-password');
 
-    const submitBtn = document.getElementById('auth-submit');
-    const demoBtn = document.getElementById('auth-demo');
-    const msgEl = document.getElementById('auth-msg');
-    const emailInput = document.getElementById('auth-email');
-    const passInput = document.getElementById('auth-password');
-    const logoutBtn = document.getElementById('logout-btn');
-    const tabLogin = document.getElementById('tab-login');
-    const tabRegister = document.getElementById('tab-register');
-    const forgotBtn = document.getElementById('auth-forgot-password');
-    
-    if (!submitBtn) return;
+  // ── FIX: vinculación INDEPENDIENTE por botón, con guard individual ──
+  // Ya no existe un único interruptor (_eventsBound) que pueda bloquear
+  // los tres botones a la vez. Cada elemento se vincula solo una vez
+  // (vía dataset), pero un fallo en uno NUNCA impide a los demás.
 
-    tabLogin?.addEventListener('click', () => {
+  if (tabLogin && !tabLogin.dataset.boundAuth) {
+    tabLogin.dataset.boundAuth = '1';
+    tabLogin.addEventListener('click', () => {
       isRegister = false;
       tabLogin.classList.add('active');
       tabRegister?.classList.remove('active');
-      submitBtn.textContent = '🔐 Iniciar Sesión';
+      if (submitBtn) submitBtn.textContent = '🔐 Iniciar Sesión';
       if (msgEl) { msgEl.hidden = true; msgEl.textContent = ''; }
     });
+  }
 
-    tabRegister?.addEventListener('click', () => {
+  if (tabRegister && !tabRegister.dataset.boundAuth) {
+    tabRegister.dataset.boundAuth = '1';
+    tabRegister.addEventListener('click', () => {
       isRegister = true;
       tabRegister.classList.add('active');
       tabLogin?.classList.remove('active');
-      submitBtn.textContent = '✅ Crear Cuenta';
+      if (submitBtn) submitBtn.textContent = '✅ Crear Cuenta';
       if (msgEl) { msgEl.hidden = true; msgEl.textContent = ''; }
     });
+  }
 
+  if (submitBtn && !submitBtn.dataset.boundAuth) {
+    submitBtn.dataset.boundAuth = '1';
     submitBtn.addEventListener('click', async () => {
       const email = emailInput?.value?.trim();
       const pass = passInput?.value;
@@ -463,14 +471,21 @@ const AuthManager = (() => {
         if (e.key === 'Enter') submitBtn.click();
       })
     );
+  }
 
-    demoBtn?.addEventListener('click', (e) => {
+  if (demoBtn && !demoBtn.dataset.boundAuth) {
+    demoBtn.dataset.boundAuth = '1';
+    demoBtn.addEventListener('click', (e) => {
       e.preventDefault();
       e.stopPropagation();
+      console.info('[Auth] Click en Demo detectado — ejecutando bypassToDemo()');
       bypassToDemo();
     });
+  }
 
-    forgotBtn?.addEventListener('click', async (e) => {
+  if (forgotBtn && !forgotBtn.dataset.boundAuth) {
+    forgotBtn.dataset.boundAuth = '1';
+    forgotBtn.addEventListener('click', async (e) => {
       e.preventDefault();
       const email = emailInput?.value?.trim();
       if (!email) {
@@ -509,43 +524,26 @@ const AuthManager = (() => {
         forgotBtn.textContent = '¿Olvidaste tu contraseña?';
       }
     });
+  }
 
-    logoutBtn?.addEventListener('click', async () => {
+  if (logoutBtn && !logoutBtn.dataset.boundAuth) {
+    logoutBtn.dataset.boundAuth = '1';
+    logoutBtn.addEventListener('click', async () => {
       const client = window.APP_STATE?.supabase;
       if (client) await client.auth.signOut();
       window.Store?.reset?.();
     });
   }
 
-  async function initialize() {
-    if (_authInitialized) return true;
-    if (_initializing) return _initPromise;
-
-    _initializing = true;
-    _initPromise = (async () => {
-      const client = window.APP_STATE?.supabase;
-      const url = window.AppConfig?.getSupabaseUrl?.() || '';
-      const key = window.AppConfig?.getSupabaseKey?.() || '';
-
-      if (!url || !key || !client) {
-        _setOverlayState(true, '⚠️ Servicio de autenticación no disponible. Usa "Ver Demo".', 'error');
-        _authInitialized = false;
-        _initializing = false;
-        return false;
-      }
-
-      _bindAuthStateListenerOnce();
-
-      const result = await _runCombinedValidation(client);
-      _authInitialized = result;
-      window.APP_STATE.authInitialized = result;
-      _initializing = false;
-      return result;
-    })();
-
-    return _initPromise;
-  }
-
+  // Diagnóstico: confirma en consola qué botones quedaron vinculados
+  console.info('[Auth] bindEvents() ejecutado:', {
+    submitBtn: !!submitBtn?.dataset.boundAuth,
+    demoBtn: !!demoBtn?.dataset.boundAuth,
+    forgotBtn: !!forgotBtn?.dataset.boundAuth,
+    tabLogin: !!tabLogin?.dataset.boundAuth,
+    tabRegister: !!tabRegister?.dataset.boundAuth
+  });
+}
   async function init() {
     bindEvents();
     await initialize();
