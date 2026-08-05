@@ -1584,6 +1584,8 @@ async function handleTimbrado(ocrData) {
 }
 
 window.App = window.App || {};
+window.App.hideAuthOverlay = hideAuthOverlay;
+window.App.showAuthOverlay = showAuthOverlay;
 window.App.handleTimbrado = handleTimbrado;
 
 
@@ -1623,6 +1625,68 @@ async function onEFirmaUpload(event) {
   return result;
 }
 
+  let authOverlayGuardBound = false;
+
+/**
+ * hideAuthOverlay — Oculta el overlay usando display:none REAL,
+ * no solo opacity. Limpia también cualquier estado inline previo.
+ */
+function hideAuthOverlay() {
+  const overlay = byId('auth-overlay');
+  if (!overlay) return;
+  overlay.style.display = 'none';   // display:none real, no opacity
+  overlay.style.opacity = '';       // limpia rastros de animaciones previas
+  overlay.setAttribute('aria-hidden', 'true');
+
+  const appRoot = byId('app');
+  if (appRoot) appRoot.style.display = 'block';
+}
+
+function showAuthOverlay() {
+  const overlay = byId('auth-overlay');
+  if (!overlay) return;
+  overlay.style.display = 'flex';
+  overlay.removeAttribute('aria-hidden');
+}
+
+/**
+ * initAuthOverlayGuard — Capa de seguridad independiente de auth.js.
+ * Si por cualquier motivo AuthManager no vincula sus propios listeners
+ * (script no cargado, error silencioso, orden de carga), esta función
+ * garantiza que los botones básicos sigan siendo funcionales.
+ */
+function initAuthOverlayGuard() {
+  if (authOverlayGuardBound) return; // evita doble-bind si se llama 2 veces
+  authOverlayGuardBound = true;
+
+  const demoBtn = byId('auth-demo');
+  if (demoBtn && !demoBtn.dataset.guardBound) {
+    demoBtn.dataset.guardBound = '1';
+    demoBtn.addEventListener('click', () => {
+      window.APP_STATE = window.APP_STATE || {};
+      window.APP_STATE.isDemo = true;
+      hideAuthOverlay(); // display:none garantizado, no solo opacity
+      window.App?.syncAndRender?.();
+    });
+  }
+
+  // Verificación de diagnóstico: confirma en consola si los scripts
+  // críticos realmente se cargaron (ayuda a detectar el bug de scripts
+  // fantasma sin depender de errores del navegador).
+  const missing = [];
+  if (typeof window.WebThreads === 'undefined') missing.push('webthreads.js');
+  if (typeof window.AuthRegisterUI === 'undefined') missing.push('auth-register.js');
+
+  if (missing.length) {
+    console.warn(
+      `[App] ⚠️ Scripts no cargados o cargados fuera de orden: ${missing.join(', ')}. ` +
+      `Verifica las etiquetas <script> en index.html antes de </body>.`
+    );
+  } else {
+    console.info('[App] ✅ WebThreads y AuthRegisterUI cargados correctamente.');
+  }
+}
+
   async function init() {
     if (booted) return;
     booted = true;
@@ -1635,6 +1699,8 @@ async function onEFirmaUpload(event) {
     setWizardStep(1);
     resetWizard();
 
+    initAuthOverlayGuard(); 
+    
     window.DocumentsManager?.init?.();
     window.DocumentProcessor?.init?.();
     window.Invoicing?.init?.();

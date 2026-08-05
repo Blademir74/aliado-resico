@@ -216,14 +216,47 @@ const AuthRegisterUI = (() => {
   function isRegisterModeActive() { return isRegisterMode; }
 
   function init() {
-    byId('tab-login')?.addEventListener('click', switchToLogin);
-    byId('tab-register')?.addEventListener('click', switchToRegister);
-
-    byId('auth-password')?.addEventListener('input', (e) => {
-      updatePasswordUI(e.target.value);
-      updateSubmitButtonState();
-    });
+  // Guard de idempotencia: si init() se llama dos veces (por ejemplo,
+  // si el script se incluye por error más de una vez), no duplica listeners.
+  if (window.__authRegisterUIBound) {
+    console.warn('[AuthRegisterUI] init() ya fue ejecutado. Ignorando doble llamada.');
+    return;
   }
+  window.__authRegisterUIBound = true;
+
+  const tabLogin = byId('tab-login');
+  const tabRegister = byId('tab-register');
+  const submitBtn = byId('auth-submit');
+
+  if (!tabLogin || !tabRegister || !submitBtn) {
+    console.warn(
+      '[AuthRegisterUI] ⚠️ No se encontraron uno o más elementos del formulario ' +
+      '(tab-login / tab-register / auth-submit). Verifica que index.html cargue ' +
+      'este script DESPUÉS de renderizar el DOM del auth-overlay.'
+    );
+    return;
+  }
+
+  tabLogin.addEventListener('click', switchToLogin);
+  tabRegister.addEventListener('click', switchToRegister);
+
+  byId('auth-password')?.addEventListener('input', (e) => {
+    updatePasswordUI(e.target.value);
+    updateSubmitButtonState();
+  });
+
+  // ── Demo button: garantiza display:none real, no solo opacity ──────────
+  byId('auth-demo')?.addEventListener('click', () => {
+    const overlay = byId('auth-overlay');
+    if (overlay) {
+      overlay.style.display = 'none';
+      overlay.style.opacity = '';
+    }
+    window.App?.hideAuthOverlay?.(); // delega también al guard de app.js
+  });
+
+  console.info('[AuthRegisterUI] ✅ Listeners de tabs y submit vinculados correctamente.');
+}
 
   return {
     init,
