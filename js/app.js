@@ -1687,37 +1687,50 @@ function initAuthOverlayGuard() {
   }
 }
 
-  async function init() {
-    if (booted) return;
-    booted = true;
+ async function init() {
+  if (booted) return;
+  booted = true;
 
-    initTheme();
-    initNavigation();
-    initRFC();
-    initClassifier();
-    initCarpetaFiscalUploads();
-    setWizardStep(1);
-    resetWizard();
+  initTheme();
+  initNavigation();
+  initRFC();
+  initClassifier();
+  initCarpetaFiscalUploads();
+  setWizardStep(1);
+  resetWizard();
 
-    initAuthOverlayGuard(); 
-    
-    window.DocumentsManager?.init?.();
-    window.DocumentProcessor?.init?.();
-    window.Invoicing?.init?.();
+  window.DocumentsManager?.init?.();
+  window.DocumentProcessor?.init?.();
+  window.Invoicing?.init?.();
 
+  // ── FIX CRÍTICO: initCore() ya NO puede tumbar el resto del boot ──
+  // Si falla (config remota caída, timeout de red, etc.), se captura,
+  // se registra en consola, y el flujo CONTINÚA hacia AuthManager.
+  try {
     await initCore();
-
-    window.Store?.on?.('storeUpdated', syncAndRender);
-    window.Store?.on?.('documentAdded', syncAndRender);
-    window.Store?.on?.('conversationAdded', syncAndRender);
-    window.Store?.on?.('carpetaUpdated', renderCarpetaFiscal);
-
-    syncAndRender();
-
-    initRiskAlertListener();
-    
-    window.AuthManager?.init?.();
+  } catch (err) {
+    console.error(
+      '[App] ⚠️ initCore() falló — la app continúa en modo degradado. ' +
+      'Los botones de Auth (Demo / Crear Cuenta) se vincularán igual. Detalle:',
+      err?.message || err
+    );
   }
+
+  window.Store?.on?.('storeUpdated', syncAndRender);
+  window.Store?.on?.('documentAdded', syncAndRender);
+  window.Store?.on?.('conversationAdded', syncAndRender);
+  window.Store?.on?.('carpetaUpdated', renderCarpetaFiscal);
+  syncAndRender();
+  initRiskAlertListener();
+
+  // ── FIX CRÍTICO: esta línea ahora SIEMPRE se ejecuta ──
+  // sin importar si initCore() tuvo éxito o falló.
+  try {
+    window.AuthManager?.init?.();
+  } catch (err) {
+    console.error('[App] ⚠️ AuthManager.init() falló:', err?.message || err);
+  }
+}
 
   return {
     init,
