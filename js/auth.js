@@ -366,7 +366,7 @@ const AuthManager = (() => {
     const tabLogin = document.getElementById('tab-login');
     const tabRegister = document.getElementById('tab-register');
     const forgotBtn = document.getElementById('auth-forgot-password');
-
+    
     if (!submitBtn) return;
 
     tabLogin?.addEventListener('click', () => {

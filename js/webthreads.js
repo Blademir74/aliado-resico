@@ -3,15 +3,15 @@ const WebThreads = (() => {
   let threads = [];
   let mouse = { x: -9999, y: -9999 };
   let config = {
-    color1: '#5227FF',
-    color2: '#FF9FFC',
-    color3: '#FFFFFF',
-    speed: 0.2,
-    mouseInteraction: true,
-    threadCount: 12,
-    lineWidth: 1.4,
-    amplitude: 60
-  };
+  color1: '#10b981',   // Verde RESICO — Aprobación/Cumplimiento
+  color2: '#38bdf8',   // Azul Fintech — Seguridad/Tecnología
+  color3: '#0a1628',   // Azul Profundo — Fondo Premium (Bóveda Fiscal)
+  speed: 0.15,
+  mouseInteraction: true,
+  threadCount: 12,
+  lineWidth: 1.2,
+  amplitude: 50
+};
 
   function isMobileViewport() {
     return window.innerWidth <= 390;
@@ -101,7 +101,7 @@ const WebThreads = (() => {
   }
 
   function animate(timestamp) {
-    ctx.fillStyle = '#0a0118';
+    ctx.fillStyle = '#0a1628';
     ctx.fillRect(0, 0, canvas.width, canvas.height);
 
     const time = timestamp * 0.001;
@@ -119,22 +119,32 @@ const WebThreads = (() => {
     resizeCanvas();
   }
 
-  function init(userConfig = {}) {
-    canvas = document.getElementById('webthreads-canvas');
-    if (!canvas) return;
-    ctx = canvas.getContext('2d');
+ function init(userConfig = {}) {
+  canvas = document.getElementById('webthreads-canvas');
+  if (!canvas) return;
+  ctx = canvas.getContext('2d');
 
-    config = { ...config, ...userConfig };
-    resizeCanvas();
+  // ── Blindaje de capas vía JS: garantiza que el canvas NUNCA ──
+  // ── intercepte clics, sin importar qué diga el CSS estático ──
+  canvas.style.position = 'fixed';
+  canvas.style.top = '0';
+  canvas.style.left = '0';
+  canvas.style.width = '100vw';
+  canvas.style.height = '100vh';
+  canvas.style.zIndex = '-1';
+  canvas.style.pointerEvents = 'none';
 
-    if (config.mouseInteraction) {
-      window.addEventListener('mousemove', handleMouseMove);
-    }
-    window.addEventListener('resize', handleResize);
+  config = { ...config, ...userConfig };
+  resizeCanvas();
 
-    if (animationId) cancelAnimationFrame(animationId);
-    animationId = requestAnimationFrame(animate);
+  if (config.mouseInteraction) {
+    window.addEventListener('mousemove', handleMouseMove);
   }
+  window.addEventListener('resize', handleResize);
+
+  if (animationId) cancelAnimationFrame(animationId);
+  animationId = requestAnimationFrame(animate);
+}
 
   function destroy() {
     if (animationId) cancelAnimationFrame(animationId);
@@ -150,13 +160,13 @@ window.WebThreads = WebThreads;
 // ── Inicialización con los props solicitados ────────────────────────────────
 document.addEventListener('DOMContentLoaded', () => {
   window.WebThreads.init({
-    color1: '#5227FF',
-    color2: '#FF9FFC',
-    color3: '#FFFFFF',
-    speed: 0.2,
+    color1: '#10b981',
+    color2: '#38bdf8',
+    color3: '#0a1628',
+    speed: 0.15,
     mouseInteraction: true,
-    threadCount: 12,   // se reduce a 4 automáticamente en viewports ≤390px
-    lineWidth: 1.4,
-    amplitude: 60
+    threadCount: 12,
+    lineWidth: 1.2,
+    amplitude: 50
   });
 });

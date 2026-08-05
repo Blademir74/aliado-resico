@@ -216,8 +216,6 @@ const AuthRegisterUI = (() => {
   function isRegisterModeActive() { return isRegisterMode; }
 
   function init() {
-  // Guard de idempotencia: si init() se llama dos veces (por ejemplo,
-  // si el script se incluye por error más de una vez), no duplica listeners.
   if (window.__authRegisterUIBound) {
     console.warn('[AuthRegisterUI] init() ya fue ejecutado. Ignorando doble llamada.');
     return;
@@ -231,8 +229,7 @@ const AuthRegisterUI = (() => {
   if (!tabLogin || !tabRegister || !submitBtn) {
     console.warn(
       '[AuthRegisterUI] ⚠️ No se encontraron uno o más elementos del formulario ' +
-      '(tab-login / tab-register / auth-submit). Verifica que index.html cargue ' +
-      'este script DESPUÉS de renderizar el DOM del auth-overlay.'
+      '(tab-login / tab-register / auth-submit). Verifica el orden de carga en index.html.'
     );
     return;
   }
@@ -245,17 +242,10 @@ const AuthRegisterUI = (() => {
     updateSubmitButtonState();
   });
 
-  // ── Demo button: garantiza display:none real, no solo opacity ──────────
-  byId('auth-demo')?.addEventListener('click', () => {
-    const overlay = byId('auth-overlay');
-    if (overlay) {
-      overlay.style.display = 'none';
-      overlay.style.opacity = '';
-    }
-    window.App?.hideAuthOverlay?.(); // delega también al guard de app.js
-  });
+  // NOTA: #auth-demo NO se toca aquí. auth.js lo gestiona
+  // exclusivamente vía bindEvents() → bypassToDemo().
 
-  console.info('[AuthRegisterUI] ✅ Listeners de tabs y submit vinculados correctamente.');
+  console.info('[AuthRegisterUI] ✅ Listeners de tabs y campos de registro vinculados.');
 }
 
   return {
