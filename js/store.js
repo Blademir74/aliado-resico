@@ -723,55 +723,48 @@ function applyMetricRow(row) {
     authListenerBound = true;
   }
 
- async function initSupabase() {
-  ensureAppState();
+  async function initSupabase() {
+    ensureAppState();
 
-  const url = window.SUPABASE_CONFIG?.url || window.AppConfig?.getSupabaseUrl?.();
-  const anonKey = window.SUPABASE_CONFIG?.anonKey || window.AppConfig?.getSupabaseKey?.();
-  const hasLibrary = !!window.supabase?.createClient;
+    const url = window.SUPABASE_CONFIG?.url || window.AppConfig?.getSupabaseUrl?.();
+    const anonKey = window.SUPABASE_CONFIG?.anonKey || window.AppConfig?.getSupabaseKey?.();
 
-  // FIX: diagnóstico explícito — ya no falla en silencio.
-  if (!url || !anonKey || !hasLibrary) {
-    console.error('[Store] ❌ No se pudo inicializar Supabase. Detalle:', {
-      url_presente: !!url,
-      anonKey_presente: !!anonKey,
-      libreria_supabase_js_cargada: hasLibrary,
-      window_AppConfig_existe: !!window.AppConfig,
-      window_SUPABASE_CONFIG_existe: !!window.SUPABASE_CONFIG
-    });
-    window.APP_STATE.supabase = null;
-    return null;
-  }
-
-  console.info('[Store] ✅ Configuración de Supabase válida. Creando cliente...');
-
-  if (!db) {
-    db = window.supabase.createClient(url, anonKey, {
-      auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true }
-    });
-  }
-
-  window.APP_STATE.supabase = db;
-  bindAuthListenerOnce();
-
-  try {
-    const { data, error } = await db.auth.getSession();
-    if (error) logSupabaseError('getSession', error);
-
-    usr = data?.session?.user || null;
-    window.APP_STATE.currentUser = usr;
-
-    if (usr?.id) {
-      await syncDown();
-      subscribeRealtime();
+    if (!url || !anonKey || !window.supabase?.createClient) {
+      window.APP_STATE.supabase = null;
+      return null;
     }
 
-    return db;
-  } catch (e) {
-    console.warn('[Store] initSupabase exception:', e?.message || e);
-    return db;
+    if (!db) {
+      db = window.supabase.createClient(url, anonKey, {
+        auth: {
+          persistSession: true,
+          autoRefreshToken: true,
+          detectSessionInUrl: true
+        }
+      });
+    }
+
+    window.APP_STATE.supabase = db;
+    bindAuthListenerOnce();
+
+    try {
+      const { data, error } = await db.auth.getSession();
+      if (error) logSupabaseError('getSession', error);
+
+      usr = data?.session?.user || null;
+      window.APP_STATE.currentUser = usr;
+
+      if (usr?.id) {
+        await syncDown();
+        subscribeRealtime();
+      }
+
+      return db;
+    } catch (e) {
+      console.warn('[Store] initSupabase exception:', e?.message || e);
+      return db;
+    }
   }
-}
 
   function getState() { return state; }
   function getMetrics() { return state.metrics; }
