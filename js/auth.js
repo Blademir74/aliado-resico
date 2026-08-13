@@ -341,14 +341,19 @@ function bindEvents() {
 
       const client = window.APP_STATE?.supabase;
       if (!client) {
-        if (msgEl) {
-          msgEl.hidden = false;
-          msgEl.textContent = 'Servicio no disponible. Usa Demo.';
-          msgEl.className = 'auth-msg error';
-          msgEl.style.color = '#ef4444';
+          // FIX: diagnóstico explícito en consola + mensaje más claro al usuario
+          console.error(
+            '[Auth] ❌ window.APP_STATE.supabase es null. El formulario no puede ' +
+            'enviar datos a Supabase. Revisa el log de [Store] arriba para ver la causa exacta.'
+          );
+          if (msgEl) {
+            msgEl.hidden = false;
+            msgEl.textContent = '⚠️ Servicio no disponible. Revisa tu conexión o usa "Ver Demo".';
+            msgEl.className = 'auth-msg error';
+            msgEl.style.color = '#ef4444';
+          }
+          return;
         }
-        return;
-      }
 
       submitBtn.disabled = true;
       submitBtn.textContent = '⏳ Verificando...';
@@ -356,23 +361,34 @@ function bindEvents() {
       try {
         let authResult;
 
-        if (isRegister) {
+       if (isRegister) {
           authResult = await client.auth.signUp({ email, password: pass });
-          if (authResult.error) throw authResult.error;
+            if (authResult.error) throw authResult.error;
 
-          if (authResult.data?.user && !authResult.data?.session) {
-            if (msgEl) {
-              msgEl.hidden = false;
-              msgEl.textContent = '✅ Cuenta creada. Revisa tu correo para confirmar.';
-              msgEl.className = 'auth-msg success';
-              msgEl.style.color = '#10b981';
+            console.info('[Auth] ✅ signUp() completado:', authResult.data);
+
+            if (authResult.data?.user && !authResult.data?.session) {
+              if (msgEl) {
+                msgEl.hidden = false;
+                msgEl.textContent = '✅ Cuenta creada con éxito. Revisa tu correo para confirmar tu registro antes de iniciar sesión.';
+                msgEl.className = 'auth-msg success';
+                msgEl.style.color = '#10b981';
+                msgEl.style.fontWeight = '700';
+              }
+              return;
             }
-            return;
+
+            // Caso: Supabase tiene confirmación de correo desactivada y ya
+            // devuelve sesión activa inmediatamente tras el registro.
+            if (authResult.data?.session) {
+              if (msgEl) {
+                msgEl.hidden = false;
+                msgEl.textContent = '✅ Cuenta creada e iniciada sesión correctamente.';
+                msgEl.className = 'auth-msg success';
+                msgEl.style.color = '#10b981';
+              }
+            }
           }
-        } else {
-          authResult = await client.auth.signInWithPassword({ email, password: pass });
-          if (authResult.error) throw authResult.error;
-        }
 
         _authInitialized = false;
         _initializing = false;
