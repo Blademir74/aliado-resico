@@ -1687,7 +1687,24 @@ function initAuthOverlayGuard() {
   }
 }
 
- async function init() {
+// ── FIX CRÍTICO: wizardNext() declarada explícitamente ──
+// Es la pieza que faltaba y provocaba el ReferenceError:
+// "wizardNext is not defined" al ejecutarse el IIFE de App.
+// Maneja la transición de pasos del Wizard Fiscal (Art. 113-F LISR),
+// reutilizando validateStep(), setWizardStep() y completeWizard()
+// que ya existen en este mismo archivo.
+function wizardNext() {
+  if (!validateStep(wizardStep)) return;
+
+  if (wizardStep >= WIZARD_MAX_STEPS) {
+    completeWizard();
+    return;
+  }
+
+  setWizardStep(wizardStep + 1);
+}
+
+async function init() {
   if (booted) return;
   booted = true;
 
@@ -1703,15 +1720,11 @@ function initAuthOverlayGuard() {
   window.DocumentProcessor?.init?.();
   window.Invoicing?.init?.();
 
-  // ── FIX CRÍTICO: initCore() ya NO puede tumbar el resto del boot ──
-  // Si falla (config remota caída, timeout de red, etc.), se captura,
-  // se registra en consola, y el flujo CONTINÚA hacia AuthManager.
   try {
     await initCore();
   } catch (err) {
     console.error(
-      '[App] ⚠️ initCore() falló — la app continúa en modo degradado. ' +
-      'Los botones de Auth (Demo / Crear Cuenta) se vincularán igual. Detalle:',
+      '[App] ⚠️ initCore() falló — la app continúa en modo degradado. Detalle:',
       err?.message || err
     );
   }
@@ -1723,8 +1736,6 @@ function initAuthOverlayGuard() {
   syncAndRender();
   initRiskAlertListener();
 
-  // ── FIX CRÍTICO: esta línea ahora SIEMPRE se ejecuta ──
-  // sin importar si initCore() tuvo éxito o falló.
   try {
     window.AuthManager?.init?.();
   } catch (err) {
@@ -1732,44 +1743,36 @@ function initAuthOverlayGuard() {
   }
 }
 
-  return {
-    init,
-    navigateTo,
-    syncAndRender,
-    wizardNext,
-    resetWizard,
-    saveDiagnostic,
-    renderCarpetaFiscal
-  };
+return {
+  init,
+  navigateTo,
+  syncAndRender,
+  wizardNext,
+  resetWizard,
+  saveDiagnostic,
+  renderCarpetaFiscal
+};
 })();
 
 window.App = App;
-window.wizardNext = App.wizardNext;
+
+// FIX: asignación defensiva — evita llamadas huérfanas si App.wizardNext
+// no existiera por algún motivo (nunca debería pasar ya, pero blinda el onclick).
+window.wizardNext = typeof App.wizardNext === 'function'
+  ? App.wizardNext
+  : function () { console.warn('[App] wizardNext no disponible todavía.'); };
+
 window.resetWizard = App.resetWizard;
 window.saveDiagnostic = App.saveDiagnostic;
 window.Dashboard = App.syncAndRender;
 
-// ────────────────────────────────────────────────────────────
-// HOOK DE INICIALIZACIÓN — Conectar al flujo post-login
-// Agregar al final de la función boot() en app.js
-// ────────────────────────────────────────────────────────────
-
-// Escuchar cuando Store termine de sincronizar con Supabase
-Store.on('store:updated', () => {
-  // Actualizar monitor cada vez que lleguen datos de Supabase
-  syncMonitorPostLogin();
-});
-
-// Registrar handler de e.firma si existe el input en el DOM
 document.addEventListener('DOMContentLoaded', () => {
   const efirmaInput = byId('efirma-upload');
-  if (efirmaInput) {
-    efirmaInput.addEventListener('change', onEFirmaUpload);
-  }
+  if (efirmaInput) efirmaInput.addEventListener('change', onEFirmaUpload);
 });
 
 if (document.readyState === 'loading') {
-  document.addEventListener('DOMContentLoaded', App.init);
+  document.addEventListener('DOMContentLoaded', () => App.init());
 } else {
   App.init();
 }
