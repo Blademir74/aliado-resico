@@ -162,26 +162,36 @@ const AuthRegisterUI = (() => {
     }
   }
 
-  function switchToLogin() {
-    isRegisterMode = false;
-    hideRegisterFields();
-
-    byId('tab-login').style.background = 'rgba(82,39,255,0.25)';
-    byId('tab-login').style.border = '1px solid #5227FF';
-    byId('tab-register').style.background = 'transparent';
-    byId('tab-register').style.border = '1px solid #475569';
-
-    const submitBtn = byId('auth-submit');
-    if (submitBtn) {
-      submitBtn.textContent = 'Iniciar Sesión';
-      submitBtn.disabled = false;
-    }
-
-    const pwHint = byId('auth-password-hint');
-    if (pwHint) { pwHint.textContent = ''; pwHint.className = 'auth-field-hint neutral'; }
-    const pwFill = byId('auth-password-strength-fill');
-    if (pwFill) pwFill.style.width = '0%';
+  // FIX: garantizar estado limpio al cargar la página — el botón
+  // NUNCA debe empezar deshabilitado si el tab activo es login.
+  const submitBtnInit = byId('auth-submit');
+  if (submitBtnInit && !isRegisterMode) {
+    submitBtnInit.disabled = false;
   }
+
+  function switchToLogin() {
+  isRegisterMode = false;
+  hideRegisterFields();
+
+  byId('tab-login').style.background = 'rgba(82,39,255,0.25)';
+  byId('tab-login').style.border = '1px solid #5227FF';
+  byId('tab-register').style.background = 'transparent';
+  byId('tab-register').style.border = '1px solid #475569';
+
+  const submitBtn = byId('auth-submit');
+  if (submitBtn) {
+    submitBtn.textContent = '🔐 Iniciar Sesión';
+    // FIX: forzar disabled=false SIEMPRE al volver a login,
+    // sin importar el estado previo de validación del registro.
+    submitBtn.disabled = false;
+    submitBtn.removeAttribute('disabled');
+  }
+
+  const pwHint = byId('auth-password-hint');
+  if (pwHint) { pwHint.textContent = ''; pwHint.className = 'auth-field-hint neutral'; }
+  const pwFill = byId('auth-password-strength-fill');
+  if (pwFill) pwFill.style.width = '0%';
+}
 
   function switchToRegister() {
     isRegisterMode = true;
