@@ -111,76 +111,75 @@ const App = (() => {
   }
 
   function classifyRFCDeep(rfc) {
-    const clean = String(rfc || '').trim().toUpperCase();
-    const genericNational = 'XAXX010101000';
-    const genericForeign = 'XEXX010101000';
-    const efosSet = new Set(getEFOSWatchlist());
+  const clean = String(rfc || '').trim().toUpperCase();
+  if (!clean) {
+    return { ok: false, message: 'Ingresa un RFC.' };
+  }
 
-    if (!clean) {
-      return { ok: false, message: 'Ingresa un RFC.' };
-    }
+  // FIX: delega en el validador meticuloso real de FiscalWizard.js
+  // (antes esta función tenía su propia validación simplificada, duplicada).
+  const result = window.ValidatorRFC?.validate?.(clean);
 
-    if (clean === genericNational) {
-      return {
-        ok: true,
-        valid: true,
-        type: 'GENÉRICO NACIONAL',
-        risk: 'warning',
-        efos: false,
-        message: `RFC válido: ${clean}`,
-        detail: 'Uso general en operaciones con público en general.'
-      };
-    }
+  if (!result) {
+    return {
+      ok: false,
+      message: 'Validador de RFC no disponible.',
+      detail: 'Verifica que js/FiscalWizard.js esté cargado antes de app.js en index.html.'
+    };
+  }
 
-    if (clean === genericForeign) {
-      return {
-        ok: true,
-        valid: true,
-        type: 'GENÉRICO EXTRANJERO',
-        risk: 'warning',
-        efos: false,
-        message: `RFC válido: ${clean}`,
-        detail: 'Uso para operaciones con residentes en el extranjero.'
-      };
-    }
+  const efosSet = new Set(getEFOSWatchlist());
+  const efos = efosSet.has(clean);
 
-    const pf = /^[A-Z&Ñ]{4}\d{6}[A-Z0-9]{3}$/;
-    const pm = /^[A-Z&Ñ]{3}\d{6}[A-Z0-9]{3}$/;
+  if (!result.valid) {
+    return {
+      ok: true,
+      valid: false,
+      message: 'RFC inválido.',
+      detail: result.warning || 'El RFC no coincide con estructura de Persona Física ni Persona Moral.'
+    };
+  }
 
-    if (!pf.test(clean) && !pm.test(clean)) {
-      return {
-        ok: false,
-        valid: false,
-        message: 'Formato inválido.',
-        detail: 'El RFC no coincide con estructura de Persona Física ni Persona Moral.'
-      };
-    }
+  const typeLabel =
+    result.type === 'PF' ? 'PERSONA FÍSICA' :
+    result.type === 'PM' ? 'PERSONA MORAL' :
+    result.type === 'extranjero' ? 'GENÉRICO EXTRANJERO' :
+    result.type === 'publico' ? 'GENÉRICO NACIONAL' : 'DESCONOCIDO';
 
-    const type = pf.test(clean) ? 'PERSONA FÍSICA' : 'PERSONA MORAL';
-    const efos = efosSet.has(clean);
-
-    if (efos) {
-      return {
-        ok: true,
-        valid: true,
-        type,
-        efos: true,
-        risk: 'danger',
-        message: `RFC válido con alerta crítica: ${clean}`,
-        detail: 'El RFC coincide con la watchlist EFOS configurada. Revisión obligatoria antes de acreditar IVA o facturar en automático.'
-      };
-    }
-
+  if (efos) {
     return {
       ok: true,
       valid: true,
-      type,
-      efos: false,
-      risk: 'safe',
-      message: `RFC válido: ${clean}`,
-      detail: `Estructura detectada de ${type}. Sin coincidencia en watchlist EFOS.`
+      type: typeLabel,
+      efos: true,
+      risk: 'danger',
+      message: `RFC válido con alerta crítica: ${clean}`,
+      detail: 'El RFC coincide con la watchlist EFOS configurada. Revisión obligatoria antes de acreditar IVA o facturar en automático.'
     };
   }
+
+  if (result.warning) {
+    return {
+      ok: true,
+      valid: true,
+      type: typeLabel,
+      efos: false,
+      risk: 'warning',
+      message: `RFC válido: ${clean}`,
+      detail: result.warning
+    };
+  }
+
+  return {
+    ok: true,
+    valid: true,
+    type: typeLabel,
+    efos: false,
+    risk: 'safe',
+    message: `RFC válido: ${clean}`,
+    detail: `Estructura detectada de ${typeLabel} (validación meticulosa PF=13/PM=12 caracteres). Sin coincidencia en watchlist EFOS.`
+  };
+}
 
   function renderRFCResult(result) {
     const out = byId('rfc-result');

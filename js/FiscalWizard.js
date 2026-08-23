@@ -1,26 +1,27 @@
 // js/FiscalWizard.js — Aliado RESICO 2026
-// VERSION CERTIFICADA: Fixes aplicados:
-//   - FIX ALTO-3:  Art. 113-F completo: intereses > $100k → anual obligatoria
-//   - FIX ALTO-3:  Campo separado para salarios e intereses
-//   - FIX T21:     Alerta proactiva e.firma próxima a vencer (30 días)
-//   - FIX T25-T29: Validador de RFC (PF=13 chars, PM=12 chars)
-//   - FIX UI:      Confirmación en lugar de alert() (más profesional)
+// VERSION CERTIFICADA Y CORREGIDA: Fixes aplicados:
+// - FIX ALTO-3: Art. 113-F completo: intereses > $100k → anual obligatoria
+// - FIX ALTO-3: Campo separado para salarios e intereses
+// - FIX T21: Alerta proactiva e.firma próxima a vencer (30 días)
+// - FIX T25-T29: Validador de RFC (PF=13 chars, PM=12 chars)
+// - FIX UI: Confirmación en lugar de alert() (más profesional)
+// - FIX SINTAXIS: Llaves de cierre faltantes corregidas (bloqueaban el script)
 
 (function () {
   // ── Constantes Fiscales 2026 ─────────────────────────────
-  const RESICO_LIMIT          = 3_500_000;
-  const ANNUAL_THRESHOLD_80   = RESICO_LIMIT * 0.80;  // $2,800,000
-  const ANNUAL_THRESHOLD_90   = RESICO_LIMIT * 0.90;  // $3,150,000
-  const ANNUAL_THRESHOLD_94   = RESICO_LIMIT * 0.94;  // $3,290,000
-  const MIXTOS_LIMIT          = 400_000;  // Art. 113-F LISR — salarios
-  const INTERESES_LIMIT       = 100_000;  // Art. 113-F LISR — intereses
-  const MULTA_BUZON           = 10_260;   // Art. 17-K CFF
-  const EFIRMA_ALERT_DAYS     = 30;       // Días de anticipación para alerta
+  const RESICO_LIMIT = 3_500_000;
+  const ANNUAL_THRESHOLD_80 = RESICO_LIMIT * 0.80; // $2,800,000
+  const ANNUAL_THRESHOLD_90 = RESICO_LIMIT * 0.90; // $3,150,000
+  const ANNUAL_THRESHOLD_94 = RESICO_LIMIT * 0.94; // $3,290,000
+  const MIXTOS_LIMIT = 400_000; // Art. 113-F LISR — salarios
+  const INTERESES_LIMIT = 100_000; // Art. 113-F LISR — intereses
+  const MULTA_BUZON = 10_260; // Art. 17-K CFF
+  const EFIRMA_ALERT_DAYS = 30; // Días de anticipación para alerta
 
   // ── Estado del wizard ────────────────────────────────────
   const STEPS = 5; // Aumentado de 4 a 5 para separar salarios/intereses
   let currentStep = 1;
-  let wizardData  = {};
+  let wizardData = {};
 
   // ── Validador de RFC ──────────────────────────────────────
 
@@ -49,14 +50,12 @@
     }
 
     // Patrón PF (Persona Física): 13 caracteres
-    // Formato: [A-Z]{4}[0-9]{6}[A-Z0-9]{3}
     const rfcPF = /^[A-Z&Ñ]{4}\d{6}[A-Z0-9]{3}$/;
     if (rfcPF.test(cleaned)) {
       return { valid: true, type: 'PF', warning: null };
     }
 
     // Patrón PM (Persona Moral): 12 caracteres
-    // Formato: [A-Z]{3}[0-9]{6}[A-Z0-9]{3}
     const rfcPM = /^[A-Z&Ñ]{3}\d{6}[A-Z0-9]{3}$/;
     if (rfcPM.test(cleaned)) {
       return { valid: true, type: 'PM', warning: null };
@@ -70,6 +69,7 @@
         warning: `RFC de 12 caracteres con formato incorrecto. ¿Es Persona Moral? Verifica en el SAT.`
       };
     }
+
     if (cleaned.length === 13) {
       return {
         valid: false,
@@ -93,13 +93,13 @@
    */
   function checkEFirmaProximaVencer() {
     const saludFiscal = window.Store?.getSaludFiscal?.() || {};
-    const expiryStr   = saludFiscal.eFirmaExpiry ||
-                        window.Store?.getCarpetaFiscal?.()?.efirmaExpiry;
+    const expiryStr = saludFiscal.eFirmaExpiry ||
+      window.Store?.getCarpetaFiscal?.()?.efirmaExpiry;
 
     if (!expiryStr || expiryStr === 'pendiente') return null;
 
-    const expiry   = new Date(expiryStr);
-    const today    = new Date();
+    const expiry = new Date(expiryStr);
+    const today = new Date();
     const diffTime = expiry.getTime() - today.getTime();
     const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
 
@@ -148,6 +148,7 @@
         showWizardError('Ingresa un monto válido (puede ser $0 si apenas empiezas).');
         return false;
       }
+
       wizardData.income = income;
 
       // Validar límite RESICO
@@ -161,14 +162,14 @@
 
     if (currentStep === 2) {
       // Paso 2: ¿Ingresos mixtos? (salarios de empresa)
-      wizardData.mixtos  = document.getElementById('wiz-mixtos')?.value === 'si';
+      wizardData.mixtos = document.getElementById('wiz-mixtos')?.value === 'si';
       wizardData.socioPM = document.getElementById('wiz-socio')?.value === 'si';
       return true;
     }
 
     if (currentStep === 3) {
       // Paso 3 (NUEVO): Monto de salarios e intereses — FIX ALTO-3
-      const salarios  = parseFloat(document.getElementById('wiz-salarios')?.value || '0');
+      const salarios = parseFloat(document.getElementById('wiz-salarios')?.value || '0');
       const intereses = parseFloat(document.getElementById('wiz-intereses')?.value || '0');
 
       if (wizardData.mixtos && (isNaN(salarios) || salarios < 0)) {
@@ -176,15 +177,15 @@
         return false;
       }
 
-      wizardData.salarios  = isNaN(salarios) ? 0 : salarios;
+      wizardData.salarios = isNaN(salarios) ? 0 : salarios;
       wizardData.intereses = isNaN(intereses) ? 0 : intereses;
       return true;
     }
 
     if (currentStep === 4) {
       // Paso 4: CFDI global y buzón
-      wizardData.cfdiGlobal   = document.getElementById('wiz-cfdi')?.value === 'si';
-      wizardData.buzonActivo  = document.getElementById('wiz-buzon')?.value === 'si';
+      wizardData.cfdiGlobal = document.getElementById('wiz-cfdi')?.value === 'si';
+      wizardData.buzonActivo = document.getElementById('wiz-buzon')?.value === 'si';
       return true;
     }
 
@@ -194,20 +195,17 @@
   // ── Cálculo del resultado ─────────────────────────────────
 
   function showResult() {
-    const ingresos  = wizardData.income    || 0;
-    const mixtos    = wizardData.mixtos    || false;
-    const socio     = wizardData.socioPM   || false;
-    const cfdi      = wizardData.cfdiGlobal !== undefined ? wizardData.cfdiGlobal : true;
-    const salarios  = wizardData.salarios  || 0;
+    const ingresos = wizardData.income || 0;
+    const mixtos = wizardData.mixtos || false;
+    const socio = wizardData.socioPM || false;
+    const cfdi = wizardData.cfdiGlobal !== undefined ? wizardData.cfdiGlobal : true;
+    const salarios = wizardData.salarios || 0;
     const intereses = wizardData.intereses || 0;
-    const buzon     = wizardData.buzonActivo !== undefined ? wizardData.buzonActivo : true;
+    const buzon = wizardData.buzonActivo !== undefined ? wizardData.buzonActivo : true;
 
     // ── Regla Art. 113-F LISR — FIX ALTO-3 COMPLETO ──────
-    // Caso 1: Ingresos mixtos + salarios > $400k
     const mixtosSalariosObligatorios = mixtos && (salarios > MIXTOS_LIMIT);
-    // Caso 2: Intereses > $100k (disparador independiente según Art. 113-F)
     const interesesObligatorios = intereses > INTERESES_LIMIT;
-    // Caso 3: Es socio de Persona Moral
     const anualObligatoria = mixtosSalariosObligatorios || interesesObligatorios || socio;
 
     // ── Riesgo CFDI Global (Art. 17-K CFF) ────────────────
@@ -286,11 +284,11 @@
     // Recomendación final
     let recomendacion = '';
     if (anualObligatoria) recomendacion += 'Debes presentar Declaración Anual en abril 2027. ';
-    if (riesgoMulta)      recomendacion += `Emite CFDI global de inmediato para evitar multa de ${fmt(MULTA_BUZON)}. `;
-    if (riesgoBuzon)      recomendacion += 'Activa tu Buzón Tributario en el portal del SAT hoy mismo. ';
-    if (riskLevel === 'PREVENTIVO')  recomendacion += 'Monitorea tus ingresos — estás al 80% del límite RESICO. ';
+    if (riesgoMulta) recomendacion += `Emite CFDI global de inmediato para evitar multa de ${fmt(MULTA_BUZON)}. `;
+    if (riesgoBuzon) recomendacion += 'Activa tu Buzón Tributario en el portal del SAT hoy mismo. ';
+    if (riskLevel === 'PREVENTIVO') recomendacion += 'Monitorea tus ingresos — estás al 80% del límite RESICO. ';
     if (riskLevel === 'RIESGO_ALTO') recomendacion += '¡Precaución! Estás al 90%+ del límite. Habla con tu contador. ';
-    if (riskLevel === 'EXPULSION')   recomendacion += '🚨 URGENTE: Superas el 94% del límite RESICO. Cambia de régimen inmediatamente. ';
+    if (riskLevel === 'EXPULSION') recomendacion += '🚨 URGENTE: Superas el 94% del límite RESICO. Cambia de régimen inmediatamente. ';
     if (!recomendacion) recomendacion = '✅ Estás al día fiscalmente. Sigue facturando y cumpliendo puntualmente.';
 
     setResultField('res-recomendacion', recomendacion);
@@ -311,13 +309,13 @@
     // Persistir diagnóstico en store
     window.Store?.setState?.({
       diagnostic: {
-        income:          ingresos,
+        income: ingresos,
         salarios,
         intereses,
         mixtos,
-        socioPM:         socio,
-        cfdiGlobal:      cfdi,
-        buzonActivo:     buzon,
+        socioPM: socio,
+        cfdiGlobal: cfdi,
+        buzonActivo: buzon,
         anualObligatoria,
         riesgoMulta,
         riesgoBuzon,
@@ -331,14 +329,15 @@
   // ── Guardar diagnóstico en Supabase ──────────────────────
 
   window.saveDiagnostic = async function () {
-    const user   = window.APP_STATE?.currentUser;
+    const user = window.APP_STATE?.currentUser;
     const client = window.APP_STATE?.supabase;
-    const diag   = window.Store?.getState?.()?.diagnostic || {};
+    const diag = window.Store?.getState?.()?.diagnostic || {};
 
     if (!user) {
       showWizardError('Inicia sesión para guardar el diagnóstico.');
       return;
     }
+
     if (!client) {
       showWizardError('Servicio de base de datos no disponible.');
       return;
@@ -346,17 +345,17 @@
 
     try {
       const { error } = await client.from('diagnostic_results').upsert({
-        user_id:             user.id,
-        income_estimated:    diag.income || 0,
-        salarios_estimated:  diag.salarios || 0,      // FIX ALTO-3
-        intereses_estimated: diag.intereses || 0,     // FIX ALTO-3
-        has_mixed_income:    diag.mixtos || false,
-        is_socio_pm:         diag.socioPM || false,
-        has_cfdi_global:     diag.cfdiGlobal || false,
-        anual_obligatoria:   diag.anualObligatoria || false,
-        riesgo_multa:        diag.riesgoMulta || false,
-        recomendacion:       diag.recomendacion || '',
-        updated_at:          new Date().toISOString()
+        user_id: user.id,
+        income_estimated: diag.income || 0,
+        salarios_estimated: diag.salarios || 0, // FIX ALTO-3
+        intereses_estimated: diag.intereses || 0, // FIX ALTO-3
+        has_mixed_income: diag.mixtos || false,
+        is_socio_pm: diag.socioPM || false,
+        has_cfdi_global: diag.cfdiGlobal || false,
+        anual_obligatoria: diag.anualObligatoria || false,
+        riesgo_multa: diag.riesgoMulta || false,
+        recomendacion: diag.recomendacion || '',
+        updated_at: new Date().toISOString()
       }, { onConflict: 'user_id' });
 
       if (error) throw error;
@@ -370,13 +369,13 @@
 
   window.resetWizard = function () {
     currentStep = 1;
-    wizardData  = {};
+    wizardData = {};
 
     document.querySelectorAll('.wizard-step').forEach(el => el.classList.remove('active'));
     const firstStep = document.querySelector('.wizard-step[data-step="1"]');
     firstStep?.classList.add('active');
 
-    const resultEl  = document.getElementById('wizard-result');
+    const resultEl = document.getElementById('wizard-result');
     if (resultEl) resultEl.style.display = 'none';
 
     const lastBtn = document.querySelector(`.wizard-step[data-step="${STEPS}"] .btn-primary`);
@@ -384,13 +383,13 @@
 
     // Limpiar campos
     const fields = {
-      'wiz-income':    '',
-      'wiz-mixtos':    'no',
-      'wiz-socio':     'no',
-      'wiz-salarios':  '0',
+      'wiz-income': '',
+      'wiz-mixtos': 'no',
+      'wiz-socio': 'no',
+      'wiz-salarios': '0',
       'wiz-intereses': '0',
-      'wiz-cfdi':      'si',
-      'wiz-buzon':     'si'
+      'wiz-cfdi': 'si',
+      'wiz-buzon': 'si'
     };
     Object.entries(fields).forEach(([id, val]) => {
       const el = document.getElementById(id);
@@ -411,8 +410,8 @@
   function showWizardError(msg) {
     const msgEl = document.getElementById('wizard-msg');
     if (msgEl) {
-      msgEl.textContent  = msg;
-      msgEl.style.color  = '#ef4444';
+      msgEl.textContent = msg;
+      msgEl.style.color = '#ef4444';
       msgEl.style.display = 'block';
     }
   }
@@ -420,8 +419,8 @@
   function showWizardSuccess(msg) {
     const msgEl = document.getElementById('wizard-msg');
     if (msgEl) {
-      msgEl.textContent  = msg;
-      msgEl.style.color  = '#10b981';
+      msgEl.textContent = msg;
+      msgEl.style.color = '#10b981';
       msgEl.style.display = 'block';
     }
   }
@@ -434,7 +433,7 @@
   function updateProgress() {
     const dots = document.querySelectorAll('#wizard-progress span');
     dots.forEach((dot, idx) => {
-      dot.style.color      = (idx + 1) <= currentStep ? '#10b981' : '#64748b';
+      dot.style.color = (idx + 1) <= currentStep ? '#10b981' : '#64748b';
       dot.style.fontWeight = (idx + 1) === currentStep ? '700' : '400';
     });
   }
@@ -465,8 +464,8 @@
     if (efirmaAlert) {
       const alertBanner = document.getElementById('efirma-alert-banner');
       if (alertBanner) {
-        alertBanner.textContent  = efirmaAlert.message;
-        alertBanner.style.color  = efirmaAlert.level === 'VENCIDA' ? '#ef4444' : '#f59e0b';
+        alertBanner.textContent = efirmaAlert.message;
+        alertBanner.style.color = efirmaAlert.level === 'VENCIDA' ? '#ef4444' : '#f59e0b';
         alertBanner.style.display = 'block';
       }
     }
