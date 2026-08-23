@@ -1,6 +1,9 @@
 // ============================================================
 // js/auth.js — Aliado RESICO 2026
 // Bunker State + Validación sesión/RLS + Demo estable
+// FIX CRÍTICO: _runCombinedValidation() restaurada (faltaba su
+// declaración completa; solo quedaba el punto de llamada, lo cual
+// rompía initialize() → init() → App.init() con ReferenceError).
 // ============================================================
 
 (function installBunkerGuard() {
@@ -8,18 +11,18 @@
   const style = document.createElement('style');
   style.id = 'auth-bunker-guard';
   style.textContent = `
-    #auth-overlay {
-      display: flex !important;
-      visibility: visible !important;
-      opacity: 1 !important;
-      pointer-events: all !important;
-      z-index: 99999 !important;
-    }
-    #app {
-      display: none !important;
-      visibility: hidden !important;
-    }
-  `;
+#auth-overlay {
+  display: flex !important;
+  visibility: visible !important;
+  opacity: 1 !important;
+  pointer-events: all !important;
+  z-index: 99999 !important;
+}
+#app {
+  display: none !important;
+  visibility: hidden !important;
+}
+`;
   (document.head || document.documentElement).appendChild(style);
 })();
 
@@ -76,7 +79,6 @@ const AuthManager = (() => {
   let _initializing = false;
   let _initPromise = null;
   let _authSubscriptionBound = false;
-  let _eventsBound = false;
   let isRegister = false;
 
   const SUPABASE_TIMEOUT_MS = 8000;
@@ -100,18 +102,18 @@ const AuthManager = (() => {
     const style = document.createElement('style');
     style.id = 'auth-bunker-guard';
     style.textContent = `
-      #auth-overlay {
-        display: flex !important;
-        visibility: visible !important;
-        opacity: 1 !important;
-        pointer-events: all !important;
-        z-index: 99999 !important;
-      }
-      #app {
-        display: none !important;
-        visibility: hidden !important;
-      }
-    `;
+#auth-overlay {
+  display: flex !important;
+  visibility: visible !important;
+  opacity: 1 !important;
+  pointer-events: all !important;
+  z-index: 99999 !important;
+}
+#app {
+  display: none !important;
+  visibility: hidden !important;
+}
+`;
     (document.head || document.documentElement).appendChild(style);
   }
 
@@ -182,8 +184,8 @@ const AuthManager = (() => {
     const bubble = document.createElement('div');
     bubble.className = 'chat-bubble bot';
     bubble.innerHTML =
-      `🛡️ <strong>Aliado RESICO activo.</strong><br><br>` +
-      `Tu acceso fue validado y la Bóveda Fiscal quedó sincronizada.<br>` +
+      `🛡️ Aliado RESICO activo. ` +
+      `Tu acceso fue validado y la Bóveda Fiscal quedó sincronizada. ` +
       `El dashboard solo se muestra tras validar sesión y RLS.`;
     chatEl.appendChild(bubble);
     chatEl.scrollTop = chatEl.scrollHeight;
@@ -236,112 +238,180 @@ const AuthManager = (() => {
     }, 50);
   }
 
-  function _bindAuthStateListenerOnce() {
-  if (_authSubscriptionBound) return;
+  // ── FIX CRÍTICO: función restaurada ─────────────────────────
+  // Valida sesión activa de Supabase + acceso RLS a fiscal_metrics.
+  // Esta función existía solo como llamada huérfana en initialize();
+  // su declaración completa se había perdido, causando el
+  // ReferenceError que bloqueaba TODO el login (real y en cascada
+  // el flujo de App.init()).
+  async function _runCombinedValidation(client) {
+    _setOverlayState(true, '🔒 Verificando Bóveda Fiscal...', 'info');
 
-  const client = window.APP_STATE?.supabase;
-  if (!client?.auth?.onAuthStateChange) return;
+    const timeoutSignal = new Promise((_, reject) =>
+      setTimeout(() => reject(new Error('TIMEOUT_SUPABASE')), SUPABASE_TIMEOUT_MS)
+    );
 
-  client.auth.onAuthStateChange((event) => {
-    if (event === 'SIGNED_OUT') {
-      currentUser = null;
-      window.APP_STATE.currentUser = null;
-      window.APP_STATE.isDemo = false;
-      window.APP_STATE.authInitialized = false;
-      window.APP_STATE.appBootstrapped = false;
-      _authInitialized = false;
-      _initializing = false;
-      _initPromise = null;
+    try {
+      const [sessionResult, metricsResult] = await Promise.race([
+        Promise.all([
+          client.auth.getSession(),
+          client.from('fiscal_metrics').select('user_id').limit(1)
+        ]),
+        timeoutSignal
+      ]);
 
-      const app = document.getElementById('app');
-      if (app) {
-        app.hidden = true;
-        app.style.display = 'none';
+      const { data: sessionData, error: sessionError } = sessionResult;
+      const session = sessionData?.session;
+
+      if (sessionError || !session) {
+        _setOverlayState(true, '🔐 Inicia sesión para acceder a tu Bóveda Fiscal.', 'info');
+        return false;
       }
 
-      _reinstallBunkerGuard();
-      _setOverlayState(true, '🔐 Sesión cerrada. Inicia sesión para continuar.', 'info');
-      document.getElementById('demo-banner')?.remove();
-    }
-  });
+      const { error: metricsError } = metricsResult;
 
-  _authSubscriptionBound = true;
-}
+      if (metricsError) {
+        const is403 =
+          metricsError.code === 'PGRST301' ||
+          metricsError.code === '42501' ||
+          (metricsError.status ?? 0) === 403 ||
+          (metricsError.message ?? '').toLowerCase().includes('permission denied') ||
+          (metricsError.message ?? '').toLowerCase().includes('row-level security');
 
-function bypassToDemo() {
-  console.info('[Auth][DEMO] Activando modo demo');
-  window.APP_STATE.isDemo = true;
-  window.APP_STATE.currentUser = null;
-  window.APP_STATE.authInitialized = true;
-
-  _showDemoBanner();
-  window.MockData?.load?.(window.Store);
-
-  _removeBunkerGuard();
-  _setOverlayState(false);
-  _showAppChrome(null);
-
-  _ensureAppBootstrapped().then(() => {
-    setTimeout(() => {
-      window.App?.navigateTo?.('dashboard');
-      window.Dashboard?.syncAndRender?.();
-      _injectWelcomeMessage();
-    }, 50);
-  });
-}
-
-function bindEvents() {
-  const submitBtn = document.getElementById('auth-submit');
-  const demoBtn = document.getElementById('auth-demo');
-  const msgEl = document.getElementById('auth-msg');
-  const emailInput = document.getElementById('auth-email');
-  const passInput = document.getElementById('auth-password');
-  const logoutBtn = document.getElementById('logout-btn');
-  const tabLogin = document.getElementById('tab-login');
-  const tabRegister = document.getElementById('tab-register');
-  const forgotBtn = document.getElementById('auth-forgot-password');
-
-  if (tabLogin && !tabLogin.dataset.boundAuth) {
-    tabLogin.dataset.boundAuth = '1';
-    tabLogin.addEventListener('click', () => {
-      isRegister = false;
-      tabLogin.classList.add('active');
-      tabRegister?.classList.remove('active');
-      if (submitBtn) submitBtn.textContent = '🔐 Iniciar Sesión';
-      if (msgEl) { msgEl.hidden = true; msgEl.textContent = ''; }
-    });
-  }
-
-  if (tabRegister && !tabRegister.dataset.boundAuth) {
-    tabRegister.dataset.boundAuth = '1';
-    tabRegister.addEventListener('click', () => {
-      isRegister = true;
-      tabRegister.classList.add('active');
-      tabLogin?.classList.remove('active');
-      if (submitBtn) submitBtn.textContent = '✅ Crear Cuenta';
-      if (msgEl) { msgEl.hidden = true; msgEl.textContent = ''; }
-    });
-  }
-
-  if (submitBtn && !submitBtn.dataset.boundAuth) {
-    submitBtn.dataset.boundAuth = '1';
-    submitBtn.addEventListener('click', async () => {
-      const email = emailInput?.value?.trim();
-      const pass = passInput?.value;
-
-      if (!email || !pass) {
-        if (msgEl) {
-          msgEl.hidden = false;
-          msgEl.textContent = 'Ingresa correo y contraseña.';
-          msgEl.className = 'auth-msg error';
-          msgEl.style.color = '#ef4444';
+        if (is403) {
+          _setOverlayState(
+            true,
+            '⚠️ Acceso Restringido - Tu Bóveda Fiscal no está sincronizada. Contacta a soporte.',
+            'rls_blocked'
+          );
+        } else {
+          _setOverlayState(
+            true,
+            `⚠️ Error de conexión con la Bóveda Fiscal (${metricsError.code ?? 'RED'}).`,
+            'error'
+          );
         }
-        return;
+        return false;
       }
 
-      const client = window.APP_STATE?.supabase;
-      if (!client) {
-          // FIX: diagnóstico explícito en consola + mensaje más claro al usuario
+      currentUser = session.user;
+      await _unlockDashboard(currentUser);
+      return true;
+    } catch (err) {
+      if (err.message === 'TIMEOUT_SUPABASE') {
+        _setOverlayState(true, '⏳ Tiempo de espera excedido. Verifica tu conexión o usa Demo.', 'error');
+      } else {
+        _setOverlayState(true, '🚨 Error crítico de seguridad. Contacta a soporte.', 'error');
+      }
+      return false;
+    }
+  }
+
+  function _bindAuthStateListenerOnce() {
+    if (_authSubscriptionBound) return;
+
+    const client = window.APP_STATE?.supabase;
+    if (!client?.auth?.onAuthStateChange) return;
+
+    client.auth.onAuthStateChange((event) => {
+      if (event === 'SIGNED_OUT') {
+        currentUser = null;
+        window.APP_STATE.currentUser = null;
+        window.APP_STATE.isDemo = false;
+        window.APP_STATE.authInitialized = false;
+        window.APP_STATE.appBootstrapped = false;
+        _authInitialized = false;
+        _initializing = false;
+        _initPromise = null;
+
+        const app = document.getElementById('app');
+        if (app) {
+          app.hidden = true;
+          app.style.display = 'none';
+        }
+
+        _reinstallBunkerGuard();
+        _setOverlayState(true, '🔐 Sesión cerrada. Inicia sesión para continuar.', 'info');
+        document.getElementById('demo-banner')?.remove();
+      }
+    });
+
+    _authSubscriptionBound = true;
+  }
+
+  function bypassToDemo() {
+    console.info('[Auth][DEMO] Activando modo demo');
+    window.APP_STATE.isDemo = true;
+    window.APP_STATE.currentUser = null;
+    window.APP_STATE.authInitialized = true;
+
+    _showDemoBanner();
+    window.MockData?.load?.(window.Store);
+
+    _removeBunkerGuard();
+    _setOverlayState(false);
+    _showAppChrome(null);
+
+    _ensureAppBootstrapped().then(() => {
+      setTimeout(() => {
+        window.App?.navigateTo?.('dashboard');
+        window.Dashboard?.syncAndRender?.();
+        _injectWelcomeMessage();
+      }, 50);
+    });
+  }
+
+  function bindEvents() {
+    const submitBtn = document.getElementById('auth-submit');
+    const demoBtn = document.getElementById('auth-demo');
+    const msgEl = document.getElementById('auth-msg');
+    const emailInput = document.getElementById('auth-email');
+    const passInput = document.getElementById('auth-password');
+    const logoutBtn = document.getElementById('logout-btn');
+    const tabLogin = document.getElementById('tab-login');
+    const tabRegister = document.getElementById('tab-register');
+    const forgotBtn = document.getElementById('auth-forgot-password');
+
+    if (tabLogin && !tabLogin.dataset.boundAuth) {
+      tabLogin.dataset.boundAuth = '1';
+      tabLogin.addEventListener('click', () => {
+        isRegister = false;
+        tabLogin.classList.add('active');
+        tabRegister?.classList.remove('active');
+        if (submitBtn) submitBtn.textContent = '🔐 Iniciar Sesión';
+        if (msgEl) { msgEl.hidden = true; msgEl.textContent = ''; }
+      });
+    }
+
+    if (tabRegister && !tabRegister.dataset.boundAuth) {
+      tabRegister.dataset.boundAuth = '1';
+      tabRegister.addEventListener('click', () => {
+        isRegister = true;
+        tabRegister.classList.add('active');
+        tabLogin?.classList.remove('active');
+        if (submitBtn) submitBtn.textContent = '✅ Crear Cuenta';
+        if (msgEl) { msgEl.hidden = true; msgEl.textContent = ''; }
+      });
+    }
+
+    if (submitBtn && !submitBtn.dataset.boundAuth) {
+      submitBtn.dataset.boundAuth = '1';
+      submitBtn.addEventListener('click', async () => {
+        const email = emailInput?.value?.trim();
+        const pass = passInput?.value;
+
+        if (!email || !pass) {
+          if (msgEl) {
+            msgEl.hidden = false;
+            msgEl.textContent = 'Ingresa correo y contraseña.';
+            msgEl.className = 'auth-msg error';
+            msgEl.style.color = '#ef4444';
+          }
+          return;
+        }
+
+        const client = window.APP_STATE?.supabase;
+        if (!client) {
           console.error(
             '[Auth] ❌ window.APP_STATE.supabase es null. El formulario no puede ' +
             'enviar datos a Supabase. Revisa el log de [Store] arriba para ver la causa exacta.'
@@ -355,14 +425,14 @@ function bindEvents() {
           return;
         }
 
-      submitBtn.disabled = true;
-      submitBtn.textContent = '⏳ Verificando...';
+        submitBtn.disabled = true;
+        submitBtn.textContent = '⏳ Verificando...';
 
-      try {
-        let authResult;
+        try {
+          let authResult;
 
-       if (isRegister) {
-          authResult = await client.auth.signUp({ email, password: pass });
+          if (isRegister) {
+            authResult = await client.auth.signUp({ email, password: pass });
             if (authResult.error) throw authResult.error;
 
             console.info('[Auth] ✅ signUp() completado:', authResult.data);
@@ -378,8 +448,6 @@ function bindEvents() {
               return;
             }
 
-            // Caso: Supabase tiene confirmación de correo desactivada y ya
-            // devuelve sesión activa inmediatamente tras el registro.
             if (authResult.data?.session) {
               if (msgEl) {
                 msgEl.hidden = false;
@@ -388,151 +456,149 @@ function bindEvents() {
                 msgEl.style.color = '#10b981';
               }
             }
+          } else {
+            authResult = await client.auth.signInWithPassword({ email, password: pass });
+            if (authResult.error) throw authResult.error;
           }
 
-        _authInitialized = false;
-        _initializing = false;
-        _initPromise = null;
-        window.APP_STATE.authInitialized = false;
+          _authInitialized = false;
+          _initializing = false;
+          _initPromise = null;
+          window.APP_STATE.authInitialized = false;
 
-        // FIX: validación defensiva — si por cualquier motivo `initialize`
-        // no está disponible como función, no se rompe el flujo de login.
-        if (typeof initialize === 'function') {
-          await initialize();
-        } else {
-          console.error('[Auth] initialize() no está definido. Revisa auth.js.');
+          if (typeof initialize === 'function') {
+            await initialize();
+          } else {
+            console.error('[Auth] initialize() no está definido. Revisa auth.js.');
+          }
+        } catch (err) {
+          const map = {
+            'Invalid login credentials': 'Correo o contraseña incorrectos.',
+            'Email not confirmed': 'Confirma tu correo antes de entrar.',
+            'User already registered': 'Ese correo ya tiene cuenta.'
+          };
+          if (msgEl) {
+            msgEl.hidden = false;
+            msgEl.textContent = map[err.message] || err.message;
+            msgEl.className = 'auth-msg error';
+            msgEl.style.color = '#ef4444';
+          }
+        } finally {
+          submitBtn.disabled = false;
+          submitBtn.textContent = isRegister ? '✅ Crear Cuenta' : '🔐 Iniciar Sesión';
         }
-      } catch (err) {
-        const map = {
-          'Invalid login credentials': 'Correo o contraseña incorrectos.',
-          'Email not confirmed': 'Confirma tu correo antes de entrar.',
-          'User already registered': 'Ese correo ya tiene cuenta.'
-        };
-        if (msgEl) {
-          msgEl.hidden = false;
-          msgEl.textContent = map[err.message] || err.message;
-          msgEl.className = 'auth-msg error';
-          msgEl.style.color = '#ef4444';
-        }
-      } finally {
-        submitBtn.disabled = false;
-        submitBtn.textContent = isRegister ? '✅ Crear Cuenta' : '🔐 Iniciar Sesión';
-      }
-    });
+      });
 
-    [emailInput, passInput].forEach(el =>
-      el?.addEventListener('keydown', e => {
-        if (e.key === 'Enter') submitBtn.click();
-      })
-    );
-  }
-
-  if (demoBtn && !demoBtn.dataset.boundAuth) {
-    demoBtn.dataset.boundAuth = '1';
-    demoBtn.addEventListener('click', (e) => {
-      e.preventDefault();
-      e.stopPropagation();
-      bypassToDemo();
-    });
-  }
-
-  if (forgotBtn && !forgotBtn.dataset.boundAuth) {
-    forgotBtn.dataset.boundAuth = '1';
-    forgotBtn.addEventListener('click', async (e) => {
-      e.preventDefault();
-      const email = emailInput?.value?.trim();
-      if (!email) {
-        if (msgEl) {
-          msgEl.hidden = false;
-          msgEl.textContent = 'Ingresa tu correo para restablecer.';
-          msgEl.className = 'auth-msg error';
-          msgEl.style.color = '#ef4444';
-        }
-        return;
-      }
-
-      const client = window.APP_STATE?.supabase;
-      if (!client) return;
-
-      forgotBtn.textContent = '⏳ Enviando...';
-      try {
-        const { error } = await client.auth.resetPasswordForEmail(email, {
-          redirectTo: `${window.location.origin}/api/auth-callback?next=/`
-        });
-        if (error) throw error;
-        if (msgEl) {
-          msgEl.hidden = false;
-          msgEl.textContent = 'Correo de recuperación enviado. Revisa tu bandeja.';
-          msgEl.className = 'auth-msg success';
-          msgEl.style.color = '#10b981';
-        }
-      } catch (err) {
-        if (msgEl) {
-          msgEl.hidden = false;
-          msgEl.textContent = err.message;
-          msgEl.className = 'auth-msg error';
-          msgEl.style.color = '#ef4444';
-        }
-      } finally {
-        forgotBtn.textContent = '¿Olvidaste tu contraseña?';
-      }
-    });
-  }
-
-  if (logoutBtn && !logoutBtn.dataset.boundAuth) {
-    logoutBtn.dataset.boundAuth = '1';
-    logoutBtn.addEventListener('click', async () => {
-      const client = window.APP_STATE?.supabase;
-      if (client) await client.auth.signOut();
-      window.Store?.reset?.();
-    });
-  }
-}
-
-// ── FIX CRÍTICO: initialize() declarada explícitamente ANTES del return ──
-// Es la pieza que faltaba (o quedó fuera de alcance) y provocaba el
-// ReferenceError: "initialize is not defined" al ejecutarse el IIFE.
-async function initialize() {
-  if (_authInitialized) return true;
-  if (_initializing) return _initPromise;
-
-  _initializing = true;
-  _initPromise = (async () => {
-    const client = window.APP_STATE?.supabase;
-    const url = window.AppConfig?.getSupabaseUrl?.() || '';
-    const key = window.AppConfig?.getSupabaseKey?.() || '';
-
-    if (!url || !key || !client) {
-      _setOverlayState(true, '⚠️ Servicio de autenticación no disponible. Usa "Ver Demo".', 'error');
-      _authInitialized = false;
-      _initializing = false;
-      return false;
+      [emailInput, passInput].forEach(el =>
+        el?.addEventListener('keydown', e => {
+          if (e.key === 'Enter') submitBtn.click();
+        })
+      );
     }
 
-    _bindAuthStateListenerOnce();
+    if (demoBtn && !demoBtn.dataset.boundAuth) {
+      demoBtn.dataset.boundAuth = '1';
+      demoBtn.addEventListener('click', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        bypassToDemo();
+      });
+    }
 
-    const result = await _runCombinedValidation(client);
-    _authInitialized = result;
-    window.APP_STATE.authInitialized = result;
-    _initializing = false;
-    return result;
-  })();
+    if (forgotBtn && !forgotBtn.dataset.boundAuth) {
+      forgotBtn.dataset.boundAuth = '1';
+      forgotBtn.addEventListener('click', async (e) => {
+        e.preventDefault();
+        const email = emailInput?.value?.trim();
+        if (!email) {
+          if (msgEl) {
+            msgEl.hidden = false;
+            msgEl.textContent = 'Ingresa tu correo para restablecer.';
+            msgEl.className = 'auth-msg error';
+            msgEl.style.color = '#ef4444';
+          }
+          return;
+        }
 
-  return _initPromise;
-}
+        const client = window.APP_STATE?.supabase;
+        if (!client) return;
 
-async function init() {
-  bindEvents();
-  await initialize();
-}
+        forgotBtn.textContent = '⏳ Enviando...';
+        try {
+          const { error } = await client.auth.resetPasswordForEmail(email, {
+            redirectTo: `${window.location.origin}/api/auth-callback?next=/`
+          });
+          if (error) throw error;
+          if (msgEl) {
+            msgEl.hidden = false;
+            msgEl.textContent = 'Correo de recuperación enviado. Revisa tu bandeja.';
+            msgEl.className = 'auth-msg success';
+            msgEl.style.color = '#10b981';
+          }
+        } catch (err) {
+          if (msgEl) {
+            msgEl.hidden = false;
+            msgEl.textContent = err.message;
+            msgEl.className = 'auth-msg error';
+            msgEl.style.color = '#ef4444';
+          }
+        } finally {
+          forgotBtn.textContent = '¿Olvidaste tu contraseña?';
+        }
+      });
+    }
 
-return {
-  init,
-  initialize,
-  bypassToDemo,
-  isInitialized: () => _authInitialized,
-  getCurrentUser: () => currentUser
-};
+    if (logoutBtn && !logoutBtn.dataset.boundAuth) {
+      logoutBtn.dataset.boundAuth = '1';
+      logoutBtn.addEventListener('click', async () => {
+        const client = window.APP_STATE?.supabase;
+        if (client) await client.auth.signOut();
+        window.Store?.reset?.();
+      });
+    }
+  }
+
+  async function initialize() {
+    if (_authInitialized) return true;
+    if (_initializing) return _initPromise;
+
+    _initializing = true;
+    _initPromise = (async () => {
+      const client = window.APP_STATE?.supabase;
+      const url = window.AppConfig?.getSupabaseUrl?.() || '';
+      const key = window.AppConfig?.getSupabaseKey?.() || '';
+
+      if (!url || !key || !client) {
+        _setOverlayState(true, '⚠️ Servicio de autenticación no disponible. Usa "Ver Demo".', 'error');
+        _authInitialized = false;
+        _initializing = false;
+        return false;
+      }
+
+      _bindAuthStateListenerOnce();
+
+      const result = await _runCombinedValidation(client);
+      _authInitialized = result;
+      window.APP_STATE.authInitialized = result;
+      _initializing = false;
+      return result;
+    })();
+
+    return _initPromise;
+  }
+
+  async function init() {
+    bindEvents();
+    await initialize();
+  }
+
+  return {
+    init,
+    initialize,
+    bypassToDemo,
+    isInitialized: () => _authInitialized,
+    getCurrentUser: () => currentUser
+  };
 })();
 
 window.AuthManager = AuthManager;
@@ -556,5 +622,3 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   }
 });
-
-window.AuthManager = AuthManager;
