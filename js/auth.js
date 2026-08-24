@@ -549,13 +549,59 @@ const AuthManager = (() => {
     }
 
     if (logoutBtn && !logoutBtn.dataset.boundAuth) {
-      logoutBtn.dataset.boundAuth = '1';
-      logoutBtn.addEventListener('click', async () => {
-        const client = window.APP_STATE?.supabase;
-        if (client) await client.auth.signOut();
-        window.Store?.reset?.();
-      });
+  logoutBtn.dataset.boundAuth = '1';
+  logoutBtn.addEventListener('click', async () => {
+    const client = window.APP_STATE?.supabase;
+    const isDemo = window.APP_STATE?.isDemo === true;
+    
+    try {
+      // 1. Si hay sesión real de Supabase, cerrarla
+      if (client && !isDemo) {
+        await client.auth.signOut();
+      }
+      
+      // 2. Limpiar estado global completo
+      window.APP_STATE.currentUser = null;
+      window.APP_STATE.isDemo = false;
+      window.APP_STATE.authInitialized = false;
+      window.APP_STATE.appBootstrapped = false;
+      
+      // 3. Resetear Store (limpia datos en memoria y localStorage)
+      window.Store?.reset?.();
+      
+      // 4. Remover banner de demo si existe
+      document.getElementById('demo-banner')?.remove();
+      
+      // 5. Limpiar hash de navegación
+      if (window.location.hash) {
+        history.replaceState(null, '', window.location.pathname);
+      }
+      
+      // 6. Ocultar la app y reinstalar el Bunker Guard
+      const app = document.getElementById('app');
+      if (app) {
+        app.hidden = true;
+        app.style.display = 'none';
+      }
+      
+      // 7. Mostrar overlay de autenticación (Auth Guard)
+      const overlay = document.getElementById('auth-overlay');
+      if (overlay) {
+        overlay.style.display = 'flex';
+        overlay.hidden = false;
+      }
+      
+      // 8. Recargar la página para estado completamente limpio
+      // (evita residuos de módulos ya inicializados)
+      setTimeout(() => window.location.reload(), 150);
+      
+    } catch (error) {
+      console.error('[Auth] Error en logout:', error);
+      // Fallback: recargar página igualmente
+      window.location.reload();
     }
+  });
+}
   }
 
   async function initialize() {

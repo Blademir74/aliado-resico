@@ -457,6 +457,17 @@ const FAST_PATH_GREETINGS = new Set(['hola', 'buenas', 'buen dia', 'buen día', 
 
 // ── Handler principal ──────────────────────────────────────────────────────
 export default async function handler(req, res) {
+  console.log('[gemini-proxy] Request received:', {
+    method: req.method,
+    hasAuth: !!req.headers.authorization,
+    bodyKeys: Object.keys(req.body || {})
+  });
+  
+  setHeaders(req, res);
+  if (req.method === 'OPTIONS') return res.status(204).end();
+  if (req.method !== 'POST') {
+    return res.status(405).json({ ok: false, error: 'Method Not Allowed' });
+  }
   setSecureHeaders(req, res);
 
   if (req.method === 'OPTIONS') { res.statusCode = 204; res.end(); return; }
@@ -557,17 +568,16 @@ export default async function handler(req, res) {
       raw:   data
     }, { 'x-aliado-ai-status': 'ok', 'x-aliado-provider': provider, ...AUDIT_HEADERS });
 
-  } catch (err) {
-    const payload = fallbackPayload(
-      'network_error',
-      debugEnabled ? { error_message: err?.message || 'unknown' } : {},
-      'proxy', null
-    );
-    sendJson(res, 200, payload, {
-      'x-aliado-ai-status':       'fallback',
-      'x-aliado-fallback-reason': 'network_error',
-      'x-aliado-provider':        'proxy',
-      ...AUDIT_HEADERS
+    } catch (error) {
+    console.error('[gemini-proxy] Error:', {
+      message: error.message,
+      stack: error.stack,
+      code: error.code
+    });
+    return res.status(500).json({ 
+      ok: false, 
+      error: 'Error interno del servidor',
+      detail: process.env.NODE_ENV === 'development' ? error.message : undefined
     });
   }
 }

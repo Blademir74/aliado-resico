@@ -16,38 +16,83 @@ const AuthRegisterUI = (() => {
     ' ':37,'Ñ':38
   };
 
-  function validateRFCChecksum(rfc) {
-    if (!rfc) return { valid: false, reason: 'RFC vacío' };
-    const clean = String(rfc).trim().toUpperCase();
-    if (clean === 'XAXX010101000' || clean === 'XEXX010101000') {
-      return { valid: true, reason: 'RFC genérico válido' };
-    }
-    if (clean.length !== 12 && clean.length !== 13) {
-      return { valid: false, reason: `Longitud inválida (${clean.length})` };
-    }
-    try {
-      // Preparar cadena para cálculo: agregar espacio al inicio si es PF (13 chars)
-      const forCalc = clean.length === 13 ? ' ' + clean.substring(0, 11) : clean.substring(0, 11);
-      let sum = 0;
-      for (let i = 0; i < 11; i++) {
-        const charVal = RFC_CHAR_MAP[forCalc[i]];
-        if (charVal === undefined) return { valid: false, reason: 'Carácter inválido en RFC' };
-        sum += charVal * (12 - i);
-      }
-      const remainder = sum % 11;
-      const expectedDigit = remainder === 0 ? '0' : remainder === 1 ? 'A' : String(11 - remainder);
-      const actualDigit = clean.charAt(clean.length - 1);
-      if (expectedDigit !== actualDigit) {
-        return {
-          valid: false,
-          reason: `Dígito verificador incorrecto. Esperado: ${expectedDigit}, recibido: ${actualDigit}`,
-        };
-      }
-      return { valid: true, reason: 'RFC válido con homoclave correcta' };
-    } catch (e) {
-      return { valid: false, reason: 'Error al validar: ' + e.message };
-    }
+  // ── FIX ERROR 1: Algoritmo RFC corregido (Anexo 21 RMF) ───────────────
+function validateRFCChecksum(rfc) {
+  if (!rfc) return { valid: false, reason: 'RFC vacío' };
+  const clean = String(rfc).trim().toUpperCase();
+  
+  // RFCs genéricos siempre válidos
+  if (clean === 'XAXX010101000' || clean === 'XEXX010101000') {
+    return { valid: true, reason: 'RFC genérico válido', isGeneric: true };
   }
+  
+  // Validar longitud
+  if (clean.length !== 12 && clean.length !== 13) {
+    return { valid: false, reason: `Longitud inválida (${clean.length}). PF=13, PM=12` };
+  }
+  
+  const isPF = clean.length === 13;
+  const isPM = clean.length === 12;
+  
+  // Tabla de valores para cálculo (Anexo 21 RMF)
+  const charMap = {
+    '0':0,'1':1,'2':2,'3':3,'4':4,'5':5,'6':6,'7':7,'8':8,'9':9,
+    'A':10,'B':11,'C':12,'D':13,'E':14,'F':15,'G':16,'H':17,'I':18,
+    'J':19,'K':20,'L':21,'M':22,'N':23,'&':24,'O':25,'P':26,'Q':27,
+    'R':28,'S':29,'T':30,'U':31,'V':32,'W':33,'X':34,'Y':35,'Z':36,
+    ' ':37,'Ñ':38
+  };
+  
+  try {
+    // Para PF (13 chars): tomar posición 2-12 (índices 1-11), agregar espacio al inicio
+    // Para PM (12 chars): tomar posición 1-11 (índices 0-10), SIN espacio
+    let rfcForCalc = '';
+    if (isPF) {
+      rfcForCalc = ' ' + clean.substring(0, 12); // Espacio + primeros 12 chars
+    } else {
+      rfcForCalc = clean.substring(0, 11); // Solo primeros 11 chars
+    }
+    
+    // Calcular suma ponderada
+    let sum = 0;
+    for (let i = 0; i < 11; i++) {
+      const char = rfcForCalc[i];
+      const value = charMap[char];
+      if (value === undefined) {
+        return { valid: false, reason: `Carácter inválido: ${char}` };
+      }
+      sum += value * (13 - i); // Multiplicar por posición (13, 12, 11... 3)
+    }
+    
+    // Calcular dígito verificador
+    const remainder = sum % 11;
+    let expectedDigit;
+    if (remainder === 0) {
+      expectedDigit = '0';
+    } else if (remainder === 1) {
+      expectedDigit = 'A';
+    } else {
+      expectedDigit = String(11 - remainder);
+    }
+    
+    const actualDigit = clean.charAt(clean.length - 1);
+    
+    if (expectedDigit !== actualDigit) {
+      return {
+        valid: false,
+        reason: `Dígito verificador incorrecto. Esperado: ${expectedDigit}, recibido: ${actualDigit}`,
+      };
+    }
+    
+    return { 
+      valid: true, 
+      reason: `RFC válido (${isPF ? 'Persona Física' : 'Persona Moral'}) con homoclave correcta`,
+      isGeneric: false
+    };
+  } catch (e) {
+    return { valid: false, reason: 'Error al validar: ' + e.message };
+  }
+}
 
   function byId(id) { return document.getElementById(id); }
 

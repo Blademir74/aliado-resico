@@ -63,20 +63,18 @@ const App = (() => {
   }
 
   function initTheme() {
-    const btn = byId('theme-toggle');
-    const saved = localStorage.getItem('ar_theme') || 'dark';
-
-    document.body.dataset.theme = saved;
-    if (btn) btn.textContent = saved === 'light' ? '☀️' : '🌙';
-
-    btn?.addEventListener('click', () => {
-      const current = localStorage.getItem('ar_theme') || 'dark';
-      const next = current === 'dark' ? 'light' : 'dark';
-      localStorage.setItem('ar_theme', next);
-      document.body.dataset.theme = next;
-      btn.textContent = next === 'light' ? '☀️' : '🌙';
-    });
-  }
+  const btn = byId('theme-toggle');
+  const saved = localStorage.getItem('ar_theme') || 'dark';
+  document.body.dataset.theme = saved;
+  if (btn) btn.textContent = saved === 'light' ? '☀️' : '🌙';
+  btn?.addEventListener('click', () => {
+    const current = localStorage.getItem('ar_theme') || 'dark';
+    const next = current === 'dark' ? 'light' : 'dark';
+    localStorage.setItem('ar_theme', next);
+    document.body.dataset.theme = next;
+    btn.textContent = next === 'light' ? '☀️' : '🌙';
+  });
+}
 
   function initNavigation() {
     document.querySelectorAll('.nav-btn[data-tab]').forEach(btn => {

@@ -91,9 +91,11 @@ function validateRFCChecksum(rfc) {
 }
 
 // ── Consulta a watchlist EFOS ────────────────────────────────────────────
-async function checkEFOS(rfc) {
-  if (!SUPABASE_URL || !SUPABASE_SERVICE_KEY) {
-    return { inList: false, reason: 'Watchlist no configurada' };
+// ── Consulta a watchlist EFOS ────────────────────────────────────────────
+async function checkEFOS(rfc, skipEFOS = false) {
+  // En modo demo, omitir consulta a EFOS (no hay acceso a DB)
+  if (skipEFOS || !SUPABASE_URL || !SUPABASE_SERVICE_KEY) {
+    return { inList: false, reason: skipEFOS ? 'Modo demo: validación EFOS omitida' : 'Watchlist no configurada' };
   }
   try {
     const cleanRfc = String(rfc).trim().toUpperCase();
@@ -131,7 +133,9 @@ export default async function handler(req, res) {
 
   // Validar JWT
   const user = await validateSupabaseJWT(req.headers.authorization);
-  if (!user) {
+  const isDemoMode = !user && req.headers['x-demo-mode'] === 'true';
+  
+  if (!user && !isDemoMode) {
     return res.status(401).json({ ok: false, error: 'No autorizado. Se requiere sesión activa.' });
   }
 
@@ -157,7 +161,7 @@ export default async function handler(req, res) {
     }
 
     // Paso 2: Verificar en lista EFOS
-    const efosResult = await checkEFOS(rfc);
+       const efosResult = await checkEFOS(rfc, isDemoMode);
     
     // Paso 3: Generar recomendación
     let recommendation = '';

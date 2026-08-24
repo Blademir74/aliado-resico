@@ -201,17 +201,34 @@ const DocumentProcessor = (() => {
       window.DocumentsManager?.renderDocuments?.();
       window.App?.renderCarpetaFiscal?.(); // refrescar carpeta fiscal si está montada
 
-    } catch (error) {
-      if (output) {
-        output.innerHTML = `
-          <div style="color:#ef4444;padding:10px;border:1px solid #ef4444;border-radius:6px;">
-            Error al procesar: ${esc(error?.message || 'desconocido')}
-          </div>`;
-      }
-      console.warn('[OCR] analyzeFile error:', error);
-    } finally {
-      showProcessingIndicator(false);
+      } catch (error) {
+    showProcessingIndicator(false);
+    console.error('[OCR] Error:', error);
+    
+    let errorMessage = 'Error al procesar el documento';
+    if (error.message.includes('401')) {
+      errorMessage = 'Error de autenticación. Inicia sesión para usar el OCR.';
+    } else if (error.message.includes('500')) {
+      errorMessage = 'Error del servidor. Intenta de nuevo en unos minutos.';
+    } else if (error.message.includes('timeout')) {
+      errorMessage = 'El procesamiento tardó demasiado. Intenta con una imagen más pequeña.';
     }
+    
+    if (output) {
+      output.innerHTML = `
+        <div style="color:#ef4444;padding:16px;border:1px solid #ef4444;border-radius:8px;background:rgba(239,68,68,0.1);">
+          <div style="font-weight:700;margin-bottom:8px;">⚠️ ${errorMessage}</div>
+          <div style="font-size:13px;color:#fca5a5;">
+            ${error?.message || 'Error desconocido'}
+          </div>
+          <button onclick="document.getElementById('ocr-result-output').innerHTML=''" 
+                  style="margin-top:12px;padding:8px 16px;background:#ef4444;color:#fff;border:none;border-radius:6px;cursor:pointer;">
+            Cerrar
+          </button>
+        </div>
+      `;
+    }
+  }
   }
 
   function bindInputPreview(inputId) {
