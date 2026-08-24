@@ -291,8 +291,7 @@ function recalc() {
     : 0;
 
   // ⚠️  BLINDAJE CRÍTICO: No recalcular incomeYTD desde conversaciones locales.
-  // El valor SIEMPRE viene de Supabase vía applyMetricRow() / syncDown().
-  // recalc() solo actualiza el riskLevel usando el valor ya existente en state.
+
   state.fiscalMetrics.riskLevel = calcRiskLevel(
     Number(state.incomeYTD || 0),
     DEFAULT_LIMIT
@@ -585,8 +584,8 @@ async function upsertMetrics() {
   }
 }
 
-// ── applyMetricRow() UNIFICADA (FIX FASE 0.1.C) ─────────────────────────
-// Blindaje contra cero + detección de cruce de umbral desde Supabase
+// ── FIX A.3: applyMetricRow UNIFICADA ─────────────────────────────────────
+// Combina: protección contra cero + detección de cruce de umbral
 function applyMetricRow(row) {
   if (!row) return;
   const previousLevel = state.fiscalMetrics.riskLevel;
@@ -600,11 +599,12 @@ function applyMetricRow(row) {
     state.incomeYTD = remoteIncome;
   }
 
+  // El annual_limit es constante normativa (Art. 113-E LISR), NO viene de la DB
   state.fiscalMetrics.annualLimit = DEFAULT_LIMIT;
   const newLevel = calcRiskLevel(Number(state.incomeYTD || 0), DEFAULT_LIMIT);
   state.fiscalMetrics.riskLevel = newLevel;
 
-  // FIX FASE 0.1.C: Detectar cruce de umbral también desde Supabase
+  // FIX A.3: Detectar cruce de umbral desde sincronización Supabase
   evaluateRiskLevelChange(previousLevel, newLevel, state.incomeYTD, DEFAULT_LIMIT);
 }
 
@@ -945,6 +945,55 @@ async function saveDocument(doc) {
 
   rebuildCarpetaFiscal();
 
+  // ── FIX A.1: saveInvoiceDocument DENTRO del IIFE (acceso al closure) ─────
+async function saveInvoiceDocument(invoiceData) {
+  const totalFactura = Number(invoiceData?.total || 0);
+  const doc = {
+    id: safeUUID(),
+    file_name: `CFDI_${invoiceData?.invoice_number || invoiceData?.invoice_id || 'sin_folio'}.xml`,
+    document_type: 'CFDI',
+    doc_type: 'CFDI',
+    extracted_data: {
+      alegra_invoice_id: invoiceData?.invoice_id || null,
+      invoice_number: invoiceData?.invoice_number || null,
+      rfc_receptor: invoiceData?.rfc_receptor || null,
+      uso_cfdi: invoiceData?.uso_cfdi || null,
+      regimen_fiscal_emisor: invoiceData?.regimen_fiscal_emisor || '626',
+      total: totalFactura,
+      fecha: invoiceData?.fecha || new Date().toISOString().slice(0, 10),
+      tax_usefulness: 'ISR',
+      folder_category: 'ingresos'
+    },
+    confidence: 1,
+    safety_flag: false,
+    validation_status: 'TIMBRADO',
+    needs_review: false,
+    source: 'alegra_invoice',
+    folder_category: 'ingresos',
+    created_at: new Date().toISOString()
+  };
+
+  const savedDoc = await saveDocument(doc);
+
+  // Sumar al Monitor de Ingresos y recalcular semáforo RESICO (Art. 113-E LISR)
+  const previousLevel = state.fiscalMetrics.riskLevel;
+  const nuevoIncomeYTD = Number(state.incomeYTD || 0) + totalFactura;
+  state.incomeYTD = nuevoIncomeYTD;
+  const newLevel = calcRiskLevel(nuevoIncomeYTD, state.fiscalMetrics.annualLimit || DEFAULT_LIMIT);
+  state.fiscalMetrics.riskLevel = newLevel;
+
+  // FIX A.1: Detectar cruce de umbral al timbrar (alertas WhatsApp)
+  evaluateRiskLevelChange(previousLevel, newLevel, nuevoIncomeYTD, state.fiscalMetrics.annualLimit || DEFAULT_LIMIT);
+
+  persist();
+  emit('income:updated', state.incomeYTD);
+  emit('incomeUpdated', state.incomeYTD);
+  emit('invoiceTimbrada', { ...invoiceData, savedDoc });
+  emitAll();
+  await upsertMetrics();
+  return savedDoc;
+}
+
   return {
     on,
     initSupabase,
@@ -972,55 +1021,5 @@ async function saveDocument(doc) {
     evaluateRiskLevelChange,
   };
 
-// ── saveInvoiceDocument DENTRO del IIFE (FIX FASE 0.1.A) ────────────────
-async function saveInvoiceDocument(invoiceData) {
-  const totalFactura = Number(invoiceData?.total || 0);
-
-  const doc = {
-    id: safeUUID(),
-    file_name: `CFDI_${invoiceData?.invoice_number || invoiceData?.invoice_id || 'sin_folio'}.xml`,
-    document_type: 'CFDI',
-    doc_type: 'CFDI',
-    extracted_data: {
-      alegra_invoice_id: invoiceData?.invoice_id || null,
-      invoice_number: invoiceData?.invoice_number || null,
-      rfc_receptor: invoiceData?.rfc_receptor || null,
-      uso_cfdi: invoiceData?.uso_cfdi || null,
-      regimen_fiscal_emisor: invoiceData?.regimen_fiscal_emisor || '626',
-      total: totalFactura,
-      fecha: invoiceData?.fecha || new Date().toISOString().slice(0, 10),
-      tax_usefulness: 'ISR',
-      folder_category: 'ingresos'
-    },
-    confidence: 1,
-    safety_flag: false,
-    validation_status: 'TIMBRADO',
-    needs_review: false,
-    source: 'alegra_invoice',
-    folder_category: 'ingresos',
-    created_at: new Date().toISOString()
-  };
-
-  // Reutiliza saveDocument() → sincroniza a Supabase 'documents' y rearma carpeta fiscal
-  const savedDoc = await saveDocument(doc);
-
-  // ── Suma al Monitor de Ingresos y recalcula el semáforo RESICO en vivo ────
-  const nuevoIncomeYTD = Number(state.incomeYTD || 0) + totalFactura;
-  state.incomeYTD = nuevoIncomeYTD;
-  state.fiscalMetrics.riskLevel = calcRiskLevel(nuevoIncomeYTD, state.fiscalMetrics.annualLimit || DEFAULT_LIMIT);
-
-  persist();
-  emit('income:updated', state.incomeYTD);
-  emit('incomeUpdated', state.incomeYTD);
-  emit('invoiceTimbrada', { ...invoiceData, savedDoc });
-  emitAll();
-
-  // Sincroniza el nuevo income_ytd a Supabase (fiscal_metrics)
-   await upsertMetrics();
-  return savedDoc;
-}
-
-// ── Exponer saveInvoiceDocument en el return del IIFE ────────────────────
-// (Ya está en el return, solo confirmamos que el IIFE cierre aquí)
 })();
 window.Store = Store;
