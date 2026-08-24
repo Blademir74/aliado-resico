@@ -177,7 +177,6 @@ function buildFallback(reason, fileName = '') {
     return res.status(401).json({ ok: false, error: 'No autorizado. Se requiere sesión activa de Supabase.' });
   }
 
-  
   const body = parseBody(req);
   const { fileName, mimeType, base64Data } = body;
     // ── FIX FASE 1.3.B: Validar magic number antes de procesar ────────────
@@ -189,39 +188,11 @@ function buildFallback(reason, fileName = '') {
       hint: 'Sube una imagen (JPG/PNG/WEBP) o PDF válido.'
     });
   }
-  const apiKey = process.env.GEMINI_API_KEY || '';
+    const apiKey = process.env.GEMINI_API_KEY || '';
 
-      // ── FIX FASE 1.4: Validar que RFC receptor sea del usuario autenticado ──
-    const extractedRfcReceptor = (doc.extracted_data?.rfc_receptor || '').toUpperCase().trim();
-    if (extractedRfcReceptor && extractedRfcReceptor !== 'XAXX010101000' && extractedRfcReceptor !== 'XEXX010101000') {
-      // Obtener RFC del usuario desde user_profiles (tabla creada en Fase 0)
-      let userRfc = null;
-      try {
-        const { SUPABASE_URL, SUPABASE_SERVICE_KEY } = process.env;
-        if (SUPABASE_URL && SUPABASE_SERVICE_KEY) {
-          const profileRes = await fetch(`${SUPABASE_URL}/rest/v1/user_profiles?user_id=eq.${user.uid}&select=rfc`, {
-            headers: {
-              apikey: SUPABASE_SERVICE_KEY,
-              Authorization: `Bearer ${SUPABASE_SERVICE_KEY}`,
-            }
-          });
-          const profiles = await profileRes.json();
-          userRfc = Array.isArray(profiles) && profiles[0]?.rfc ? profiles[0].rfc.toUpperCase() : null;
-        }
-      } catch (e) { /* silent */ }
-      if (userRfc && extractedRfcReceptor !== userRfc) {
-        doc.extracted_data.rfc_receptor_mismatch = true;
-        doc.extracted_data.rfc_receptor_expected = userRfc;
-        doc.safety_flag = true;
-        doc.needs_review = true;
-        doc.validation_status = 'RFC_receptor_no_coincide';
-        doc.extracted_data.warning = `⚠️ El RFC receptor (${extractedRfcReceptor}) no coincide con tu RFC registrado (${userRfc}). Este documento NO es acreditable para IVA.`;
-      }
+    if (!apiKey) {
+      return res.status(200).json(buildFallback('missing_api_key', fileName || ''));
     }
-
-  if (!apiKey) {
-    return res.status(200).json(buildFallback('missing_api_key', fileName || ''));
-  }
 
   if (!fileName || !mimeType || !base64Data) {
     return res.status(400).json({
@@ -336,7 +307,38 @@ function buildFallback(reason, fileName = '') {
       needsHumanReview: safetyFlag,
       model: GEMINI_MODEL
     });
+        // ── FIX FASE 1.4: Validar que RFC receptor sea del usuario autenticado ──
+    // Previene acreditamiento indebido de IVA con facturas ajenas (riesgo auditoría SAT)
+    const extractedRfcReceptor = (doc.extracted_data?.rfc_receptor || '').toUpperCase().trim();
+    if (extractedRfcReceptor && extractedRfcReceptor !== 'XAXX010101000' && extractedRfcReceptor !== 'XEXX010101000') {
+      let userRfc = null;
+      try {
+        const { SUPABASE_URL, SUPABASE_SERVICE_KEY } = process.env;
+        if (SUPABASE_URL && SUPABASE_SERVICE_KEY && jwtUser?.uid) {
+          const profileRes = await fetch(`${SUPABASE_URL}/rest/v1/user_profiles?user_id=eq.${jwtUser.uid}&select=rfc`, {
+            headers: {
+              apikey: SUPABASE_SERVICE_KEY,
+              Authorization: `Bearer ${SUPABASE_SERVICE_KEY}`,
+            }
+          });
+          const profiles = await profileRes.json();
+          userRfc = Array.isArray(profiles) && profiles[0]?.rfc ? profiles[0].rfc.toUpperCase().trim() : null;
+        }
+      } catch (e) {
+        console.warn('[document-ocr] No se pudo validar RFC receptor:', e.message);
+      }
+      if (userRfc && extractedRfcReceptor !== userRfc) {
+        doc.extracted_data.rfc_receptor_mismatch = true;
+        doc.extracted_data.rfc_receptor_expected = userRfc;
+        doc.safety_flag = true;
+        doc.needs_review = true;
+        doc.validation_status = 'RFC_receptor_no_coincide';
+        doc.extracted_data.warning = `⚠️ El RFC receptor (${extractedRfcReceptor}) no coincide con tu RFC registrado (${userRfc}). Este documento NO es acreditable para IVA.`;
+      }
+    }
+     return res.status(200).json({ ok: true, document: doc });
   } catch (error) {
+    
     return res.status(200).json(buildFallback(error?.message || 'network_error', fileName));
   }
 }
