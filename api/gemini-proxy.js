@@ -80,7 +80,7 @@ function fiscalEngine(message) {
   return { respuestaFiscal, fundamentoLegal, diferenciacionIsrIva, accionConcreta };
 }
 
-async function callGemini(message, context) {
+async function callGemini(model, message, context) {
   const prompt = `Eres el asesor fiscal RESICO 2026 de Aliado RESICO (México).
 Contexto del usuario: ingreso acumulado $${context?.incomeYTD || 0} MXN de un límite de $3,500,000.
 Responde SOLO JSON válido con estas llaves exactas (sin espacios):
@@ -112,13 +112,17 @@ export default async function handler(req, res) {
     if (!rateLimit(user?.uid || 'demo')) return res.status(429).json({ ok: false, error: 'Límite alcanzado. Intenta en un minuto.' });
 
     if (GEMINI_KEY) {
-      try {
-        const ai = callGemini(message, body.context);
-        const structured = await ai;
-        return res.status(200).json({ ok: true, source: 'gemini', reply: structured.respuestaFiscal, structured });
-      } catch (e) {
-        console.warn('[gemini-proxy] Gemini falló, usando motor fiscal:', e.message);
+      const models = [...new Set([GEMINI_MODEL, 'gemini-2.0-flash', 'gemini-1.5-flash', 'gemini-2.5-flash'])];
+      let lastErr = null;
+      for (const m of models) {
+        try {
+          const structured = await callGemini(m, message, body.context);
+          return res.status(200).json({ ok: true, source: 'gemini', provider: m, reply: structured.respuestaFiscal, structured });
+        } catch (e) { lastErr = e; }
       }
+      console.warn('[gemini-proxy] Gemini falló en todos los modelos:', lastErr?.message);
+      const fb = fiscalEngine(message);
+      return res.status(200).json({ ok: true, is_fallback: true, fallback_reason: 'gemini_error', debug: { geminiError: String(lastErr?.message || 'unknown') }, reply: fb.respuestaFiscal, structured: fb });
     }
     const fb = fiscalEngine(message);
     return res.status(200).json({ ok: true, is_fallback: true, fallback_reason: GEMINI_KEY ? 'gemini_error' : 'no_api_key', reply: fb.respuestaFiscal, structured: fb });

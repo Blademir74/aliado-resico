@@ -62,10 +62,10 @@ const App = (() => {
     if (target === 'carpeta') renderCarpetaFiscal();
   }
 
-    // ── FIX D1: El tema se aplica con la CLASE que styles.css realmente lee ──
+    
     function applyTheme(mode) {
       document.body.classList.toggle('light-mode', mode === 'light');
-      document.body.dataset.theme = mode; // compatibilidad
+      document.body.dataset.theme = mode;
     }
     function initTheme() {
       const btn = byId('theme-toggle');
@@ -79,8 +79,7 @@ const App = (() => {
         applyTheme(next);
         btn.textContent = next === 'light' ? '☀️' : '🌙';
       });
-
-}
+    }
 
   function initNavigation() {
     document.querySelectorAll('.nav-btn[data-tab]').forEach(btn => {
@@ -862,41 +861,44 @@ ${esc(diagnosis.recomendacion)}
   `;
 }
  
+function readYesNo(id) {
+  const el = byId(id);
+  if (!el) return false;
+  if (el.type === 'checkbox') return !!el.checked;
+  return String(el.value || '').toLowerCase() === 'si';
+}
 function completeWizard() {
-  // Leer inputs del DOM
   const income    = Number((byId('wiz-income')    || {}).value || 0);
   const salarios  = Number((byId('wiz-salarios')  || {}).value || 0);
   const intereses = Number((byId('wiz-intereses') || {}).value || 0);
-  const socioPM   = !!(byId('wiz-socio')  || {}).checked;   // FIX D2: ID real
-  const mixtos    = !!(byId('wiz-mixtos') || {}).checked;
-  const cfdiGlobal= !!(byId('wiz-cfdi')   || {}).checked;   // FIX D2: ID real
-  const buzonActivo = (byId('wiz-buzon')       || {}).value !== 'false';
+  const socioPM   = readYesNo('wiz-socio');
+  const mixtos    = readYesNo('wiz-mixtos');
+  const cfdiGlobal= readYesNo('wiz-cfdi');
+  const buzonVal  = String((byId('wiz-buzon') || {}).value || 'si').toLowerCase();
+  const buzonActivo = !(buzonVal === 'no' || buzonVal === 'false');
 
   const diagnosis = computeWizardDiagnosis({
     income, salarios, intereses, socioPM, mixtos, cfdiGlobal, buzonActivo
   });
-
-  // Persistir en Store y Supabase
   Store.updateDiagnostic(diagnosis);
-
-  // Renderizar resultado
   renderWizardResult(diagnosis);
 
-    // ── FIX D2: Llenar el panel "Diagnóstico completado" (IDs res-*) ────────
+  // ── FIX R2: Llenar el panel visible "Diagnóstico completado" ──────────
   const setF = (id, val) => { const el = byId(id); if (el) el.textContent = val; };
   const fmtM = n => `$${Number(n || 0).toLocaleString('es-MX')} MXN`;
   setF('res-income', fmtM(diagnosis.income));
   setF('res-salarios', fmtM(diagnosis.salarios));
   setF('res-intereses', fmtM(diagnosis.intereses));
   setF('res-anual', diagnosis.anualObligatoria ? '⚠️ OBLIGATORIA (Art. 113-F LISR)' : '✅ No obligatoria');
-  setF('res-multa', diagnosis.riesgoMulta ? '🔴 Riesgo de multa por CFDI' : '✅ CFDI al corriente');
+  setF('res-multa', diagnosis.riesgoMulta ? '🔴 Riesgo de multa CFDI' : '✅ CFDI al corriente');
   setF('res-buzon', diagnosis.riesgoBuzon ? '🔴 Inactivo — multa $10,260 MXN (Art. 17-K CFF)' : '✅ Activo');
   setF('res-risk', `${diagnosis.riskLevel} — ${diagnosis.income > 0 ? ((diagnosis.income / 3500000) * 100).toFixed(1) : '0.0'}% del límite`);
   setF('res-pedagogia', '📚 ISR RESICO: sobre ingresos brutos sin deducciones (1%–2.5%). IVA: acreditable solo con CFDI válido y gasto indispensable.');
   setF('res-recomendacion', diagnosis.recomendacion);
 
-  // Navegar a la vista de resultado
-  navigateTo('dashboard');
+  // ── FIX R2: NO navegar al dashboard — mostrar resultado en el wizard ──
+  const target = byId('res-income');
+  if (target) target.scrollIntoView({ behavior: 'smooth', block: 'center' });
 }
 
   function resetWizard() {

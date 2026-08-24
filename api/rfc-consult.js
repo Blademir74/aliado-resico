@@ -140,14 +140,13 @@ export default async function handler(req, res) {
     return res.status(405).json({ ok: false, error: 'Method Not Allowed' });
   }
 
-  // Validar JWT
-    // FIX D5: La validación de RFC NO es dato sensible → pública con rate-limit.
-  // La consulta EFOS usa service_role (server-side), nunca expone la DB al cliente.
+   // FIX R3: Validación de RFC es información PÚBLICA → sin 401, con rate-limit
   const user = await validateSupabaseJWT(req.headers.authorization);
   const rlKey = user?.uid || String(req.headers['x-forwarded-for'] || 'anon');
   if (!rateLimit(rlKey)) {
     return res.status(429).json({ ok: false, error: 'Demasiadas consultas. Intenta en un minuto.' });
   }
+  
   const isDemoMode = !user && req.headers['x-demo-mode'] === 'true';
   
   if (!user && !isDemoMode) {
