@@ -6,22 +6,71 @@ const AuthRegisterUI = (() => {
   const PHONE_REGEX = /^\d{10}$/;
   const PASSWORD_MIN = 12;
   const PASSWORD_MAX = 18;
+  // ── FIX FASE 1.2: Validación oficial del carácter verificador RFC ───────
+  // Algoritmo del SAT (Anexo 21 RMF) — detecta homoclaves incorrectas
+  const RFC_CHAR_MAP = {
+    '0':0,'1':1,'2':2,'3':3,'4':4,'5':5,'6':6,'7':7,'8':8,'9':9,
+    'A':10,'B':11,'C':12,'D':13,'E':14,'F':15,'G':16,'H':17,'I':18,
+    'J':19,'K':20,'L':21,'M':22,'N':23,'&':24,'O':25,'P':26,'Q':27,
+    'R':28,'S':29,'T':30,'U':31,'V':32,'W':33,'X':34,'Y':35,'Z':36,
+    ' ':37,'Ñ':38
+  };
+
+  function validateRFCChecksum(rfc) {
+    if (!rfc) return { valid: false, reason: 'RFC vacío' };
+    const clean = String(rfc).trim().toUpperCase();
+    if (clean === 'XAXX010101000' || clean === 'XEXX010101000') {
+      return { valid: true, reason: 'RFC genérico válido' };
+    }
+    if (clean.length !== 12 && clean.length !== 13) {
+      return { valid: false, reason: `Longitud inválida (${clean.length})` };
+    }
+    try {
+      // Preparar cadena para cálculo: agregar espacio al inicio si es PF (13 chars)
+      const forCalc = clean.length === 13 ? ' ' + clean.substring(0, 11) : clean.substring(0, 11);
+      let sum = 0;
+      for (let i = 0; i < 11; i++) {
+        const charVal = RFC_CHAR_MAP[forCalc[i]];
+        if (charVal === undefined) return { valid: false, reason: 'Carácter inválido en RFC' };
+        sum += charVal * (12 - i);
+      }
+      const remainder = sum % 11;
+      const expectedDigit = remainder === 0 ? '0' : remainder === 1 ? 'A' : String(11 - remainder);
+      const actualDigit = clean.charAt(clean.length - 1);
+      if (expectedDigit !== actualDigit) {
+        return {
+          valid: false,
+          reason: `Dígito verificador incorrecto. Esperado: ${expectedDigit}, recibido: ${actualDigit}`,
+        };
+      }
+      return { valid: true, reason: 'RFC válido con homoclave correcta' };
+    } catch (e) {
+      return { valid: false, reason: 'Error al validar: ' + e.message };
+    }
+  }
 
   function byId(id) { return document.getElementById(id); }
 
   function validateRFCLive(value) {
-    const clean = String(value || '').trim().toUpperCase();
-    if (!clean) return { valid: false, message: '', tone: 'neutral' };
-    if (clean.length < 12) return { valid: false, message: 'RFC incompleto...', tone: 'neutral' };
-
-    const isPF = RFC_REGEX_PF.test(clean);
-    const isPM = RFC_REGEX_PM.test(clean);
-
-    if (isPF || isPM) {
-      return { valid: true, message: `✓ RFC válido (${isPF ? 'Persona Física' : 'Persona Moral'})`, tone: 'valid' };
+  const clean = String(value || '').trim().toUpperCase();
+  if (!clean) return { valid: false, message: '', tone: 'neutral' };
+  if (clean.length < 12) return { valid: false, message: 'RFC incompleto...', tone: 'neutral' };
+  const isPF = RFC_REGEX_PF.test(clean);
+  const isPM = RFC_REGEX_PM.test(clean);
+  if (isPF || isPM) {
+    // ── FIX FASE 1.2.B: Validar carácter verificador ────────────────────
+    const checksum = validateRFCChecksum(clean);
+    if (!checksum.valid) {
+      return {
+        valid: false,
+        message: `✗ ${checksum.reason}`,
+        tone: 'invalid'
+      };
     }
-    return { valid: false, message: '✗ Formato de RFC inválido', tone: 'invalid' };
+    return { valid: true, message: `✓ RFC válido (${isPF ? 'Persona Física' : 'Persona Moral'}) con homoclave correcta`, tone: 'valid' };
   }
+  return { valid: false, message: '✗ Formato de RFC inválido', tone: 'invalid' };
+}
 
   function validatePhoneLive(value) {
     const clean = String(value || '').replace(/\D/g, '');

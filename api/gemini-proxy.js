@@ -41,11 +41,11 @@ const JSON_CONTRACT = [
   'Responde SOLO JSON válido sin markdown ni texto extra.',
   'Usa exactamente estas llaves:',
   '{',
-  '  "respuestaFiscal": "string",',
-  '  "fundamentoLegal": "string",',
-  '  "diferenciacionIsrIva": "string",',
-  '  "accionConcreta": "string",',
-  '  "solicitudDatoFaltante": "string opcional o vacío"',
+  '   "respuestaFiscal": "string",',
+  '   "fundamentoLegal": "string",',
+  '   "diferenciacionIsrIva": "string",',
+  '   "accionConcreta": "string",',
+  '   "solicitudDatoFaltante": "string opcional o vacío"',
   '}',
   'Reglas obligatorias:',
   '- Español mexicano claro.',
@@ -62,6 +62,34 @@ const JSON_CONTRACT = [
 
 // ── Cache del token de Vertex AI (TTL 55 min) ──────────────────────────────
 const _tokenCache = { token: null, expiresAt: 0 };
+
+// ── FIX FASE 1.1: Rate Limiting por usuario autenticado ─────────────────
+// Previene abuso de cuota de Vertex AI (60 requests/minuto por usuario)
+const RATE_LIMIT_WINDOW_MS = 60 * 1000; // 1 minuto
+const RATE_LIMIT_MAX_REQUESTS = 60;
+const rateLimitMap = new Map();
+
+function checkRateLimit(userId) {
+  const key = userId || 'anonymous';
+  const now = Date.now();
+  let entry = rateLimitMap.get(key);
+  if (!entry || now - entry.windowStart > RATE_LIMIT_WINDOW_MS) {
+    entry = { windowStart: now, count: 0 };
+  }
+  entry.count++;
+  rateLimitMap.set(key, entry);
+  if (entry.count > RATE_LIMIT_MAX_REQUESTS) {
+    const retryAfter = Math.ceil((entry.windowStart + RATE_LIMIT_WINDOW_MS - now) / 1000);
+    return { allowed: false, retryAfter };
+  }
+  // Limpieza periódica (cada 100 requests) para evitar memory leak
+  if (rateLimitMap.size > 10000 && entry.count === 1) {
+    for (const [k, v] of rateLimitMap) {
+      if (now - v.windowStart > RATE_LIMIT_WINDOW_MS) rateLimitMap.delete(k);
+    }
+  }
+  return { allowed: true, remaining: RATE_LIMIT_MAX_REQUESTS - entry.count };
+}
 
 // ── Helpers CORS / respuesta ───────────────────────────────────────────────
 function resolveOrigin(origin = '') {
@@ -455,6 +483,17 @@ export default async function handler(req, res) {
       code:  'jwt_required'
     });
     return;
+  }
+
+  // ── FIX FASE 1.1.B: Aplicar rate limit por usuario ────────────────────
+  const rateCheck = checkRateLimit(user.uid);
+  if (!rateCheck.allowed) {
+    res.setHeader('Retry-After', String(rateCheck.retryAfter));
+    return res.status(429).json({
+      ok: false,
+      error: 'Límite de consultas alcanzado. Intenta de nuevo en unos segundos.',
+      retryAfter: rateCheck.retryAfter,
+    });
   }
 
   const body = parseBody(req);

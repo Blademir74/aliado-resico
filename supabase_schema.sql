@@ -21,6 +21,8 @@ DROP TABLE IF EXISTS public.isr_rates_resico CASCADE;
 DROP TABLE IF EXISTS public.documents        CASCADE;
 DROP TABLE IF EXISTS public.fiscal_metrics   CASCADE;
 DROP TABLE IF EXISTS public.conversations    CASCADE;
+DROP TABLE IF EXISTS public.diagnostic_results CASCADE;
+DROP TABLE IF EXISTS public.user_profiles      CASCADE;
 
 -- ============================================================
 -- 2. TABLA: conversations  (Cerebro de Intenciones)
@@ -50,19 +52,22 @@ CREATE TABLE public.conversations (
 --    user_id obligatorio para que el RLS aísle cada contribuyente.
 -- ============================================================
 CREATE TABLE public.documents (
-    id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    user_id         UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
-    file_name       TEXT,
-    doc_type        TEXT,
-    extracted_data  JSONB DEFAULT '{}',
-    confidence      FLOAT DEFAULT 0,
-    safety_flag     BOOLEAN DEFAULT FALSE,   -- OCR < 85% → requiere verificación humana
-    validation_status TEXT DEFAULT 'pendiente',
-    needs_review    BOOLEAN DEFAULT FALSE,
-    source          TEXT DEFAULT 'unknown',
-    created_at      TIMESTAMPTZ DEFAULT now()
+  id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id         UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+  file_name       TEXT,
+  doc_type        TEXT,
+  document_type   TEXT,                    -- FIX FASE 0.7.A
+  file_url        TEXT,                    -- FIX FASE 0.7.A
+  folder_category TEXT,                    -- FIX FASE 0.7.A
+  extracted_data  JSONB DEFAULT '{}',
+  confidence      FLOAT DEFAULT 0,
+  safety_flag     BOOLEAN DEFAULT FALSE,
+  validation_status TEXT DEFAULT 'pendiente',
+  needs_review    BOOLEAN DEFAULT FALSE,
+  source          TEXT DEFAULT 'unknown',
+  created_at      TIMESTAMPTZ DEFAULT now(),
+  updated_at      TIMESTAMPTZ DEFAULT now()  -- FIX FASE 0.7.A
 );
-
 -- ============================================================
 -- 4. TABLA: fiscal_metrics  (Monitor Art. 113-E LISR)
 --    user_id UNIQUE → el onConflict:'user_id' del store.js funciona.
@@ -75,6 +80,25 @@ CREATE TABLE public.fiscal_metrics (
     total_processed INTEGER NOT NULL DEFAULT 0,
     avg_confidence  NUMERIC NOT NULL DEFAULT 0,
     updated_at      TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+-- ============================================================
+-- 4.5 TABLA: diagnostic_results (FIX FASE 0.7.B)
+--     Persiste el diagnóstico del wizard (FiscalWizard.js)
+-- ============================================================
+CREATE TABLE public.diagnostic_results (
+  id                 UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id            UUID NOT NULL UNIQUE REFERENCES auth.users(id) ON DELETE CASCADE,
+  income_estimated   NUMERIC DEFAULT 0,
+  salarios_estimated NUMERIC DEFAULT 0,
+  intereses_estimated NUMERIC DEFAULT 0,
+  has_mixed_income   BOOLEAN DEFAULT FALSE,
+  is_socio_pm        BOOLEAN DEFAULT FALSE,
+  has_cfdi_global    BOOLEAN DEFAULT FALSE,
+  anual_obligatoria  BOOLEAN DEFAULT FALSE,
+  riesgo_multa       BOOLEAN DEFAULT FALSE,
+  recomendacion      TEXT DEFAULT '',
+  updated_at         TIMESTAMPTZ DEFAULT now()
 );
 
 -- ============================================================
@@ -93,6 +117,21 @@ CREATE TABLE public.audit_log (
 );
 
 -- ============================================================
+-- 5.5 TABLA: user_profiles (FIX FASE 0.7.C)
+--     Almacena RFC, teléfono y nombre del contribuyente
+-- ============================================================
+CREATE TABLE public.user_profiles (
+  id           UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id      UUID NOT NULL UNIQUE REFERENCES auth.users(id) ON DELETE CASCADE,
+  full_name    TEXT,
+  rfc          TEXT,
+  phone        TEXT,
+  regimen      TEXT DEFAULT '626',
+  created_at   TIMESTAMPTZ DEFAULT now(),
+  updated_at   TIMESTAMPTZ DEFAULT now()
+);
+
+-- ============================================================
 -- 6. TABLA: isr_rates_resico  (Catálogo público Art. 113-E LISR)
 -- ============================================================
 CREATE TABLE public.isr_rates_resico (
@@ -105,12 +144,13 @@ CREATE TABLE public.isr_rates_resico (
     valid_until DATE DEFAULT '2099-12-31'
 );
 
+-- FIX FASE 0.7.D: Tabla oficial anual 2026 (Novedades RESICO 2026)
 INSERT INTO public.isr_rates_resico (lower_limit, upper_limit, rate_pct, description) VALUES
-    (0.00,       25000.00,    1.00, 'Hasta $25,000 mensuales'),
-    (25000.01,   50000.00,    1.10, 'De $25,000.01 a $50,000'),
-    (50000.01,   83333.33,    1.50, 'De $50,000.01 a $83,333.33'),
-    (83333.34,   208333.33,   2.00, 'De $83,333.34 a $208,333.33'),
-    (208333.34,  3500000.00,  2.50, 'De $208,333.34 hasta límite anual');
+(0.00,       300000.00,   1.00, 'Hasta $300,000 anuales'),
+(300000.01,  600000.00,   1.10, 'De $300,000.01 a $600,000'),
+(600000.01,  1000000.00,  1.50, 'De $600,000.01 a $1,000,000'),
+(1000000.01, 2500000.00,  2.00, 'De $1,000,000.01 a $2,500,000'),
+(2500000.01, 3500000.00,  2.50, 'De $2,500,000.01 hasta límite anual');
 
 -- ============================================================
 -- 7. ACTIVAR ROW LEVEL SECURITY EN TODAS LAS TABLAS
@@ -191,6 +231,24 @@ CREATE POLICY "owner_update_fiscal_metrics"
     USING (auth.uid() = user_id) WITH CHECK (auth.uid() = user_id);
 
 -- ============================================================
+-- 10.5 RLS — diagnostic_results (FIX FASE 0.7.E)
+-- ============================================================
+ALTER TABLE public.diagnostic_results ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "service_role_all_diagnostic" ON public.diagnostic_results FOR ALL TO service_role USING (true) WITH CHECK (true);
+CREATE POLICY "owner_select_diagnostic" ON public.diagnostic_results FOR SELECT TO authenticated USING (auth.uid() = user_id);
+CREATE POLICY "owner_insert_diagnostic" ON public.diagnostic_results FOR INSERT TO authenticated WITH CHECK (auth.uid() = user_id);
+CREATE POLICY "owner_update_diagnostic" ON public.diagnostic_results FOR UPDATE TO authenticated USING (auth.uid() = user_id) WITH CHECK (auth.uid() = user_id);
+
+-- ============================================================
+-- 10.6 RLS — user_profiles (FIX FASE 0.7.E)
+-- ============================================================
+ALTER TABLE public.user_profiles ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "service_role_all_profiles" ON public.user_profiles FOR ALL TO service_role USING (true) WITH CHECK (true);
+CREATE POLICY "owner_select_profiles" ON public.user_profiles FOR SELECT TO authenticated USING (auth.uid() = user_id);
+CREATE POLICY "owner_insert_profiles" ON public.user_profiles FOR INSERT TO authenticated WITH CHECK (auth.uid() = user_id);
+CREATE POLICY "owner_update_profiles" ON public.user_profiles FOR UPDATE TO authenticated USING (auth.uid() = user_id) WITH CHECK (auth.uid() = user_id);
+
+-- ============================================================
 -- 11. RLS — audit_log  (solo service_role; el usuario no lo ve)
 -- ============================================================
 CREATE POLICY "service_role_all_audit_log"
@@ -221,6 +279,8 @@ REVOKE ALL ON public.conversations   FROM anon;
 REVOKE ALL ON public.documents       FROM anon;
 REVOKE ALL ON public.fiscal_metrics  FROM anon;
 REVOKE ALL ON public.audit_log       FROM anon;
+REVOKE ALL ON public.diagnostic_results FROM anon;
+REVOKE ALL ON public.user_profiles      FROM anon;
 GRANT  SELECT ON public.isr_rates_resico TO anon;
 
 -- ============================================================

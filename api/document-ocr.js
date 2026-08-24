@@ -11,6 +11,71 @@ const ALLOWED_ORIGINS = [
 const GEMINI_MODEL = 'gemini-2.0-flash';
 const GEMINI_ENDPOINT = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent`;
 
+import crypto from 'node:crypto';
+
+const SUPABASE_JWT_SECRET = process.env.SUPABASE_JWT_SECRET || '';
+
+// ── Validación JWT de Supabase (FIX FASE 0.4.B) ─────────────────────────
+async function validateSupabaseJWT(authHeader) {
+  if (!authHeader || !authHeader.startsWith('Bearer ')) return null;
+  const token = authHeader.slice(7).trim();
+  if (!token) return null;
+  try {
+    const parts = token.split('.');
+    if (parts.length !== 3) return null;
+    const [encodedHeader, encodedPayload, encodedSig] = parts;
+    if (SUPABASE_JWT_SECRET) {
+      const signingInput = `${encodedHeader}.${encodedPayload}`;
+      const expectedSig = crypto.createHmac('sha256', SUPABASE_JWT_SECRET)
+        .update(signingInput).digest('base64url');
+      const sigBuf = Buffer.from(encodedSig, 'base64url');
+      const expBuf = Buffer.from(expectedSig, 'base64url');
+      if (sigBuf.length !== expBuf.length || !crypto.timingSafeEqual(sigBuf, expBuf)) return null;
+    } else {
+      console.warn('[document-ocr] SUPABASE_JWT_SECRET no configurado. Verificación OFF.');
+    }
+    const payload = JSON.parse(Buffer.from(encodedPayload, 'base64url').toString('utf8'));
+    if (payload.exp && payload.exp < Math.floor(Date.now() / 1000)) return null;
+    if (payload.role === 'service_role') return null;
+    return { uid: payload.sub || null, email: payload.email || null };
+  } catch { return null; }
+}
+
+// ── FIX FASE 1.3: Validación de magic number (MIME real) ────────────────
+// Detecta el tipo real del archivo desde sus primeros bytes, no la extensión
+const MAGIC_SIGNATURES = {
+  'image/jpeg': ['FFD8FF'],
+  'image/png': ['89504E47'],
+  'image/webp': ['52494646'],
+  'application/pdf': ['25504446'],
+};
+
+function validateMagicNumber(base64Data, claimedMime) {
+  if (!base64Data || typeof base64Data !== 'string') {
+    return { valid: false, reason: 'Datos vacíos' };
+  }
+  try {
+    const buffer = Buffer.from(base64Data, 'base64');
+    if (buffer.length < 8) return { valid: false, reason: 'Archivo muy pequeño' };
+    const hexHead = buffer.slice(0, 4).toString('hex').toUpperCase();
+    const allowedMimes = ['image/jpeg', 'image/png', 'image/webp', 'application/pdf'];
+    if (!allowedMimes.includes(claimedMime)) {
+      return { valid: false, reason: `MIME no permitido: ${claimedMime}` };
+    }
+    const expectedSigs = MAGIC_SIGNATURES[claimedMime] || [];
+    const matches = expectedSigs.some(sig => hexHead.startsWith(sig));
+    if (!matches) {
+      return {
+        valid: false,
+        reason: `Firma binaria no coincide. Esperado: ${claimedMime}, detectado: ${hexHead}`,
+      };
+    }
+    return { valid: true, mime: claimedMime };
+  } catch (e) {
+    return { valid: false, reason: 'Error al validar: ' + e.message };
+  }
+}
+
 function resolveOrigin(origin = '') {
   if (!origin) return ALLOWED_ORIGINS[0];
   return ALLOWED_ORIGINS.includes(origin) ? origin : ALLOWED_ORIGINS[0];
@@ -97,20 +162,62 @@ function buildFallback(reason, fileName = '') {
   };
 }
 
-export default async function handler(req, res) {
+  export default async function handler(req, res) {
   setHeaders(req, res);
-
   if (req.method === 'OPTIONS') {
     return res.status(204).end();
   }
-
   if (req.method !== 'POST') {
     return res.status(405).json({ ok: false, error: 'Method Not Allowed' });
   }
 
+  // ── FIX FASE 0.4.B: JWT obligatorio ───────────────────────────────────
+  const user = await validateSupabaseJWT(req.headers.authorization);
+  if (!user) {
+    return res.status(401).json({ ok: false, error: 'No autorizado. Se requiere sesión activa de Supabase.' });
+  }
+
+  
   const body = parseBody(req);
   const { fileName, mimeType, base64Data } = body;
+    // ── FIX FASE 1.3.B: Validar magic number antes de procesar ────────────
+  const magicCheck = validateMagicNumber(base64Data, mimeType);
+  if (!magicCheck.valid) {
+    return res.status(400).json({
+      ok: false,
+      error: `Archivo inválido: ${magicCheck.reason}`,
+      hint: 'Sube una imagen (JPG/PNG/WEBP) o PDF válido.'
+    });
+  }
   const apiKey = process.env.GEMINI_API_KEY || '';
+
+      // ── FIX FASE 1.4: Validar que RFC receptor sea del usuario autenticado ──
+    const extractedRfcReceptor = (doc.extracted_data?.rfc_receptor || '').toUpperCase().trim();
+    if (extractedRfcReceptor && extractedRfcReceptor !== 'XAXX010101000' && extractedRfcReceptor !== 'XEXX010101000') {
+      // Obtener RFC del usuario desde user_profiles (tabla creada en Fase 0)
+      let userRfc = null;
+      try {
+        const { SUPABASE_URL, SUPABASE_SERVICE_KEY } = process.env;
+        if (SUPABASE_URL && SUPABASE_SERVICE_KEY) {
+          const profileRes = await fetch(`${SUPABASE_URL}/rest/v1/user_profiles?user_id=eq.${user.uid}&select=rfc`, {
+            headers: {
+              apikey: SUPABASE_SERVICE_KEY,
+              Authorization: `Bearer ${SUPABASE_SERVICE_KEY}`,
+            }
+          });
+          const profiles = await profileRes.json();
+          userRfc = Array.isArray(profiles) && profiles[0]?.rfc ? profiles[0].rfc.toUpperCase() : null;
+        }
+      } catch (e) { /* silent */ }
+      if (userRfc && extractedRfcReceptor !== userRfc) {
+        doc.extracted_data.rfc_receptor_mismatch = true;
+        doc.extracted_data.rfc_receptor_expected = userRfc;
+        doc.safety_flag = true;
+        doc.needs_review = true;
+        doc.validation_status = 'RFC_receptor_no_coincide';
+        doc.extracted_data.warning = `⚠️ El RFC receptor (${extractedRfcReceptor}) no coincide con tu RFC registrado (${userRfc}). Este documento NO es acreditable para IVA.`;
+      }
+    }
 
   if (!apiKey) {
     return res.status(200).json(buildFallback('missing_api_key', fileName || ''));
@@ -132,17 +239,17 @@ export default async function handler(req, res) {
     'El IVA debe ir explícito cuando se detecte; si no aparece, devuelve 0 o null según corresponda.',
     'Responde con esta forma exacta:',
     '{',
-    '"document_type":"CFDI|TICKET|CONSTANCIA|OPINION|EFIRMA|OTRO",',
-    '"confidence":0.97,',
-    '"rfc_emisor":"string|null",',
-    '"rfc_receptor":"string|null",',
-    '"subtotal":123.45,',
-    '"iva":19.76,',
-    '"total":143.21,',
-    '"folio":"string|null",',
-    '"fecha":"YYYY-MM-DD|null",',
-    '"summary":"breve",',
-    '"tax_usefulness":"IVA|ISR|AMBOS|NINGUNO"',
+    ' "document_type": "CFDI|TICKET|CONSTANCIA|OPINION|EFIRMA|OTRO",',
+    ' "confidence": 0.97,',
+    ' "rfc_emisor": "string|null",',
+    ' "rfc_receptor": "string|null",',
+    ' "subtotal": 123.45,',
+    ' "iva": 19.76,',
+    ' "total": 143.21,',
+    ' "folio": "string|null",',
+    ' "fecha": "YYYY-MM-DD|null",',
+    ' "summary": "breve",',
+    ' "tax_usefulness": "IVA|ISR|AMBOS|NINGUNO"',
     '}',
     'Regla fiscal pedagógica: ISR RESICO no deduce gastos; IVA solo es acreditable con CFDI válido y gasto indispensable.'
   ].join('\n');

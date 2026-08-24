@@ -212,11 +212,11 @@ const InputSanitizer = (() => {
       '<': '&lt;',
       '>': '&gt;',
       '"': '&quot;',
-      "'": '&#x27;',
+      "'": '&#39;',
       '/': '&#x2F;',
-      '`': '&#96;',
+      '`': '&#96;'
     };
-    return str.replace(/[&<>"'/`]/g, char => escapeMap[char]);
+    return str.replace(/[&<>"'\/`]/g, char => escapeMap[char]);
   }
 
   // =============================================

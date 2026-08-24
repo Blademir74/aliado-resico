@@ -266,29 +266,6 @@ function updateIncome(amount) {
   upsertMetrics();
 }
 
-// ── applyMetricRow() también debe detectar cruces al sincronizar desde Supabase ──
-function applyMetricRow(row) {
-  if (!row) return;
-
-  const previousLevel = state.fiscalMetrics.riskLevel;
-  const remoteIncome = Number(row.income_ytd ?? 0);
-
-  if (remoteIncome === 0 && state.incomeYTD > 0) {
-    console.info('[Store] applyMetricRow: valor remoto 0 ignorado, conservando local:', state.incomeYTD);
-  } else {
-    state.incomeYTD = remoteIncome;
-  }
-
-  state.fiscalMetrics.annualLimit = DEFAULT_LIMIT;
-  const newLevel = calcRiskLevel(Number(state.incomeYTD || 0), DEFAULT_LIMIT);
-  state.fiscalMetrics.riskLevel = newLevel;
-
-  evaluateRiskLevelChange(previousLevel, newLevel, state.incomeYTD, DEFAULT_LIMIT);
-}
-  // ============================================================
-// PATCH store.js — Fix amnesia fiscal + recalc() blindado
-// Reemplazar las funciones recalc() y upsertMetrics() existentes
-// ============================================================
 
 // ────────────────────────────────────────────────────────────
 // FUNCIÓN 1: recalc() — NUNCA sobrescribe income histórico
@@ -507,25 +484,6 @@ function recalc() {
     emit('carpetaUpdated', state.carpetaFiscal);
   }
 
-  function applyMetricRow(row) {
-    if (!row) return;
-
-    const remoteIncome = Number(row.income_ytd || 0);
-
-    // PROTECCIÓN: no sobrescribir con cero si ya tenemos un valor local mayor.
-    // Evita que un modo de espera / IA fallback limpie el monitor de ingresos.
-    if (remoteIncome === 0 && state.incomeYTD > 0) {
-      // Conservar el valor local; solo actualizar métricas de procesamiento.
-    } else {
-      state.incomeYTD = remoteIncome;
-    }
-
-    state.fiscalMetrics.annualLimit = DEFAULT_LIMIT;
-    state.fiscalMetrics.riskLevel = calcRiskLevel(
-      Number(state.incomeYTD || 0),
-      DEFAULT_LIMIT
-    );
-  }
 
   async function syncDown() {
     if (!db || !usr?.id) return;
@@ -627,30 +585,27 @@ async function upsertMetrics() {
   }
 }
 
-// ────────────────────────────────────────────────────────────
-// FUNCIÓN 3: applyMetricRow() — Reforzar blindaje contra cero
-// Esta función ya existe en store.js; verifica que tenga esta lógica:
-// ────────────────────────────────────────────────────────────
+// ── applyMetricRow() UNIFICADA (FIX FASE 0.1.C) ─────────────────────────
+// Blindaje contra cero + detección de cruce de umbral desde Supabase
 function applyMetricRow(row) {
   if (!row) return;
-
+  const previousLevel = state.fiscalMetrics.riskLevel;
   const remoteIncome = Number(row.income_ytd ?? 0);
 
   // REGLA DE ORO: Un valor 0 remoto solo se acepta si el estado local
   // también es 0. Nunca limpiar un ingreso histórico ya registrado.
   if (remoteIncome === 0 && state.incomeYTD > 0) {
-    // Mantener valor local; el cero puede ser un registro nuevo vacío.
     console.info('[Store] applyMetricRow: valor remoto 0 ignorado, conservando local:', state.incomeYTD);
   } else {
     state.incomeYTD = remoteIncome;
   }
 
-  // El annual_limit es constante normativa, NO viene de la DB
   state.fiscalMetrics.annualLimit = DEFAULT_LIMIT;
-  state.fiscalMetrics.riskLevel = calcRiskLevel(
-    Number(state.incomeYTD || 0),
-    DEFAULT_LIMIT
-  );
+  const newLevel = calcRiskLevel(Number(state.incomeYTD || 0), DEFAULT_LIMIT);
+  state.fiscalMetrics.riskLevel = newLevel;
+
+  // FIX FASE 0.1.C: Detectar cruce de umbral también desde Supabase
+  evaluateRiskLevelChange(previousLevel, newLevel, state.incomeYTD, DEFAULT_LIMIT);
 }
 
   async function saveDocumentRemote(doc) {
@@ -824,14 +779,6 @@ function applyMetricRow(row) {
     emit('conversationadded', conv);
     emitAll();
     upsertConversation(conv);
-    upsertMetrics();
-  }
-
-  function updateIncome(amount) {
-    state.incomeYTD = Number(amount || 0);
-    state.fiscalMetrics.riskLevel = calcRiskLevel(state.incomeYTD, DEFAULT_LIMIT);
-    persist();
-    emitAll();
     upsertMetrics();
   }
 
@@ -1024,8 +971,8 @@ async function saveDocument(doc) {
     buildWhatsAppAlertPayload,
     evaluateRiskLevelChange,
   };
-})();
 
+// ── saveInvoiceDocument DENTRO del IIFE (FIX FASE 0.1.A) ────────────────
 async function saveInvoiceDocument(invoiceData) {
   const totalFactura = Number(invoiceData?.total || 0);
 
@@ -1069,9 +1016,11 @@ async function saveInvoiceDocument(invoiceData) {
   emitAll();
 
   // Sincroniza el nuevo income_ytd a Supabase (fiscal_metrics)
-  await upsertMetrics();
-
+   await upsertMetrics();
   return savedDoc;
 }
 
+// ── Exponer saveInvoiceDocument en el return del IIFE ────────────────────
+// (Ya está en el return, solo confirmamos que el IIFE cierre aquí)
+})();
 window.Store = Store;

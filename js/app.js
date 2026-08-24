@@ -1765,8 +1765,9 @@ window.resetWizard = App.resetWizard;
 window.saveDiagnostic = App.saveDiagnostic;
 window.Dashboard = App.syncAndRender;
 
+// FIX FASE 0.8: byId fuera de scope — usar document.getElementById directamente
 document.addEventListener('DOMContentLoaded', () => {
-  const efirmaInput = byId('efirma-upload');
+  const efirmaInput = document.getElementById('efirma-upload');
   if (efirmaInput) efirmaInput.addEventListener('change', onEFirmaUpload);
 });
 

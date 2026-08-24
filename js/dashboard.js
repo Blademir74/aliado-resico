@@ -44,24 +44,47 @@ const Dashboard = (() => {
       efirma.textContent = vigente ? '✅ Vigente' : '❌ Vencida';
       efirma.style.color = vigente ? '#10b981' : '#ef4444';
     }
-    const opinion = document.getElementById('opinion-status');
-    if (opinion) {
+      // FIX FASE 0.9: Opinión de Cumplimiento basada en estado real
+  const opinion = document.getElementById('opinion-status');
+  if (opinion) {
+    const opinionLoaded = state.carpetaFiscal?.opinionStatus === 'cargada';
+    const opinionPositive = state.saludFiscal?.opinionCumplimientoPositiva === true;
+    if (opinionLoaded && opinionPositive) {
       opinion.textContent = '✅ Positiva';
       opinion.style.color = '#10b981';
+    } else if (opinionLoaded) {
+      opinion.textContent = '📄 Cargada — Verificar vigencia';
+      opinion.style.color = '#f59e0b';
+    } else {
+      opinion.textContent = '⚠️ No consultada';
+      opinion.style.color = '#94a3b8';
     }
+  }
 
     // Feed de actividad
+      // Feed de actividad — FIX FASE 1.6: Blindaje XSS con escapeHTML
     const feed = document.getElementById('feed-list');
     const convs = state.conversations || [];
+    if (!feed) return;
     if (convs.length === 0) {
       feed.innerHTML = '<p class="feed-empty" style="color:#94a3b8;">Sin actividad.</p>';
     } else {
-      feed.innerHTML = convs.slice(0,5).map(c => 
-        `<div style="padding:8px 0; border-bottom:1px solid rgba(255,255,255,0.05); display:flex; justify-content:space-between;">
-          <span style="color:#e2e8f0;">${c.text?.substring(0,60)||'...'}</span>
-          <span style="color:#64748b; font-size:12px;">${new Date(c.timestamp).toLocaleDateString()}</span>
-        </div>`
-      ).join('');
+      feed.innerHTML = convs.slice(0, 5).map(c => {
+        const rawText = String(c.text || c.message_text || '...');
+        // Escape robusto contra XSS
+        const safeText = rawText
+          .replace(/&/g, '&amp;')
+          .replace(/</g, '&lt;')
+          .replace(/>/g, '&gt;')
+          .replace(/"/g, '&quot;')
+          .replace(/'/g, '&#39;')
+          .substring(0, 60);
+        const safeDate = new Date(c.timestamp || c.created_at || Date.now()).toLocaleDateString('es-MX');
+        return `<div style="padding:8px 0; border-bottom:1px solid rgba(255,255,255,0.05); display:flex; justify-content:space-between;">
+          <span style="color:#e2e8f0;">${safeText}${rawText.length > 60 ? '…' : ''}</span>
+          <span style="color:#64748b; font-size:12px; flex-shrink:0; margin-left:8px;">${safeDate}</span>
+        </div>`;
+      }).join('');
     }
   }
 

@@ -269,6 +269,44 @@ function mapAlegraError(data, status) {
     return 'Error del SAT: El Uso de CFDI no es compatible con el régimen RESICO (626) conforme a la RMF 2026.';
   }
   return data?.message || 'Error del SAT: Verifique la vigencia de su CSD o el RFC del receptor.';
+    // ── FIX FASE 1.7: Detección específica de CSD restringido ─────────────
+  // Art. 17-H Bis CFF — El SAT puede restringir CSD por incumplimientos
+  const errMsg = String(error?.message || error?.error || '').toLowerCase();
+  const errDetails = String(JSON.stringify(error?.details || error?.response || '')).toLowerCase();
+  const combinedError = `${errMsg} ${errDetails}`;
+  
+  if (combinedError.includes('certificado') && (combinedError.includes('cancelado') || combinedError.includes('restringido') || combinedError.includes('vigencia'))) {
+    return {
+      userMessage: '🚨 Tu Certificado de Sello Digital (CSD) está restringido o cancelado por el SAT (Art. 17-H Bis CFF). No puedes timbrar CFDIs hasta renovarlo. Acude a la oficina del SAT o usa SAT ID para tramitar uno nuevo.',
+      httpStatus: 403,
+      actionable: true,
+      satReference: 'https://sat.gob.mx → Trámites → Certificados',
+    };
+  }
+  
+  if (combinedError.includes('buzón') && combinedError.includes('inactivo')) {
+    return {
+      userMessage: '📭 Tu Buzón Tributario está inactivo. Multa de hasta $10,260 MXN (Art. 17-K CFF). Actívalo en sat.gob.mx antes de timbrar.',
+      httpStatus: 403,
+      actionable: true,
+    };
+  }
+  
+  if (combinedError.includes('efirma') || combinedError.includes('e.firma') || combinedError.includes('firma electronica')) {
+    return {
+      userMessage: '🔐 Tu e.firma está vencida (Art. 17-D CFF). Sin e.firma vigente no puedes emitir CFDIs. Renueva en el portal del SAT.',
+      httpStatus: 403,
+      actionable: true,
+    };
+  }
+  
+  if (combinedError.includes('rfc') && combinedError.includes('no existe')) {
+    return {
+      userMessage: '⚠️ El RFC del receptor no existe en el padrón del SAT. Verifica el RFC con el cliente antes de timbrar.',
+      httpStatus: 400,
+      actionable: true,
+    };
+  }
 }
 
 function mapInvoiceSuccess(result, input) {

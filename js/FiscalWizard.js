@@ -19,7 +19,7 @@
   const EFIRMA_ALERT_DAYS = 30; // Días de anticipación para alerta
 
   // ── Estado del wizard ────────────────────────────────────
-  const STEPS = 5; // Aumentado de 4 a 5 para separar salarios/intereses
+  const STEPS = 4; // FIX FASE 0.10: Alineado con los 4 pasos del HTML
   let currentStep = 1;
   let wizardData = {};
 
@@ -125,12 +125,11 @@
   // ── Navegación del wizard ─────────────────────────────────
 
   window.wizardNext = function () {
-    if (!validateCurrentStep()) return;
-
-    if (currentStep === STEPS) {
-      showResult();
-      return;
-    }
+  if (!validateCurrentStep()) return;
+  if (currentStep === STEPS) {
+    showResult();
+    return;
+  }
 
     const current = document.querySelector(`.wizard-step[data-step="${currentStep}"]`);
     current?.classList.remove('active');
