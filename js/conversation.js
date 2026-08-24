@@ -11,38 +11,45 @@ const ConversationManager = (() => {
   let auditCompleted = false;
   let _awaitingAnnualAnswer = false;  // estado del wizard de declaración anual
 
-  /* ── Tabla ISR RESICO (Art. 113-E LISR) ── */
-  const ISR_RATES_RESICO = [
-    { lowerLimit: 0,          upperLimit: 25000,      rate: 1.00, label: 'Hasta $25,000' },
-    { lowerLimit: 25000.01,   upperLimit: 50000,      rate: 1.10, label: 'De $25,000.01 a $50,000' },
-    { lowerLimit: 50000.01,   upperLimit: 83333.33,   rate: 1.50, label: 'De $50,000.01 a $83,333.33' },
-    { lowerLimit: 83333.34,   upperLimit: 208333.33,  rate: 2.00, label: 'De $83,333.34 a $208,333.33' },
-    { lowerLimit: 208333.34,  upperLimit: 3500000,    rate: 2.50, label: 'De $208,333.34 en adelante' },
-  ];
+ // ── FIX FASE 2.1: Tabla ISR RESICO oficial anual 2026 (RMF 2026) ─────────
+const ISR_RATES_RESICO = [
+  { lowerLimit: 0,          upperLimit: 300000,     rate: 1.00, label: 'Hasta $300,000 anuales' },
+  { lowerLimit: 300000.01,  upperLimit: 600000,     rate: 1.10, label: 'De $300,000.01 a $600,000' },
+  { lowerLimit: 600000.01,  upperLimit: 1000000,    rate: 1.50, label: 'De $600,000.01 a $1,000,000' },
+  { lowerLimit: 1000000.01, upperLimit: 2500000,    rate: 2.00, label: 'De $1,000,000.01 a $2,500,000' },
+  { lowerLimit: 2500000.01, upperLimit: 3500000,    rate: 2.50, label: 'De $2,500,000.01 a $3,500,000' },
+];
 
   const RESICO_INCOME_LIMIT = 3_500_000;
 
-  function calculateISR(monthlyIncome) {
-    if (!monthlyIncome || monthlyIncome <= 0) return { rate: 0, amount: 0, bracket: null, warning: null };
-    let applicableRate = ISR_RATES_RESICO[ISR_RATES_RESICO.length - 1];
-    for (const bracket of ISR_RATES_RESICO) {
-      if (monthlyIncome >= bracket.lowerLimit && monthlyIncome <= bracket.upperLimit) {
-        applicableRate = bracket; break;
-      }
+  // ── FIX FASE 2.1.B: calculateISR ahora acepta ingreso anual ───────────────
+function calculateISR(annualIncome) {
+  if (!annualIncome || annualIncome <= 0) return { rate: 0, amount: 0, bracket: null, warning: null };
+  
+  let applicableRate = ISR_RATES_RESICO[ISR_RATES_RESICO.length - 1];
+  for (const bracket of ISR_RATES_RESICO) {
+    if (annualIncome >= bracket.lowerLimit && annualIncome <= bracket.upperLimit) {
+      applicableRate = bracket;
+      break;
     }
-    const isrAmount = monthlyIncome * (applicableRate.rate / 100);
-    const monthlyLimit = RESICO_INCOME_LIMIT / 12;
-    const warning = monthlyIncome > monthlyLimit * 0.85
-      ? `⚠️ Ingreso mensual ($${monthlyIncome.toLocaleString('es-MX')}) supera el 85% del promedio mensual. Riesgo de exceder $3,500,000 anuales (Art. 113-E LISR).`
-      : null;
-    return {
-      rate: applicableRate.rate,
-      amount: Math.round(isrAmount * 100) / 100,
-      bracket: applicableRate.label,
-      warning,
-      formula: `$${monthlyIncome.toLocaleString('es-MX')} × ${applicableRate.rate}% = $${isrAmount.toLocaleString('es-MX', { minimumFractionDigits: 2 })}`,
-    };
   }
+  
+  const isrAmount = annualIncome * (applicableRate.rate / 100);
+  const monthlyIncome = annualIncome / 12;
+  const monthlyLimit = RESICO_INCOME_LIMIT / 12;
+  
+  const warning = monthlyIncome > monthlyLimit * 0.85
+    ? `⚠️ Ingreso mensual promedio ($${monthlyIncome.toLocaleString('es-MX')}) supera el 85% del promedio mensual. Riesgo de exceder $3,500,000 anuales (Art. 113-E LISR).`
+    : null;
+  
+  return {
+    rate: applicableRate.rate,
+    amount: Math.round(isrAmount * 100) / 100,
+    bracket: applicableRate.label,
+    warning,
+    formula: `$${annualIncome.toLocaleString('es-MX')} × ${applicableRate.rate}% = $${isrAmount.toLocaleString('es-MX', { minimumFractionDigits: 2 })} anuales`,
+  };
+}
 
   function evaluateIncomeRisk(incomeYTD) {
     const pct = (incomeYTD / RESICO_INCOME_LIMIT) * 100;

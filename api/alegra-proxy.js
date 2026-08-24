@@ -18,6 +18,27 @@ const ALLOWED_ORIGINS = [
 
 // ── Régimen y Usos de CFDI válidos para RESICO PF (RMF 2026) ────────────────
 const RESICO_REGIMEN_FISCAL = '626'; // Régimen Simplificado de Confianza
+// ── FIX FASE 2.2: Tabla ISR RESICO anual 2026 para retenciones ────────────
+const ISR_RATES_RESICO_2026 = [
+  { lowerLimit: 0,          upperLimit: 300000,     rate: 1.00 },
+  { lowerLimit: 300000.01,  upperLimit: 600000,     rate: 1.10 },
+  { lowerLimit: 600000.01,  upperLimit: 1000000,    rate: 1.50 },
+  { lowerLimit: 1000000.01, upperLimit: 2500000,    rate: 2.00 },
+  { lowerLimit: 2500000.01, upperLimit: 3500000,    rate: 2.50 },
+];
+
+function calculateProgressiveRetention(annualIncome) {
+  const income = Number(annualIncome || 0);
+  if (income <= 0) return { rate: 1.00, bracket: 'Hasta $300,000' };
+  
+  for (const bracket of ISR_RATES_RESICO_2026) {
+    if (income >= bracket.lowerLimit && income <= bracket.upperLimit) {
+      return { rate: bracket.rate, bracket: `$${bracket.lowerLimit.toLocaleString()} - $${bracket.upperLimit.toLocaleString()}` };
+    }
+  }
+  // Si supera el límite, usar la tasa máxima
+  return { rate: 2.50, bracket: 'Más de $2,500,000' };
+}
 const VALID_USOS_CFDI_RESICO = [
   'G01', 'G02', 'G03', // Adquisición de mercancías / Devoluciones / Gastos en general
   'D01', 'D02', 'D03', 'D04', 'D05', 'D06', 'D07', 'D08', 'D09', 'D10', // Deducciones personales
@@ -198,6 +219,11 @@ function buildInvoicePayload(input, contactId) {
     reference: sanitizeText(input.claveProdServ, 30)
   };
 
+  // ── FIX FASE 2.2.B.1: Función síncrona, recibe retentionInfo como parámetro ──
+function buildInvoicePayload(input, contactId, receptorPM, retentionInfo) {
+  const retentionRate = (retentionInfo?.rate || 1.0).toFixed(2);
+  const retentionBracket = retentionInfo?.bracket || 'Hasta $300,000';
+  
   const payload = {
     client: Number(contactId),
     date: new Date().toISOString().slice(0, 10),
@@ -208,7 +234,8 @@ function buildInvoicePayload(input, contactId) {
       `Régimen fiscal receptor: ${sanitizeText(input.regimenFiscal, 30)}`,
       `CP receptor: ${sanitizeText(input.zip, 10)}`,
       `Método de pago: ${sanitizeText(input.metodoPago, 10)}`,
-      `Forma de pago: ${sanitizeText(input.formaPago, 10)}`
+      `Forma de pago: ${sanitizeText(input.formaPago, 10)}`,
+      `Retención ISR RESICO: ${retentionRate}% (bracket ${retentionBracket})`
     ].join(' | '),
     items: [item],
     status: String(input.metodoPago || '').toUpperCase() === 'PUE' ? 'open' : 'draft',
@@ -221,12 +248,20 @@ function buildInvoicePayload(input, contactId) {
       metodo_pago: sanitizeText(input.metodoPago, 10),
       forma_pago: sanitizeText(input.formaPago, 10),
       iva_type: sanitizeText(input.ivaType, 10),
-      receptor_type: receptorPM ? 'PM' : 'PF'
+      receptor_type: receptorPM ? 'PM' : 'PF',
+      retention_rate: retentionRate,
+      retention_bracket: retentionBracket
     }
   };
 
-  if (receptorPM) payload.metadata.auto_retencion_isr_resico = '1.25';
+  // Retención ISR progresiva (no fija 1.25%)
+  if (receptorPM) {
+    payload.metadata.auto_retencion_isr_resico = retentionRate;
+  }
+  
   return payload;
+}
+  
 }
 
 async function createInvoice(input) {
@@ -234,7 +269,7 @@ async function createInvoice(input) {
   const contactId = contact?.id;
   if (!contactId) throw new Error('No se obtuvo id de contacto en Alegra.');
 
-  const payload = buildInvoicePayload(input, contactId);
+  const payload = buildInvoicePayload(input, contactId, receptorPM, retentionInfo);
   const { response, data } = await alegraFetchWithRetry('/invoices', { method: 'POST', body: payload });
   if (!response.ok) throw new Error(mapAlegraError(data, response.status));
 
@@ -309,9 +344,16 @@ function mapAlegraError(data, status) {
   }
 }
 
-function mapInvoiceSuccess(result, input) {
+// ── FIX FASE 2.2.B + 2.3: mapInvoiceSuccess con retención progresiva y alerta REP ──
+function mapInvoiceSuccess(result, input, retentionInfo = null, repDeadlineAlert = null) {
   const invoice = result?.invoice || {};
   const receptorPM = String(input.receptorType || '').toUpperCase() === 'PM' || isPMByRFC(input.rfc);
+  
+  // Tasa de retención progresiva según ingreso anual del emisor
+  // Si no hay retentionInfo (fallback), usar 1.00% (tasa base RESICO)
+  const retentionRate = retentionInfo?.rate?.toFixed(2) || '1.00';
+  const retentionBracket = retentionInfo?.bracket || 'Hasta $300,000';
+  
   return {
     ok: true,
     invoice: {
@@ -333,9 +375,15 @@ function mapInvoiceSuccess(result, input) {
       formaPago: sanitizeText(input.formaPago, 10),
       usoCfdi: sanitizeText(input.usoCfdi, 20),
       ivaType: sanitizeText(input.ivaType, 10),
-      retencionISR125: receptorPM
+      // ── FIX FASE 2.2.B: Retención progresiva (no fija 1.25%) ──────────
+      retencionISR125: receptorPM,  // Se mantiene para compatibilidad
+      retentionRate: retentionRate,  // Nueva: tasa progresiva real (1.00% a 2.50%)
+      retentionBracket: retentionBracket,  // Nueva: bracket del ingreso anual
+      emisorAnnualIncome: retentionInfo?.income || 0  // Nueva: ingreso anual del emisor
     },
-    repRequired: String(input.metodoPago || '').toUpperCase() === 'PPD'
+    repRequired: String(input.metodoPago || '').toUpperCase() === 'PPD',
+    // ── FIX FASE 2.3: Alerta de plazo REP (RMF 2026) ────────────────────
+    repDeadlineAlert: repDeadlineAlert || null
   };
 }
 
@@ -372,13 +420,61 @@ export default async function handler(req, res) {
     }
 
     if (action === 'create_invoice') {
-      const input = body.input || {};
-      const errors = validateInvoiceInput(input);
-      if (errors.length) return fail(res, 'Validación fallida.', 422, { details: errors });
+  const input = body.input || {};
+  const errors = validateInvoiceInput(input);
+  if (errors.length) return fail(res, 'Validación fallida.', 422, { details: errors });
 
-      const result = await createInvoice(input);
-      return okJson(res, mapInvoiceSuccess(result, input));
+  // ── FIX FASE 2.2.B.2: Obtener ingreso anual ANTES de construir payload ──
+  // La consulta va aquí (handler async), no en buildInvoicePayload (síncrono)
+  let emisorAnnualIncome = 0;
+  try {
+    const { SUPABASE_URL, SUPABASE_SERVICE_KEY } = process.env;
+    if (SUPABASE_URL && SUPABASE_SERVICE_KEY && req.aliadoUser?.uid) {
+      const metricsRes = await fetch(
+        `${SUPABASE_URL}/rest/v1/fiscal_metrics?user_id=eq.${req.aliadoUser.uid}&select=income_ytd`,
+        {
+          headers: {
+            apikey: SUPABASE_SERVICE_KEY,
+            Authorization: `Bearer ${SUPABASE_SERVICE_KEY}`,
+          }
+        }
+      );
+      const metrics = await metricsRes.json();
+      emisorAnnualIncome = Array.isArray(metrics) && metrics[0]?.income_ytd
+        ? Number(metrics[0].income_ytd)
+        : 0;
     }
+  } catch (e) {
+    console.warn('[alegra-proxy] No se pudo obtener income_ytd:', e.message);
+  }
+
+  // Calcular retención progresiva con el ingreso anual
+  const retentionInfo = calculateProgressiveRetention(emisorAnnualIncome);
+
+  // Pasar retentionInfo a la función que construye el payload
+  const result = await createInvoice(input, retentionInfo);
+        // ── FIX FASE 2.3.A: Calcular alerta de plazo REP (RMF 2026) ──────────
+      const repRequired = String(input.metodoPago || '').toUpperCase() === 'PPD';
+      let repDeadlineAlert = null;
+      if (repRequired) {
+        const today = new Date();
+        const nextMonth = new Date(today.getFullYear(), today.getMonth() + 1, 1);
+        const deadline = new Date(nextMonth.getFullYear(), nextMonth.getMonth(), 5);
+        const daysUntilDeadline = Math.ceil((deadline - today) / (1000 * 60 * 60 * 24));
+        
+        repDeadlineAlert = {
+          required: true,
+          deadline: deadline.toISOString().split('T')[0],
+          daysRemaining: daysUntilDeadline,
+          message: `⏰ PLAZO RMF 2026: Debes emitir el Complemento de Pago (REP) antes del ${deadline.toLocaleDateString('es-MX')} (${daysUntilDeadline} días). Art. 2.7.1.22 RMF 2026.`,
+          urgency: daysUntilDeadline <= 2 ? 'CRÍTICO' : daysUntilDeadline <= 5 ? 'URGENTE' : 'NORMAL',
+          legalReference: 'Art. 2.7.1.22 RMF 2026 — 5 días naturales del mes siguiente'
+        };
+      }
+        const successResponse = mapInvoiceSuccess(result, input, retentionInfo);
+            // ── FIX FASE 2.3.B (simplificado): Pasar repDeadlineAlert directamente ──
+      return okJson(res, mapInvoiceSuccess(result, input, retentionInfo, repDeadlineAlert));
+}
 
     if (action === 'get_pdf') {
       const { invoiceId } = body.input || {};

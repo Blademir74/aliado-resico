@@ -176,7 +176,22 @@ const Invoicing = (() => {
         const detail = Array.isArray(result?.details) ? result.details.join(' · ') : (result?.error || 'Error desconocido');
         throw new Error(detail);
       }
-
+          // ── FIX FASE 2.4: Alerta de plazo RMF 2026 para CFDI Global ────────────
+    const isCFDIGlobal = data.rfc === 'XAXX010101000' || data.rfc === 'XEXX010101000';
+    let cfdiGlobalAlert = null;
+    if (isCFDIGlobal) {
+      const now = new Date();
+      const deadline = new Date(now.getTime() + 24 * 60 * 60 * 1000); // 24 horas
+      const hoursRemaining = 24;
+      
+      cfdiGlobalAlert = {
+        isGlobal: true,
+        deadline: deadline.toISOString(),
+        hoursRemaining,
+        message: `⏰ PLAZO RMF 2026: CFDI Global debe emitirse dentro de 24 horas del cierre de operaciones. Art. 2.7.1.21 RMF 2026.`,
+        urgency: 'URGENTE'
+      };
+    }
       const total = result?.invoice?.total ?? '—';
       const number = result?.invoice?.number || result?.invoice?.id || 'sin folio';
       const repRequired = !!result?.repRequired;
@@ -197,15 +212,28 @@ const Invoicing = (() => {
         window.Store.updateIncome(next);
       }
 
-      renderOutput(`
-        <div style="background:rgba(16,185,129,0.12);border:1px solid rgba(16,185,129,0.35);padding:16px;border-radius:12px;color:#d1fae5;">
-          <div style="font-weight:700;">CFDI creado correctamente</div>
-          <div style="margin-top:6px;">Folio / referencia: ${esc(number)}</div>
-          <div style="margin-top:6px;">Total reportado por Alegra: ${esc(total)}</div>
-          <div style="margin-top:6px;">Retención ISR 1.25% aplicada: ${retISR ? 'Sí' : 'No'}</div>
-          <div style="margin-top:6px;">REP requerido: ${repRequired ? 'Sí, por método PPD' : 'No'}</div>
-        </div>
-      `);
+          // ── FIX FASE 2.3.C: Alerta REP visible en el resultado ─────────────────
+   const repAlert = result?.repDeadlineAlert;
+   const repAlertHTML = repAlert
+     ? `<div style="margin-top:12px;padding:12px;background:rgba(245,158,11,0.15);border:1px solid rgba(245,158,11,0.3);border-radius:8px;color:#fde68a;font-size:13px;">
+          <div style="font-weight:700;margin-bottom:4px;">📋 ${repAlert.urgency} — Complemento de Pago Requerido</div>
+          <div>${esc(repAlert.message)}</div>
+          <div style="margin-top:6px;font-size:12px;color:#fcd34d;">
+            📅 Fecha límite: ${esc(repAlert.deadline)} · Días restantes: ${repAlert.daysRemaining}
+          </div>
+        </div>`
+     : '';
+
+   renderOutput(`
+     <div style="background:rgba(16,185,129,0.12);border:1px solid rgba(16,185,129,0.35);padding:16px;border-radius:12px;color:#d1fae5;">
+       <div style="font-weight:700;">CFDI creado correctamente</div>
+       <div style="margin-top:6px;">Folio / referencia: ${esc(number)}</div>
+       <div style="margin-top:6px;">Total reportado por Alegra: ${esc(total)}</div>
+       <div style="margin-top:6px;">Retención ISR ${result?.fiscal?.retentionRate || '1.25'}% aplicada: ${retISR ? 'Sí' : 'No'}</div>
+       <div style="margin-top:6px;">REP requerido: ${repRequired ? 'Sí, por método PPD' : 'No'}</div>
+       ${repAlertHTML}
+     </div>
+   `);
     } catch (error) {
       renderOutput(`
         <div style="background:rgba(239,68,68,0.12);border:1px solid rgba(239,68,68,0.35);padding:16px;border-radius:12px;color:#fecaca;">
