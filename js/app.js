@@ -63,9 +63,12 @@ const App = (() => {
   }
 
     
+
     function applyTheme(mode) {
       document.body.classList.toggle('light-mode', mode === 'light');
       document.body.dataset.theme = mode;
+      const cv = byId('webthreads-canvas');
+      if (cv) cv.style.opacity = mode === 'light' ? '0.08' : '1';
     }
     function initTheme() {
       const btn = byId('theme-toggle');
@@ -871,19 +874,16 @@ function completeWizard() {
   const income    = Number((byId('wiz-income')    || {}).value || 0);
   const salarios  = Number((byId('wiz-salarios')  || {}).value || 0);
   const intereses = Number((byId('wiz-intereses') || {}).value || 0);
-  const socioPM   = readYesNo('wiz-socio');
-  const mixtos    = readYesNo('wiz-mixtos');
-  const cfdiGlobal= readYesNo('wiz-cfdi');
-  const buzonVal  = String((byId('wiz-buzon') || {}).value || 'si').toLowerCase();
-  const buzonActivo = !(buzonVal === 'no' || buzonVal === 'false');
-
   const diagnosis = computeWizardDiagnosis({
-    income, salarios, intereses, socioPM, mixtos, cfdiGlobal, buzonActivo
+    income, salarios, intereses,
+    socioPM: readYesNo('wiz-socio'),
+    mixtos: readYesNo('wiz-mixtos'),
+    cfdiGlobal: readYesNo('wiz-cfdi'),
+    buzonActivo: String(byId('wiz-buzon')?.value || 'si').toLowerCase() !== 'no'
   });
   Store.updateDiagnostic(diagnosis);
   renderWizardResult(diagnosis);
-
-  // ── FIX R2: Llenar el panel visible "Diagnóstico completado" ──────────
+  // FIX T2: llenar el panel visible "Diagnóstico completado"
   const setF = (id, val) => { const el = byId(id); if (el) el.textContent = val; };
   const fmtM = n => `$${Number(n || 0).toLocaleString('es-MX')} MXN`;
   setF('res-income', fmtM(diagnosis.income));
@@ -895,10 +895,8 @@ function completeWizard() {
   setF('res-risk', `${diagnosis.riskLevel} — ${diagnosis.income > 0 ? ((diagnosis.income / 3500000) * 100).toFixed(1) : '0.0'}% del límite`);
   setF('res-pedagogia', '📚 ISR RESICO: sobre ingresos brutos sin deducciones (1%–2.5%). IVA: acreditable solo con CFDI válido y gasto indispensable.');
   setF('res-recomendacion', diagnosis.recomendacion);
-
-  // ── FIX R2: NO navegar al dashboard — mostrar resultado en el wizard ──
-  const target = byId('res-income');
-  if (target) target.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  // FIX T2: permanecer en el wizard para mostrar el resultado
+  byId('res-income')?.scrollIntoView({ behavior: 'smooth', block: 'center' });
 }
 
   function resetWizard() {
@@ -1735,6 +1733,9 @@ async function init() {
   setWizardStep(1);
   resetWizard();
 
+    // FIX T2: app.js es el dueño del wizard (se ejecuta tras cargar todos los scripts)
+  window.wizardNext = wizardNext;
+  window.resetWizard = resetWizard;
   window.DocumentsManager?.init?.();
   window.DocumentProcessor?.init?.();
   window.Invoicing?.init?.();
