@@ -49,6 +49,15 @@ async function validateSupabaseJWT(authHeader) {
   } catch { return null; }
 }
 
+// ── FIX D5: Rate limit para uso público (30 req/min) ────────────────────
+const _rl = new Map();
+function rateLimit(key) {
+  const now = Date.now();
+  let b = _rl.get(key);
+  if (!b || now - b.start > 60000) b = { start: now, n: 0 };
+  b.n++; _rl.set(key, b);
+  return b.n <= 30;
+}
 // ── Validación de RFC con homoclave (algoritmo oficial SAT) ─────────────
 const RFC_CHAR_MAP = {
   '0':0,'1':1,'2':2,'3':3,'4':4,'5':5,'6':6,'7':7,'8':8,'9':9,
@@ -132,7 +141,13 @@ export default async function handler(req, res) {
   }
 
   // Validar JWT
+    // FIX D5: La validación de RFC NO es dato sensible → pública con rate-limit.
+  // La consulta EFOS usa service_role (server-side), nunca expone la DB al cliente.
   const user = await validateSupabaseJWT(req.headers.authorization);
+  const rlKey = user?.uid || String(req.headers['x-forwarded-for'] || 'anon');
+  if (!rateLimit(rlKey)) {
+    return res.status(429).json({ ok: false, error: 'Demasiadas consultas. Intenta en un minuto.' });
+  }
   const isDemoMode = !user && req.headers['x-demo-mode'] === 'true';
   
   if (!user && !isDemoMode) {

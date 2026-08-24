@@ -131,6 +131,30 @@ const DocumentProcessor = (() => {
     showProcessingIndicator(true);
     if (output) output.innerHTML = '';
 
+      // ── FIX D6: OCR simulado en MODO DEMO (sin backend, sin JWT) ───────────
+  if (window.APP_STATE?.isDemo) {
+    await new Promise(r => setTimeout(r, 1200));
+    const simulated = {
+      document: {
+        file_name: file.name,
+        document_type: 'TICKET',
+        confidence: 0.93,
+        source: 'demo_simulado',
+        extracted_data: {
+          rfc_emisor: 'XAXX010101000', rfc_receptor: 'DEMO123456XXX',
+          nombre_emisor: 'COMERCIAL DEMO SA', fecha: new Date().toISOString().slice(0, 10),
+          folio: 'DEMO-0001', subtotal: 1000, iva: 160, total: 1160,
+          tipo_comprobante: 'TICKET', tax_usefulness: 'IVA'
+        }
+      }
+    };
+    showProcessingIndicator(false);
+    if (output) output.innerHTML = renderResult(simulated);
+    window.Store?.saveDocument?.({ ...simulated.document, safety_flag: false, needs_review: false, validation_status: 'demo' });
+    window.DocumentsManager?.renderDocuments?.();
+    return;
+  }
+
     try {
       const base64Data = await fileToBase64(file);
       const session = await window.APP_STATE?.supabase?.auth?.getSession?.();

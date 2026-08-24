@@ -9,7 +9,7 @@ const App = (() => {
   const INTERESES_LIMIT = 100000;
   const BUZON_MULTA = 10260;
   const EFIRMA_YEARS = 4;
-  const WIZARD_MAX_STEPS = 5;
+  const WIZARD_MAX_STEPS = 4;
   const EFIRMA_ALERT_90_DAYS = 90;
   const EFIRMA_ALERT_30_DAYS = 30;
 
@@ -62,18 +62,24 @@ const App = (() => {
     if (target === 'carpeta') renderCarpetaFiscal();
   }
 
-  function initTheme() {
-  const btn = byId('theme-toggle');
-  const saved = localStorage.getItem('ar_theme') || 'dark';
-  document.body.dataset.theme = saved;
-  if (btn) btn.textContent = saved === 'light' ? '☀️' : '🌙';
-  btn?.addEventListener('click', () => {
-    const current = localStorage.getItem('ar_theme') || 'dark';
-    const next = current === 'dark' ? 'light' : 'dark';
-    localStorage.setItem('ar_theme', next);
-    document.body.dataset.theme = next;
-    btn.textContent = next === 'light' ? '☀️' : '🌙';
-  });
+    // ── FIX D1: El tema se aplica con la CLASE que styles.css realmente lee ──
+    function applyTheme(mode) {
+      document.body.classList.toggle('light-mode', mode === 'light');
+      document.body.dataset.theme = mode; // compatibilidad
+    }
+    function initTheme() {
+      const btn = byId('theme-toggle');
+      const saved = localStorage.getItem('ar_theme') || 'dark';
+      applyTheme(saved);
+      if (btn) btn.textContent = saved === 'light' ? '☀️' : '🌙';
+      btn?.addEventListener('click', () => {
+        const current = localStorage.getItem('ar_theme') || 'dark';
+        const next = current === 'dark' ? 'light' : 'dark';
+        localStorage.setItem('ar_theme', next);
+        applyTheme(next);
+        btn.textContent = next === 'light' ? '☀️' : '🌙';
+      });
+
 }
 
   function initNavigation() {
@@ -861,9 +867,9 @@ function completeWizard() {
   const income    = Number((byId('wiz-income')    || {}).value || 0);
   const salarios  = Number((byId('wiz-salarios')  || {}).value || 0);
   const intereses = Number((byId('wiz-intereses') || {}).value || 0);
-  const socioPM   = !!(byId('wiz-socio-pm')   || {}).checked;
-  const mixtos    = !!(byId('wiz-mixtos')      || {}).checked;
-  const cfdiGlobal= !!(byId('wiz-cfdi-global') || {}).checked;
+  const socioPM   = !!(byId('wiz-socio')  || {}).checked;   // FIX D2: ID real
+  const mixtos    = !!(byId('wiz-mixtos') || {}).checked;
+  const cfdiGlobal= !!(byId('wiz-cfdi')   || {}).checked;   // FIX D2: ID real
   const buzonActivo = (byId('wiz-buzon')       || {}).value !== 'false';
 
   const diagnosis = computeWizardDiagnosis({
@@ -875,6 +881,19 @@ function completeWizard() {
 
   // Renderizar resultado
   renderWizardResult(diagnosis);
+
+    // ── FIX D2: Llenar el panel "Diagnóstico completado" (IDs res-*) ────────
+  const setF = (id, val) => { const el = byId(id); if (el) el.textContent = val; };
+  const fmtM = n => `$${Number(n || 0).toLocaleString('es-MX')} MXN`;
+  setF('res-income', fmtM(diagnosis.income));
+  setF('res-salarios', fmtM(diagnosis.salarios));
+  setF('res-intereses', fmtM(diagnosis.intereses));
+  setF('res-anual', diagnosis.anualObligatoria ? '⚠️ OBLIGATORIA (Art. 113-F LISR)' : '✅ No obligatoria');
+  setF('res-multa', diagnosis.riesgoMulta ? '🔴 Riesgo de multa por CFDI' : '✅ CFDI al corriente');
+  setF('res-buzon', diagnosis.riesgoBuzon ? '🔴 Inactivo — multa $10,260 MXN (Art. 17-K CFF)' : '✅ Activo');
+  setF('res-risk', `${diagnosis.riskLevel} — ${diagnosis.income > 0 ? ((diagnosis.income / 3500000) * 100).toFixed(1) : '0.0'}% del límite`);
+  setF('res-pedagogia', '📚 ISR RESICO: sobre ingresos brutos sin deducciones (1%–2.5%). IVA: acreditable solo con CFDI válido y gasto indispensable.');
+  setF('res-recomendacion', diagnosis.recomendacion);
 
   // Navegar a la vista de resultado
   navigateTo('dashboard');

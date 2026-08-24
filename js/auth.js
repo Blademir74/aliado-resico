@@ -347,6 +347,17 @@ const AuthManager = (() => {
 
     _showDemoBanner();
     window.MockData?.load?.(window.Store);
+  // ── FIX D7: Bootstrap determinista — el demo SIEMPRE muestra datos reales ──
+  try {
+    window.Store?.updateIncome?.(1420000); // 40% del límite: semáforo verde con proyección
+    window.Store?.updateSaludFiscal?.({
+      buzonTributarioActivo: true,
+      eFirmaVigente: true,
+      eFirmaExpiry: '2027-12-31',
+      alertLevel: 'safe',
+      lastAuditDate: new Date().toISOString()
+    });
+  } catch (e) { console.warn('[Auth] demo bootstrap:', e.message); }
 
     _removeBunkerGuard();
     _setOverlayState(false);
