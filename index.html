@@ -499,6 +499,7 @@
         <button class="nav-btn" data-tab="wizard">Wizard</button>
         <button class="nav-btn" data-tab="classifier">Asistente IA</button>
         <button class="nav-btn" data-tab="documents">Documentos</button>
+        <button class="nav-btn" data-tab="rfc-consult">🔍 Consultas RFC</button>
         <button class="nav-btn" data-tab="invoicing">Facturación</button>
         <button class="nav-btn" data-tab="carpeta">Mi Carpeta Fiscal</button>
       </nav>
@@ -764,7 +765,7 @@
           </div>
 
           <button id="ocr-analyze-btn" class="btn-primary" style="width:100%;">
-            Analizar con IA
+            Analizar
           </button>
 
           <!-- Indicador visual de procesamiento IA (oculto por defecto) -->
@@ -776,7 +777,7 @@
                         border-top-color:transparent;border-radius:50%;
                         animation:ocr-spin 0.8s linear infinite;"></div>
             <span style="color:#10b981;font-weight:600;">
-              🧠 Procesando con IA... Extrayendo RFC, montos e IVA
+              🧠 Procesando... Extrayendo RFC, montos e IVA
             </span>
           </div>
 
@@ -787,6 +788,17 @@
           <div id="ocr-result-output" style="margin-top:14px;"></div>
         </div>
       </section>
+
+    <!-- ── CONSULTAS RFC (FIX FASE 2.5.4) ──────────────────── -->
+    <section id="rfc-consult-tab" class="tab-view" hidden>
+      <div class="section-header">
+        <div>
+          <h2 class="section-title">🔍 Consultas RFC</h2>
+          <p class="section-sub">Valida estructura, homoclave y lista EFOS antes de facturar</p>
+        </div>
+      </div>
+      <div id="rfc-consult-container"></div>
+    </section>
 
       <section id="invoicing-tab" class="tab-view" role="tabpanel" hidden>
         <div class="grid-2" style="grid-template-columns:1.2fr 0.8fr;">
@@ -917,5 +929,6 @@
 <script src="js/invoicing.js"></script>
 <script src="js/FiscalWizard.js"></script>
 <script src="js/app.js"></script>
+<script src="js/rfc-consult.js"></script>
 </body>
 </html>

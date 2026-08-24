@@ -684,3 +684,35 @@ button { cursor: pointer; border: none; }
   .main { overflow-x: hidden; }
   .glass, .income-monitor, .monthly-tracker, .health-card, .feed-card, .carpeta-fiscal { width: 100%; overflow-x: auto; }
 }
+
+/* ── FIX FASE 2.6: Carpetas Mensuales Visuales ──────────────────────── */
+.carpeta-month-tab {
+  transition: all var(--t-fast);
+  font-family: var(--font-sans);
+}
+.carpeta-month-tab:hover {
+  background: rgba(16,185,129,0.1) !important;
+  border-color: rgba(16,185,129,0.3) !important;
+}
+.carpeta-month-tab.active {
+  background: rgba(16,185,129,0.15) !important;
+  border-color: #10b981 !important;
+  color: #10b981 !important;
+  font-weight: 600;
+}
+
+/* Scrollbar horizontal para tabs de meses */
+.carpeta-month-tabs-wrapper {
+  display: flex;
+  gap: 6px;
+  overflow-x: auto;
+  padding-bottom: 8px;
+  margin-bottom: 14px;
+}
+.carpeta-month-tabs-wrapper::-webkit-scrollbar {
+  height: 4px;
+}
+.carpeta-month-tabs-wrapper::-webkit-scrollbar-thumb {
+  background: rgba(16,185,129,0.3);
+  border-radius: 99px;
+}

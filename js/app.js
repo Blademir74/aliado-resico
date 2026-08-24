@@ -1,5 +1,5 @@
 const App = (() => {
-  const VIEWS = ['dashboard', 'wizard', 'classifier', 'documents', 'invoicing', 'carpeta'];
+  const VIEWS = ['dashboard', 'wizard', 'classifier', 'documents', 'rfc-consult', 'invoicing', 'carpeta'];
   const EFOS_KEY = 'ar_efos_watchlist_v1';
   const RESICO_LIMIT = 3500000;
   const ALERT_80 = 2800000;
@@ -57,6 +57,7 @@ const App = (() => {
     window.location.hash = target;
 
     if (target === 'documents') window.DocumentsManager?.renderDocuments?.();
+    if (target === 'rfc-consult') window.RFCConsult?.render?.();
     if (target === 'invoicing') window.Invoicing?.renderProfiles?.();
     if (target === 'carpeta') renderCarpetaFiscal();
   }
