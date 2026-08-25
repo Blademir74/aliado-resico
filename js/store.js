@@ -1,9 +1,3 @@
-/* ════════════════════════════════════════════════════════════
-ALIADO RESICO 2026 — store.js v7.0 (ROBUSTO)
-Store unificado: una sola updateIncome, una sola applyMetricRow,
-saveInvoiceDocument DENTRO del IIFE.
-Cumplimiento: Art. 113-E LISR · Art. 17-K, 17-D CFF.
-════════════════════════════════════════════════════════════ */
 const Store = (() => {
   const KEY = 'aliado_resico_v10';
   const EVT = {};
@@ -20,7 +14,7 @@ const Store = (() => {
     { level: 'PREVENTIVO', min: ALERT_80, ratio: 0.80 },
     { level: 'SEGURO', min: 0, ratio: 0 }
   ];
-  const MONTHS = ['Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre'];
+  const MONTHS = ['Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio', 'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'];
   let db = null, usr = null, rtChannel = null, authListenerBound = false;
 
   function buildMonthlyFolders(year = YEAR) {
@@ -31,15 +25,15 @@ const Store = (() => {
   }
   const DEF = {
     conversations: [],
-    metrics: { totalProcessed: 0, byCategory: { CONSULTA_FISCAL:0, SOLICITUD_FACTURA:0, REGISTRO_GASTO:0, REPORTE_PAGO:0, SALUD_FISCAL:0, OTROS:0 }, avgConfidence: 0, autoResolutionRate: 92, avgResponseTime: 2.3 },
+    metrics: { totalProcessed: 0, byCategory: { CONSULTA_FISCAL: 0, SOLICITUD_FACTURA: 0, REGISTRO_GASTO: 0, REPORTE_PAGO: 0, SALUD_FISCAL: 0, OTROS: 0 }, avgConfidence: 0, autoResolutionRate: 92, avgResponseTime: 2.3 },
     incomeYTD: 0,
     fiscalMetrics: { annualLimit: DEFAULT_LIMIT, riskLevel: 'SEGURO' },
     settings: { autoReply: true, incomeAlert: true, sound: false },
     documents: [],
     invoiceProfiles: [],
     saludFiscal: { buzonTributarioActivo: null, eFirmaVigente: null, eFirmaExpiry: null, lastAuditDate: null, alertLevel: 'safe' },
-    carpetaFiscal: { year: YEAR, monthlyFolders: buildMonthlyFolders(YEAR), summary: { total:0, ingresos:0, gastos_iva:0, efirma:0, constancia:0, opinion:0 }, efirmaExpiry: null, constanciaStatus: 'pendiente', opinionStatus: 'pendiente', lastUpdated: null },
-    diagnostic: { income:0, mixtos:false, socioPM:false, salarios:0, intereses:0, cfdiGlobal:false, buzonActivo:true, anualObligatoria:false, riesgoMulta:false, riesgoBuzon:false, riskLevel:'SEGURO', recomendacion:'', completedAt:null }
+    carpetaFiscal: { year: YEAR, monthlyFolders: buildMonthlyFolders(YEAR), summary: { total: 0, ingresos: 0, gastos_iva: 0, efirma: 0, constancia: 0, opinion: 0 }, efirmaExpiry: null, constanciaStatus: 'pendiente', opinionStatus: 'pendiente', lastUpdated: null },
+    diagnostic: { income: 0, mixtos: false, socioPM: false, salarios: 0, intereses: 0, cfdiGlobal: false, buzonActivo: true, anualObligatoria: false, riesgoMulta: false, riesgoBuzon: false, riskLevel: 'SEGURO', recomendacion: '', completedAt: null }
   };
   function clone(v) { return JSON.parse(JSON.stringify(v)); }
   function ensureAppState() {
@@ -93,7 +87,6 @@ const Store = (() => {
     emit('income:updated', state.incomeYTD); emit('incomeUpdated', state.incomeYTD);
   }
   function on(ev, fn) { if (!EVT[ev]) EVT[ev] = []; EVT[ev].push(fn); }
-
   function calcRiskLevel(income, limit = DEFAULT_LIMIT) {
     const value = Number(income || 0); const max = Number(limit || DEFAULT_LIMIT);
     const ratio = max > 0 ? value / max : 0;
@@ -101,7 +94,6 @@ const Store = (() => {
     return 'SEGURO';
   }
   const RISK_SEVERITY = { SEGURO: 0, PREVENTIVO: 1, RIESGO_ALTO: 2, EXPULSION: 3 };
-
   function buildWhatsAppAlertPayload(previousLevel, newLevel, income, limit) {
     const messages = {
       PREVENTIVO: `⚠️ Alerta RESICO: Has superado el 80% de tu límite anual ($2,800,000 MXN). Ingreso actual: $${Number(income).toLocaleString('es-MX')} MXN.`,
@@ -129,8 +121,6 @@ const Store = (() => {
     }
     return null;
   }
-
-  // ── updateIncome() ÚNICA: con detección de cruce ────────────
   function updateIncome(amount) {
     const previousLevel = state.fiscalMetrics.riskLevel;
     state.incomeYTD = Number(amount || 0);
@@ -139,8 +129,6 @@ const Store = (() => {
     evaluateRiskLevelChange(previousLevel, newLevel, state.incomeYTD, state.fiscalMetrics.annualLimit);
     persist(); emitAll(); upsertMetrics();
   }
-
-  // ── applyMetricRow() ÚNICA: protección contra cero + cruce ──
   function applyMetricRow(row) {
     if (!row) return;
     const previousLevel = state.fiscalMetrics.riskLevel;
@@ -155,7 +143,6 @@ const Store = (() => {
     state.fiscalMetrics.riskLevel = newLevel;
     evaluateRiskLevelChange(previousLevel, newLevel, state.incomeYTD, DEFAULT_LIMIT);
   }
-
   function recalc() {
     state.metrics.totalProcessed = state.conversations.length;
     Object.keys(state.metrics.byCategory).forEach(k => { state.metrics.byCategory[k] = 0; });
@@ -169,7 +156,6 @@ const Store = (() => {
     state.metrics.avgConfidence = state.conversations.length ? Math.round((confidenceSum / state.conversations.length) * 100) : 0;
     state.fiscalMetrics.riskLevel = calcRiskLevel(Number(state.incomeYTD || 0), DEFAULT_LIMIT);
   }
-
   function logSupabaseError(scope, error, payload = null) {
     if (!error) return;
     console.warn(`[Store] ${scope}:`, { message: error.message || 'unknown_error', details: error.details || null, hint: error.hint || null, code: error.code || null, payload });
@@ -188,7 +174,7 @@ const Store = (() => {
   }
   function normalizeFolderCategory(value) {
     const v = String(value || '').trim().toLowerCase();
-    if (['ingresos','gastos_iva','efirma','constancia','opinion'].includes(v)) return v;
+    if (['ingresos', 'gastos_iva', 'efirma', 'constancia', 'opinion'].includes(v)) return v;
     return 'gastos_iva';
   }
   function detectFolderCategory(doc) {
@@ -212,8 +198,8 @@ const Store = (() => {
   function diffDaysFromToday(dateStr) {
     if (!dateStr || dateStr === 'pendiente') return null;
     const today = new Date(); const target = new Date(dateStr);
-    today.setHours(0,0,0,0); target.setHours(0,0,0,0);
-    return Math.ceil((target.getTime() - today.getTime()) / (1000*60*60*24));
+    today.setHours(0, 0, 0, 0); target.setHours(0, 0, 0, 0);
+    return Math.ceil((target.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
   }
   function refreshSaludFiscalFromCarpeta() {
     const expiry = state.carpetaFiscal?.efirmaExpiry || state.saludFiscal?.eFirmaExpiry || null;
@@ -230,7 +216,7 @@ const Store = (() => {
   }
   function rebuildCarpetaFiscal() {
     const folders = buildMonthlyFolders(YEAR);
-    const summary = { total:0, ingresos:0, gastos_iva:0, efirma:0, constancia:0, opinion:0 };
+    const summary = { total: 0, ingresos: 0, gastos_iva: 0, efirma: 0, constancia: 0, opinion: 0 };
     let latestEFirma = null, latestConstancia = null, latestOpinion = null;
     (state.documents || []).forEach(doc => {
       const d = deriveDocumentDate(doc);
@@ -256,7 +242,6 @@ const Store = (() => {
     refreshSaludFiscalFromCarpeta();
     emit('carpetaUpdated', state.carpetaFiscal);
   }
-
   async function syncDown() {
     if (!db || !usr?.id) return;
     try {
@@ -274,21 +259,18 @@ const Store = (() => {
       recalc(); rebuildCarpetaFiscal(); persist(); emitAll();
     } catch (e) { console.warn('[Store] syncDown exception:', e?.message || e); }
   }
-
   async function upsertConversation(c) {
     if (!db || !usr?.id) return;
     const payload = { id: c.id || safeUUID(), user_id: usr.id, message_text: String(c.message_text || c.text || '').slice(0, 10000), intent: c.intent || 'OTROS', confidence: Number(c.confidence || 0), is_fiscal_audit_completed: !!c.is_fiscal_audit_completed };
     try { const { error } = await db.from('conversations').upsert(payload, { onConflict: 'id' }); if (error) logSupabaseError('upsertConversation', error, payload); }
     catch (e) { console.warn('[Store] upsertConversation exception:', e?.message || e, payload); }
   }
-
   async function upsertMetrics() {
     if (!db || !usr?.id) return;
     const payload = { user_id: usr.id, income_ytd: Number(state.incomeYTD || 0), total_processed: Number(state.metrics?.totalProcessed || state.conversations.length || 0), avg_confidence: Number(state.metrics?.avgConfidence || 0) };
     try { const { error } = await db.from('fiscal_metrics').upsert(payload, { onConflict: 'user_id' }); if (error) logSupabaseError('upsertMetrics', error, payload); }
     catch (e) { console.warn('[Store] upsertMetrics exception:', e?.message || e, payload); }
   }
-
   async function saveDocumentRemote(doc) {
     if (!db || !usr?.id) return;
     const normalizedType = doc.document_type || doc.doc_type || 'OTRO';
@@ -296,7 +278,6 @@ const Store = (() => {
     try { const { error } = await db.from('documents').upsert(payload, { onConflict: 'id' }); if (error) logSupabaseError('saveDocumentRemote', error, payload); }
     catch (e) { console.warn('[Store] saveDocumentRemote exception:', e?.message || e, payload); }
   }
-
   function subscribeRealtime() {
     if (!db || !usr?.id) return;
     try { if (rtChannel) db.removeChannel(rtChannel); } catch {}
@@ -315,7 +296,6 @@ const Store = (() => {
     });
     authListenerBound = true;
   }
-
   async function initSupabase() {
     ensureAppState();
     const url = window.SUPABASE_CONFIG?.url || window.AppConfig?.getSupabaseUrl?.();
@@ -334,7 +314,6 @@ const Store = (() => {
       return db;
     } catch (e) { console.warn('[Store] initSupabase exception:', e?.message || e); return db; }
   }
-
   function getState() { return state; }
   function getMetrics() { return state.metrics; }
   function getConversations() { return state.conversations; }
@@ -365,7 +344,6 @@ const Store = (() => {
     emit('conversationAdded', conv); emit('conversationadded', conv); emitAll();
     upsertConversation(conv); upsertMetrics();
   }
-
   function updateAnnualLimit(amount) {
     const nextLimit = Number(amount || DEFAULT_LIMIT);
     state.fiscalMetrics.annualLimit = nextLimit > 0 ? nextLimit : DEFAULT_LIMIT;
@@ -385,11 +363,10 @@ const Store = (() => {
     const issued = new Date(fechaEmision);
     if (Number.isNaN(issued.getTime())) return null;
     const expires = new Date(issued); expires.setFullYear(expires.getFullYear() + EFIRMA_VALIDITY_YEARS);
-    const today = new Date(); today.setHours(0,0,0,0); expires.setHours(0,0,0,0);
-    const diasRestantes = Math.ceil((expires - today) / (1000*60*60*24));
+    const today = new Date(); today.setHours(0, 0, 0, 0); expires.setHours(0, 0, 0, 0);
+    const diasRestantes = Math.ceil((expires - today) / (1000 * 60 * 60 * 24));
     return { fechaEmision: issued.toISOString().split('T')[0], fechaVencimiento: expires.toISOString().split('T')[0], diasRestantes, vigente: diasRestantes > 0 };
   }
-
   async function saveDocument(doc) {
     const normalizedType = doc.document_type || doc.doc_type || 'OTRO';
     const localDoc = { id: doc.id || safeUUID(), file_name: doc.file_name || 'unnamed_file', doc_type: normalizedType, document_type: normalizedType, extracted_data: doc.extracted_data || {}, confidence: Number(doc.confidence || 0), safety_flag: !!doc.safety_flag, validation_status: doc.validation_status || 'pendiente', needs_review: !!doc.needs_review || !!doc.safety_flag, source: doc.source || 'local', file_url: doc.file_url || null, created_at: doc.created_at || new Date().toISOString(), updated_at: doc.updated_at || new Date().toISOString(), folder_category: doc.folder_category || doc.extracted_data?.folder_category || null };
@@ -409,8 +386,6 @@ const Store = (() => {
     await saveDocumentRemote(localDoc);
     return localDoc;
   }
-
-  // ── saveInvoiceDocument() DENTRO del IIFE ──────────────────
   async function saveInvoiceDocument(invoiceData) {
     const totalFactura = Number(invoiceData?.total || 0);
     const doc = {
@@ -444,7 +419,6 @@ const Store = (() => {
     await upsertMetrics();
     return savedDoc;
   }
-
   function updateCarpetaFiscal(data) {
     state.carpetaFiscal = { ...state.carpetaFiscal, ...data, monthlyFolders: normalizeMonthlyFolders(data?.monthlyFolders || state.carpetaFiscal.monthlyFolders), lastUpdated: new Date().toISOString() };
     refreshSaludFiscalFromCarpeta(); persist();
@@ -465,7 +439,6 @@ const Store = (() => {
     emit('storeReset', null); emitAll(); rebuildCarpetaFiscal();
   }
   rebuildCarpetaFiscal();
-
   return {
     on, initSupabase, getState, getMetrics, getConversations, getSettings,
     getDocuments, getSaludFiscal, getCarpetaFiscal, getDiagnostic,
