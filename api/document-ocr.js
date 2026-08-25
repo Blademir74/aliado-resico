@@ -1,9 +1,9 @@
-// api/document-ocr.js — v6.1 CERTIFICADO
-// FIX: Manejo robusto de GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY (múltiples formatos)
-// Cascada: AI Studio (simple) → Vertex (service account) → fallback pedagógico
+// api/document-ocr.js — v6.2 CERTIFICADO
+// Cascada AI Studio → Vertex con reintento por parseo + prompt anti-refusal
+// + debug completo en fallbacks. Safety Flag 85% (DOC02 TRD).
 import crypto from 'node:crypto';
 
-const ENGINE = 'ocr-v6.1';
+const ENGINE = 'ocr-v6.2';
 const ALLOWED_ORIGINS = [
   'https://aliado-resico.vercel.app','https://aliadoresico.com','https://www.aliadoresico.com',
   'http://localhost:3000','http://127.0.0.1:3000','http://localhost:5500','http://127.0.0.1:5500'
@@ -87,6 +87,11 @@ function extractJSON(text) {
   if (s === -1 || e <= s) return null;
   return cleaned.slice(s, e + 1);
 }
+function safeParse(raw) {
+  const jsonText = extractJSON(raw);
+  if (!jsonText) return null;
+  try { return normalizeKeys(JSON.parse(jsonText)); } catch { return null; }
+}
 function buildFallback(reason, fileName = '', debug = {}) {
   return {
     ok: true, is_fallback: true, reason, engine: ENGINE, debug,
@@ -101,28 +106,8 @@ function buildFallback(reason, fileName = '', debug = {}) {
     needsHumanReview: true
   };
 }
-
-// ── FIX v6.1: Normalización robusta de clave privada ─────────────────────
-function normalizePrivateKey(raw) {
-  if (!raw) return null;
-  let key = String(raw);
-  // 1. Convertir \n literales a saltos de línea reales (Vercel env vars)
-  key = key.replace(/\\n/g, '\n').replace(/\\\\n/g, '\n');
-  // 2. Si no tiene headers PEM, agregarlos (formato PKCS#8)
-  if (!key.includes('-----BEGIN')) {
-    key = `-----BEGIN PRIVATE KEY-----\n${key.trim()}\n-----END PRIVATE KEY-----`;
-  }
-  // 3. Normalizar saltos de línea (Windows \r\n → \n)
-  key = key.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
-  // 4. Asegurar que cada línea tenga longitud correcta (64 chars para PEM)
-  const lines = key.split('\n');
-  const header = lines[0];
-  const footer = lines[lines.length - 1];
-  const body = lines.slice(1, -1).join('').replace(/\s/g, '');
-  const formattedBody = body.match(/.{1,64}/g)?.join('\n') || body;
-  return `${header}\n${formattedBody}\n${footer}`;
-}
-
+// ── Vertex: Service Account → token (cache 55 min) ──────────────────────
+function base64url(input) { return Buffer.from(input).toString('base64').replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/g, ''); }
 const _tok = { token: null, exp: 0 };
 function canUseVertex() {
   return Boolean(VERTEX_PROJECT_ID && process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL && process.env.GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY);
@@ -130,18 +115,11 @@ function canUseVertex() {
 async function googleToken() {
   if (_tok.token && _tok.exp > Date.now() + 60000) return _tok.token;
   const email = process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL;
-  const rawKey = process.env.GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY;
-  const key = normalizePrivateKey(rawKey);
-  if (!key) throw new Error('missing_or_invalid_private_key');
+  const key = (process.env.GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY || '').replace(/\\n/g, '\n');
   const now = Math.floor(Date.now() / 1000);
-  const head = Buffer.from(JSON.stringify({ alg: 'RS256', typ: 'JWT' })).toString('base64url');
-  const claims = Buffer.from(JSON.stringify({ iss: email, scope: 'https://www.googleapis.com/auth/cloud-platform', aud: 'https://oauth2.googleapis.com/token', iat: now, exp: now + 3600 })).toString('base64url');
-  let sig;
-  try {
-    sig = crypto.createSign('RSA-SHA256').update(`${head}.${claims}`).sign(key, 'base64url');
-  } catch (signErr) {
-    throw new Error(`sign_error: ${signErr.message}`);
-  }
+  const head = base64url(JSON.stringify({ alg: 'RS256', typ: 'JWT' }));
+  const claims = base64url(JSON.stringify({ iss: email, scope: 'https://www.googleapis.com/auth/cloud-platform', aud: 'https://oauth2.googleapis.com/token', iat: now, exp: now + 3600 }));
+  const sig = crypto.createSign('RSA-SHA256').update(`${head}.${claims}`).sign(key, 'base64');
   const r = await fetch('https://oauth2.googleapis.com/token', {
     method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
     body: `grant_type=urn:ietf:params:oauth:grant-type:jwt-bearer&assertion=${head}.${claims}.${sig}`
@@ -151,12 +129,12 @@ async function googleToken() {
   _tok = { token: d.access_token, exp: Date.now() + 55 * 60 * 1000 };
   return d.access_token;
 }
-
+// ── Prompt anti-refusal: SIEMPRE JSON, aunque no lea datos ──────────────
 const PROMPT = [
   'Eres un extractor fiscal mexicano especializado en RESICO 2026.',
-  'Analiza el documento y responde SOLO JSON válido, sin markdown.',
+  'Analiza el documento y responde SOLO JSON válido, sin markdown y sin explicaciones.',
+  'IMPORTANTE: Aunque la imagen esté borrosa o no encuentres datos, responde SIEMPRE el JSON con los campos en null y confidence 0.4.',
   'Detecta si es CFDI, ticket, constancia, opinión de cumplimiento, e.firma u otro.',
-  'Si falta un dato, devuelve null.',
   'Responde con esta forma exacta:',
   '{',
   '  "document_type": "CFDI|TICKET|CONSTANCIA|OPINION|EFIRMA|OTRO",',
@@ -180,21 +158,39 @@ function geminiBody(mimeType, base64Data) {
     generationConfig: { temperature: 0.05, topP: 0.9, maxOutputTokens: 700 }
   };
 }
-async function callVertex(body) {
-  const token = await googleToken();
-  const url = `https://${VERTEX_LOCATION}-aiplatform.googleapis.com/v1/projects/${VERTEX_PROJECT_ID}/locations/${VERTEX_LOCATION}/publishers/google/models/${VERTEX_MODEL}:generateContent`;
-  const r = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` }, body: JSON.stringify(body) });
-  if (!r.ok) throw new Error(`Vertex HTTP ${r.status}`);
-  return { data: await r.json(), model: `vertex:${VERTEX_MODEL}` };
-}
-async function callAIStudio(model, body) {
-  const apiKey = process.env.GEMINI_API_KEY;
-  if (!apiKey) throw new Error('missing_gemini_api_key');
-  const r = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`, {
-    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body)
-  });
-  if (!r.ok) throw new Error(`AIStudio HTTP ${r.status}`);
-  return { data: await r.json(), model: `ai-studio:${model}` };
+// ── Cascada con reintento por parseo: AI Studio → Vertex ────────────────
+async function tryProviders(gBody, tried) {
+  if (process.env.GEMINI_API_KEY) {
+    for (const m of AI_MODELS) {
+      try {
+        const r = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${m}:generateContent?key=${process.env.GEMINI_API_KEY}`, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(gBody)
+        });
+        const data = await r.json().catch(() => ({}));
+        if (!r.ok || data?.error) { tried.push({ provider: `ai-studio:${m}`, http: r.status, err: data?.error?.message || 'http_error' }); continue; }
+        const raw = extractReplyText(data);
+        const parsed = safeParse(raw);
+        if (parsed) return { parsed, model: `ai-studio:${m}` };
+        tried.push({ provider: `ai-studio:${m}`, http: r.status, err: 'no_json', raw_preview: raw.slice(0, 300) });
+      } catch (e) { tried.push({ provider: `ai-studio:${m}`, err: e.message }); }
+    }
+  }
+  if (canUseVertex()) {
+    try {
+      const token = await googleToken();
+      const url = `https://${VERTEX_LOCATION}-aiplatform.googleapis.com/v1/projects/${VERTEX_PROJECT_ID}/locations/${VERTEX_LOCATION}/publishers/google/models/${VERTEX_MODEL}:generateContent`;
+      const r = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` }, body: JSON.stringify(gBody) });
+      const data = await r.json().catch(() => ({}));
+      if (!r.ok || data?.error) { tried.push({ provider: 'vertex', http: r.status, err: data?.error?.message || 'http_error' }); }
+      else {
+        const raw = extractReplyText(data);
+        const parsed = safeParse(raw);
+        if (parsed) return { parsed, model: `vertex:${VERTEX_MODEL}` };
+        tried.push({ provider: 'vertex', http: r.status, err: 'no_json', raw_preview: raw.slice(0, 300) });
+      }
+    } catch (e) { tried.push({ provider: 'vertex', err: e.message }); }
+  }
+  return null;
 }
 
 export default async function handler(req, res) {
@@ -214,37 +210,13 @@ export default async function handler(req, res) {
   const magicCheck = validateMagicNumber(base64Data, mimeType);
   if (!magicCheck.valid) return res.status(400).json({ ok: false, error: `Archivo inválido: ${magicCheck.reason}`, engine: ENGINE });
   if (!fileName || !mimeType || !base64Data) return res.status(400).json({ ok: false, error: 'fileName, mimeType y base64Data requeridos.', engine: ENGINE });
+  if (!process.env.GEMINI_API_KEY && !canUseVertex()) return res.status(200).json(buildFallback('missing_credentials', fileName));
 
-  const gBody = geminiBody(mimeType, base64Data);
-  const errors = [];
-  let result = null;
+  const tried = [];
+  const outcome = await tryProviders(geminiBody(mimeType, base64Data), tried);
+  if (!outcome) return res.status(200).json(buildFallback('all_providers_failed', fileName, { tried }));
 
-  // ── Cascada v6.1: AI Studio primero (más simple) → Vertex (service account) ──
-  if (process.env.GEMINI_API_KEY) {
-    for (const m of AI_MODELS) {
-      try { result = await callAIStudio(m, gBody); break; } catch (e) { errors.push(`${m}: ${e.message}`); }
-    }
-  }
-  if (!result && canUseVertex()) {
-    try { result = await callVertex(gBody); } catch (e) { errors.push(`vertex: ${e.message}`); }
-  }
-  
-  if (!result) return res.status(200).json(buildFallback('all_providers_failed', fileName || '', { providers: errors, gemini_key_configured: !!process.env.GEMINI_API_KEY, vertex_configured: canUseVertex() }));
-
-// ── FIX v6.2: Log del provider que respondió (incluso sin JSON) ──────────
-const rawText = extractReplyText(result.data);
-const jsonText = extractJSON(rawText);
-if (!jsonText) {
-  return res.status(200).json(buildFallback('empty_response', fileName || '', {
-    providers: errors,
-    provider_used: result.model,
-    raw_response_preview: rawText.slice(0, 200) // Primeros 200 chars para diagnóstico
-  }));
-}
-  if (!jsonText) return res.status(200).json(buildFallback('empty_response', fileName || '', { providers: errors }));
-  let parsed;
-  try { parsed = normalizeKeys(JSON.parse(jsonText)); } catch { return res.status(200).json(buildFallback('invalid_json', fileName || '', { providers: errors })); }
-
+  const parsed = outcome.parsed;
   const docType = normalizeDocType(parsed.document_type);
   const confidence = Number(parsed.confidence || 0);
   const safetyFlag = confidence < 0.85;
@@ -281,5 +253,5 @@ if (!jsonText) {
       } catch (e) { console.warn('[document-ocr] validación receptor:', e.message); }
     }
   }
-  return res.status(200).json({ ok: true, engine: ENGINE, is_fallback: false, model: result.model, document: doc, needsHumanReview: safetyFlag });
+  return res.status(200).json({ ok: true, engine: ENGINE, is_fallback: false, model: outcome.model, document: doc, needsHumanReview: safetyFlag });
 }

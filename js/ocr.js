@@ -206,9 +206,9 @@ function compressImage(file, maxDim = 1280, quality = 0.8) {
         throw new Error(payload?.error || `OCR HTTP ${response.status}`);
       }
 
-      const safety = computeSafetyFlag(payload.document.confidence);
-
-      if (output) output.innerHTML = renderResult(payload);
+       showProcessingIndicator(false); // FIX: destrabar botón en ruta de éxito
+        const safety = computeSafetyFlag(payload.document.confidence);
+        if (output) output.innerHTML = renderResult(payload);
 
       // Enriquecer el documento antes de guardarlo
       const extractedData = payload.document.extracted_data || {};
