@@ -1,160 +1,105 @@
-const ALLOWED_ORIGINS = [
-  'https://aliado-resico.vercel.app',
-  'https://aliadoresico.com',
-  'https://www.aliadoresico.com',
-  'http://localhost:3000',
-  'http://127.0.0.1:3000',
-  'http://localhost:5500',
-  'http://127.0.0.1:5500'
-];
-
-const GEMINI_MODEL = 'gemini-2.0-flash';
-const GEMINI_ENDPOINT = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent`;
-
+// api/document-ocr.js — v4.0 CERTIFICADO
+// OCR fiscal real con Gemini Vision. Acepta sesión real O modo demo (rate-limited).
+// Cumplimiento: Art. 17-D CFF (e.firma) · Diferenciador ISR/IVA (DOC02 TRD).
 import crypto from 'node:crypto';
 
+const ALLOWED_ORIGINS = [
+  'https://aliado-resico.vercel.app','https://aliadoresico.com','https://www.aliadoresico.com',
+  'http://localhost:3000','http://127.0.0.1:3000','http://localhost:5500','http://127.0.0.1:5500'
+];
+const GEMINI_MODEL = process.env.GEMINI_MODEL || 'gemini-2.0-flash';
+const GEMINI_ENDPOINT = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent`;
 const SUPABASE_JWT_SECRET = process.env.SUPABASE_JWT_SECRET || '';
+const SUPABASE_URL = process.env.SUPABASE_URL || '';
+const SUPABASE_SERVICE_KEY = process.env.SUPABASE_SERVICE_KEY || '';
 
-// ── Validación JWT de Supabase (FIX FASE 0.4.B) ─────────────────────────
+// ── Rate limit (demo: 10 req/min por IP; autenticado: 30) ────────────────
+const _rl = new Map();
+function rateLimit(key, max) {
+  const now = Date.now();
+  let b = _rl.get(key);
+  if (!b || now - b.start > 60000) b = { start: now, n: 0 };
+  b.n++; _rl.set(key, b);
+  return b.n <= max;
+}
+
 async function validateSupabaseJWT(authHeader) {
   if (!authHeader || !authHeader.startsWith('Bearer ')) return null;
   const token = authHeader.slice(7).trim();
   if (!token) return null;
   try {
-    const parts = token.split('.');
-    if (parts.length !== 3) return null;
-    const [encodedHeader, encodedPayload, encodedSig] = parts;
+    const [h, p, s] = token.split('.');
+    if (!h || !p || !s) return null;
     if (SUPABASE_JWT_SECRET) {
-      const signingInput = `${encodedHeader}.${encodedPayload}`;
-      const expectedSig = crypto.createHmac('sha256', SUPABASE_JWT_SECRET)
-        .update(signingInput).digest('base64url');
-      const sigBuf = Buffer.from(encodedSig, 'base64url');
-      const expBuf = Buffer.from(expectedSig, 'base64url');
-      if (sigBuf.length !== expBuf.length || !crypto.timingSafeEqual(sigBuf, expBuf)) return null;
-    } else {
-      console.warn('[document-ocr] SUPABASE_JWT_SECRET no configurado. Verificación OFF.');
+      const exp = crypto.createHmac('sha256', SUPABASE_JWT_SECRET).update(`${h}.${p}`).digest('base64url');
+      const a = Buffer.from(s, 'base64url'), b2 = Buffer.from(exp, 'base64url');
+      if (a.length !== b2.length || !crypto.timingSafeEqual(a, b2)) return null;
     }
-    const payload = JSON.parse(Buffer.from(encodedPayload, 'base64url').toString('utf8'));
+    const payload = JSON.parse(Buffer.from(p, 'base64url').toString('utf8'));
     if (payload.exp && payload.exp < Math.floor(Date.now() / 1000)) return null;
     if (payload.role === 'service_role') return null;
     return { uid: payload.sub || null, email: payload.email || null };
   } catch { return null; }
 }
 
-// ── FIX FASE 1.3: Validación de magic number (MIME real) ────────────────
-// Detecta el tipo real del archivo desde sus primeros bytes, no la extensión
-const MAGIC_SIGNATURES = {
-  'image/jpeg': ['FFD8FF'],
-  'image/png': ['89504E47'],
-  'image/webp': ['52494646'],
-  'application/pdf': ['25504446'],
-};
-
+// ── Magic number: MIME real desde bytes, no extensión ────────────────────
+const MAGIC_SIGNATURES = { 'image/jpeg': ['FFD8FF'], 'image/png': ['89504E47'], 'image/webp': ['52494646'], 'application/pdf': ['25504446'] };
 function validateMagicNumber(base64Data, claimedMime) {
-  if (!base64Data || typeof base64Data !== 'string') {
-    return { valid: false, reason: 'Datos vacíos' };
-  }
+  if (!base64Data || typeof base64Data !== 'string') return { valid: false, reason: 'Datos vacíos' };
   try {
     const buffer = Buffer.from(base64Data, 'base64');
     if (buffer.length < 8) return { valid: false, reason: 'Archivo muy pequeño' };
     const hexHead = buffer.slice(0, 4).toString('hex').toUpperCase();
-    const allowedMimes = ['image/jpeg', 'image/png', 'image/webp', 'application/pdf'];
-    if (!allowedMimes.includes(claimedMime)) {
-      return { valid: false, reason: `MIME no permitido: ${claimedMime}` };
-    }
-    const expectedSigs = MAGIC_SIGNATURES[claimedMime] || [];
-    const matches = expectedSigs.some(sig => hexHead.startsWith(sig));
-    if (!matches) {
-      return {
-        valid: false,
-        reason: `Firma binaria no coincide. Esperado: ${claimedMime}, detectado: ${hexHead}`,
-      };
+    if (!MAGIC_SIGNATURES[claimedMime]) return { valid: false, reason: `MIME no permitido: ${claimedMime}` };
+    if (!MAGIC_SIGNATURES[claimedMime].some(sig => hexHead.startsWith(sig))) {
+      return { valid: false, reason: `Firma binaria no coincide con ${claimedMime}.` };
     }
     return { valid: true, mime: claimedMime };
-  } catch (e) {
-    return { valid: false, reason: 'Error al validar: ' + e.message };
-  }
-}
-
-function resolveOrigin(origin = '') {
-  if (!origin) return ALLOWED_ORIGINS[0];
-  return ALLOWED_ORIGINS.includes(origin) ? origin : ALLOWED_ORIGINS[0];
+  } catch (e) { return { valid: false, reason: 'Error al validar: ' + e.message }; }
 }
 
 function setHeaders(req, res) {
-  res.setHeader('Access-Control-Allow-Origin', resolveOrigin(req.headers.origin || ''));
+  const origin = req.headers.origin || '';
+  res.setHeader('Access-Control-Allow-Origin', ALLOWED_ORIGINS.includes(origin) ? origin : ALLOWED_ORIGINS[0]);
   res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, x-demo-mode');
   res.setHeader('Vary', 'Origin');
-  res.setHeader('Content-Type', 'application/json; charset=utf-8');
-  res.setHeader('Cache-Control', 'no-store, max-age=0');
+  res.setHeader('Cache-Control', 'no-store');
   res.setHeader('X-Content-Type-Options', 'nosniff');
-  res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
 }
-
 function parseBody(req) {
   if (!req?.body) return {};
   if (typeof req.body === 'object') return req.body;
-  try {
-    return JSON.parse(req.body);
-  } catch {
-    return {};
-  }
+  try { return JSON.parse(req.body); } catch { return {}; }
 }
-
-function normalizeDocType(value) {
-  const v = String(value || '').trim().toUpperCase();
-  const allowed = new Set(['CFDI', 'TICKET', 'CONSTANCIA', 'OPINION', 'EFIRMA', 'OTRO']);
-  return allowed.has(v) ? v : 'OTRO';
+function normalizeDocType(v) {
+  const t = String(v || '').trim().toUpperCase();
+  return new Set(['CFDI','TICKET','CONSTANCIA','OPINION','EFIRMA','OTRO']).has(t) ? t : 'OTRO';
 }
-
+// ── FIX CRÍTICO: normaliza llaves (Gemini a veces devuelve espacios) ─────
+function normalizeKeys(obj) {
+  const out = {};
+  for (const [k, v] of Object.entries(obj || {})) out[k.trim()] = v;
+  return out;
+}
 function extractReplyText(data) {
-  return (
-    data?.candidates?.[0]?.content?.parts
-      ?.map(part => part?.text || '')
-      .join('\n')
-      .trim() || ''
-  );
+  return (data?.candidates?.[0]?.content?.parts?.map(p => p?.text || '').join('\n').trim()) || '';
 }
-
 function extractJSON(text) {
   if (!text) return null;
-  const cleaned = String(text)
-    .replace(/```json/gi, '```')
-    .replace(/```/g, '')
-    .trim();
-  const start = cleaned.indexOf('{');
-  const end = cleaned.lastIndexOf('}');
-  if (start === -1 || end <= start) return null;
-  return cleaned.slice(start, end + 1);
+  const cleaned = String(text).replace(/```json/gi, '').replace(/```/g, '').trim();
+  const s = cleaned.indexOf('{'), e = cleaned.lastIndexOf('}');
+  if (s === -1 || e <= s) return null;
+  return cleaned.slice(s, e + 1);
 }
-
 function buildFallback(reason, fileName = '') {
-  const docType = 'OTRO';
   return {
-    ok: true,
-    is_fallback: true,
-    reason,
+    ok: true, is_fallback: true, reason,
     document: {
-      file_name: fileName || 'documento',
-      doc_type: docType,
-      document_type: docType,
-      confidence: 0.5,
-      file_url: `local:${fileName || 'documento'}`,
-      extracted_data: {
-        rfc_emisor: null,
-        rfc_receptor: null,
-        subtotal: null,
-        iva: null,
-        total: null,
-        folio: null,
-        fecha: null,
-        summary: null,
-        tax_usefulness: null
-      },
-      safety_flag: true,
-      validation_status: 'pendiente',
-      needs_review: true,
+      file_name: fileName || 'documento', doc_type: 'OTRO', document_type: 'OTRO',
+      confidence: 0.5, file_url: `local:${fileName || 'documento'}`,
+      extracted_data: { rfc_emisor: null, rfc_receptor: null, subtotal: null, iva: null, total: null, folio: null, fecha: null, summary: null, tax_usefulness: null },
+      safety_flag: true, validation_status: 'pendiente', needs_review: true,
       source: 'ocr_fallback',
       pedagogical_note: 'ISR RESICO: sin deducciones. IVA: requiere CFDI válido y gasto indispensable para acreditamiento.'
     },
@@ -162,183 +107,107 @@ function buildFallback(reason, fileName = '') {
   };
 }
 
-  export default async function handler(req, res) {
+export default async function handler(req, res) {
   setHeaders(req, res);
-  if (req.method === 'OPTIONS') {
-    return res.status(204).end();
-  }
-  if (req.method !== 'POST') {
-    return res.status(405).json({ ok: false, error: 'Method Not Allowed' });
-  }
+  if (req.method === 'OPTIONS') return res.status(204).end();
+  if (req.method !== 'POST') return res.status(405).json({ ok: false, error: 'Method Not Allowed' });
 
-  // ── FIX FASE 0.4.B: JWT obligatorio ───────────────────────────────────
+  // ── AUTH: sesión real O demo con rate-limit estricto ──────────────────
+  const isDemo = req.headers['x-demo-mode'] === 'true';
   const user = await validateSupabaseJWT(req.headers.authorization);
-  if (!user) {
-    return res.status(401).json({ ok: false, error: 'No autorizado. Se requiere sesión activa de Supabase.' });
-  }
+  if (!user && !isDemo) return res.status(401).json({ ok: false, error: 'No autorizado. Se requiere sesión activa de Supabase.' });
+  const ip = String(req.headers['x-forwarded-for'] || 'local');
+  if (!user && !rateLimit(ip, 10)) return res.status(429).json({ ok: false, error: 'Límite de OCR en demo alcanzado. Inicia sesión para continuar.' });
+  if (user && !rateLimit(user.uid, 30)) return res.status(429).json({ ok: false, error: 'Límite de procesamiento alcanzado. Intenta en un minuto.' });
 
   const body = parseBody(req);
   const { fileName, mimeType, base64Data } = body;
-    // ── FIX FASE 1.3.B: Validar magic number antes de procesar ────────────
   const magicCheck = validateMagicNumber(base64Data, mimeType);
-  if (!magicCheck.valid) {
-    return res.status(400).json({
-      ok: false,
-      error: `Archivo inválido: ${magicCheck.reason}`,
-      hint: 'Sube una imagen (JPG/PNG/WEBP) o PDF válido.'
-    });
-  }
-    const apiKey = process.env.GEMINI_API_KEY || '';
+  if (!magicCheck.valid) return res.status(400).json({ ok: false, error: `Archivo inválido: ${magicCheck.reason}`, hint: 'Sube JPG/PNG/WEBP o PDF válido.' });
 
-    if (!apiKey) {
-      return res.status(200).json(buildFallback('missing_api_key', fileName || ''));
-    }
+  const apiKey = process.env.GEMINI_API_KEY || '';
+  if (!apiKey) return res.status(200).json(buildFallback('missing_api_key', fileName || ''));
+  if (!fileName || !mimeType || !base64Data) return res.status(400).json({ ok: false, error: 'fileName, mimeType y base64Data son requeridos.' });
 
-  if (!fileName || !mimeType || !base64Data) {
-    return res.status(400).json({
-      ok: false,
-      error: 'fileName, mimeType y base64Data son requeridos.'
-    });
-  }
-
+  // ── PROMPT con llaves LIMPIAS (sin espacios) ───────────────────────────
   const prompt = [
     'Eres un extractor fiscal mexicano especializado en RESICO 2026.',
-    'Analiza el documento y responde SOLO JSON válido.',
-    'No uses markdown. No uses explicaciones.',
+    'Analiza el documento y responde SOLO JSON válido, sin markdown.',
     'Detecta si es CFDI, ticket, constancia, opinión de cumplimiento, e.firma u otro.',
     'Si falta un dato, devuelve null.',
-    'El IVA debe ir explícito cuando se detecte; si no aparece, devuelve 0 o null según corresponda.',
     'Responde con esta forma exacta:',
     '{',
-    ' "document_type": "CFDI|TICKET|CONSTANCIA|OPINION|EFIRMA|OTRO",',
-    ' "confidence": 0.97,',
-    ' "rfc_emisor": "string|null",',
-    ' "rfc_receptor": "string|null",',
-    ' "subtotal": 123.45,',
-    ' "iva": 19.76,',
-    ' "total": 143.21,',
-    ' "folio": "string|null",',
-    ' "fecha": "YYYY-MM-DD|null",',
-    ' "summary": "breve",',
-    ' "tax_usefulness": "IVA|ISR|AMBOS|NINGUNO"',
+    '  "document_type": "CFDI|TICKET|CONSTANCIA|OPINION|EFIRMA|OTRO",',
+    '  "confidence": 0.97,',
+    '  "rfc_emisor": "string|null",',
+    '  "rfc_receptor": "string|null",',
+    '  "nombre_emisor": "string|null",',
+    '  "subtotal": 123.45,',
+    '  "iva": 19.76,',
+    '  "total": 143.21,',
+    '  "folio": "string|null",',
+    '  "fecha": "YYYY-MM-DD|null",',
+    '  "summary": "breve",',
+    '  "tax_usefulness": "IVA|ISR|AMBOS|NINGUNO"',
     '}',
-    'Regla fiscal pedagógica: ISR RESICO no deduce gastos; IVA solo es acreditable con CFDI válido y gasto indispensable.'
+    'Regla fiscal: ISR RESICO no deduce gastos; IVA solo acreditable con CFDI válido y gasto indispensable.'
   ].join('\n');
-
-  const payload = {
-    contents: [
-      {
-        role: 'user',
-        parts: [
-          { text: prompt },
-          {
-            inline_data: {
-              mime_type: mimeType,
-              data: base64Data
-            }
-          }
-        ]
-      }
-    ],
-    generationConfig: {
-      temperature: 0.05,
-      topP: 0.9,
-      maxOutputTokens: 700
-    }
-  };
 
   try {
     const upstream = await fetch(`${GEMINI_ENDPOINT}?key=${apiKey}`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload)
+      body: JSON.stringify({
+        contents: [{ role: 'user', parts: [{ text: prompt }, { inline_data: { mime_type: mimeType, data: base64Data } }] }],
+        generationConfig: { temperature: 0.05, topP: 0.9, maxOutputTokens: 700 }
+      })
     });
-
     const data = await upstream.json().catch(() => ({}));
-
-    if (!upstream.ok || data?.error) {
-      return res.status(200).json(buildFallback('gemini_error', fileName));
-    }
-
-    const rawText = extractReplyText(data);
-    const jsonText = extractJSON(rawText);
-
-    if (!jsonText) {
-      return res.status(200).json(buildFallback('empty_response', fileName));
-    }
-
+    if (!upstream.ok || data?.error) return res.status(200).json(buildFallback('gemini_error', fileName));
+    const jsonText = extractJSON(extractReplyText(data));
+    if (!jsonText) return res.status(200).json(buildFallback('empty_response', fileName));
     let parsed;
-    try {
-      parsed = JSON.parse(jsonText);
-    } catch {
-      return res.status(200).json(buildFallback('invalid_json', fileName));
-    }
+    try { parsed = normalizeKeys(JSON.parse(jsonText)); } catch { return res.status(200).json(buildFallback('invalid_json', fileName)); }
 
     const docType = normalizeDocType(parsed.document_type);
     const confidence = Number(parsed.confidence || 0);
     const safetyFlag = confidence < 0.85;
 
-    return res.status(200).json({
-      ok: true,
-      is_fallback: false,
-      document: {
-        file_name: fileName,
-        doc_type: docType,
-        document_type: docType,
-        confidence,
-        file_url: `local:${fileName}`,
-        extracted_data: {
-          rfc_emisor: parsed.rfc_emisor || null,
-          rfc_receptor: parsed.rfc_receptor || null,
-          subtotal: parsed.subtotal ?? null,
-          iva: parsed.iva ?? null,
-          total: parsed.total ?? null,
-          folio: parsed.folio || null,
-          fecha: parsed.fecha || null,
-          summary: parsed.summary || null,
-          tax_usefulness: parsed.tax_usefulness || null
-        },
-        safety_flag: safetyFlag,
-        validation_status: 'pendiente',
-        needs_review: safetyFlag,
-        source: 'ocr_ai',
-        pedagogical_note: 'ISR RESICO: sin deducciones. IVA: requiere CFDI válido y gasto indispensable para acreditamiento.'
+    const doc = {
+      file_name: fileName, doc_type: docType, document_type: docType, confidence,
+      file_url: `local:${fileName}`,
+      extracted_data: {
+        rfc_emisor: parsed.rfc_emisor || null, rfc_receptor: parsed.rfc_receptor || null,
+        nombre_emisor: parsed.nombre_emisor || null,
+        subtotal: parsed.subtotal ?? null, iva: parsed.iva ?? null, total: parsed.total ?? null,
+        folio: parsed.folio || null, fecha: parsed.fecha || null,
+        summary: parsed.summary || null, tax_usefulness: parsed.tax_usefulness || null
       },
-      needsHumanReview: safetyFlag,
-      model: GEMINI_MODEL
-    });
-        // ── FIX FASE 1.4: Validar que RFC receptor sea del usuario autenticado ──
-    // Previene acreditamiento indebido de IVA con facturas ajenas (riesgo auditoría SAT)
-    const extractedRfcReceptor = (doc.extracted_data?.rfc_receptor || '').toUpperCase().trim();
-    if (extractedRfcReceptor && extractedRfcReceptor !== 'XAXX010101000' && extractedRfcReceptor !== 'XEXX010101000') {
-      let userRfc = null;
-      try {
-        const { SUPABASE_URL, SUPABASE_SERVICE_KEY } = process.env;
-        if (SUPABASE_URL && SUPABASE_SERVICE_KEY && jwtUser?.uid) {
-          const profileRes = await fetch(`${SUPABASE_URL}/rest/v1/user_profiles?user_id=eq.${jwtUser.uid}&select=rfc`, {
-            headers: {
-              apikey: SUPABASE_SERVICE_KEY,
-              Authorization: `Bearer ${SUPABASE_SERVICE_KEY}`,
-            }
+      safety_flag: safetyFlag, validation_status: 'pendiente', needs_review: safetyFlag,
+      source: isDemo ? 'ocr_ai_demo' : 'ocr_ai',
+      pedagogical_note: 'ISR RESICO: sin deducciones. IVA: requiere CFDI válido y gasto indispensable para acreditamiento.'
+    };
+
+    // ── Validación de RFC receptor contra el usuario (solo sesión real) ──
+    if (user && SUPABASE_URL && SUPABASE_SERVICE_KEY) {
+      const rec = String(doc.extracted_data.rfc_receptor || '').toUpperCase().trim();
+      if (rec && rec !== 'XAXX010101000' && rec !== 'XEXX010101000') {
+        try {
+          const pr = await fetch(`${SUPABASE_URL}/rest/v1/user_profiles?user_id=eq.${user.uid}&select=rfc`, {
+            headers: { apikey: SUPABASE_SERVICE_KEY, Authorization: `Bearer ${SUPABASE_SERVICE_KEY}` }
           });
-          const profiles = await profileRes.json();
-          userRfc = Array.isArray(profiles) && profiles[0]?.rfc ? profiles[0].rfc.toUpperCase().trim() : null;
-        }
-      } catch (e) {
-        console.warn('[document-ocr] No se pudo validar RFC receptor:', e.message);
-      }
-      if (userRfc && extractedRfcReceptor !== userRfc) {
-        doc.extracted_data.rfc_receptor_mismatch = true;
-        doc.extracted_data.rfc_receptor_expected = userRfc;
-        doc.safety_flag = true;
-        doc.needs_review = true;
-        doc.validation_status = 'RFC_receptor_no_coincide';
-        doc.extracted_data.warning = `⚠️ El RFC receptor (${extractedRfcReceptor}) no coincide con tu RFC registrado (${userRfc}). Este documento NO es acreditable para IVA.`;
+          const profiles = await pr.json();
+          const userRfc = Array.isArray(profiles) && profiles[0]?.rfc ? profiles[0].rfc.toUpperCase().trim() : null;
+          if (userRfc && rec !== userRfc) {
+            doc.extracted_data.rfc_receptor_mismatch = true;
+            doc.extracted_data.warning = `⚠️ El RFC receptor (${rec}) no coincide con tu RFC (${userRfc}). NO acreditable para IVA.`;
+            doc.safety_flag = true; doc.needs_review = true; doc.validation_status = 'RFC_receptor_no_coincide';
+          }
+        } catch (e) { console.warn('[document-ocr] validación receptor:', e.message); }
       }
     }
-     return res.status(200).json({ ok: true, document: doc });
+    return res.status(200).json({ ok: true, is_fallback: false, document: doc, needsHumanReview: safetyFlag, model: GEMINI_MODEL });
   } catch (error) {
-    
     return res.status(200).json(buildFallback(error?.message || 'network_error', fileName));
   }
 }

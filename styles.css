@@ -628,7 +628,7 @@ button { cursor: pointer; border: none; }
   .mobile-nav {
     display: flex; position: fixed; bottom: 0; left: 0; right: 0; z-index: 200;
     background: rgba(11,25,44,.96); border-top: 1px solid rgba(241,245,249,.07);
-    backdrop-filter: blur(20px); padding: var(--sp-xs) 0; safe-area-inset-bottom: env(safe-area-inset-bottom);
+    backdrop-filter: blur(20px); padding: var(--sp-xs) 0; padding-bottom: env(safe-area-inset-bottom);
   }
   .mobile-nav .nav-btn { flex: 1; flex-direction: column; gap: 2px; padding: var(--sp-xs); font-size: .62rem; border-radius: 0; justify-content: center; }
   .mobile-nav .nav-icon { font-size: 1.3rem; }
