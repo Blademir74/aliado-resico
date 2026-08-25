@@ -228,9 +228,19 @@ export default async function handler(req, res) {
   if (!result && canUseVertex()) {
     try { result = await callVertex(gBody); } catch (e) { errors.push(`vertex: ${e.message}`); }
   }
+  
   if (!result) return res.status(200).json(buildFallback('all_providers_failed', fileName || '', { providers: errors, gemini_key_configured: !!process.env.GEMINI_API_KEY, vertex_configured: canUseVertex() }));
 
-  const jsonText = extractJSON(extractReplyText(result.data));
+// ── FIX v6.2: Log del provider que respondió (incluso sin JSON) ──────────
+const rawText = extractReplyText(result.data);
+const jsonText = extractJSON(rawText);
+if (!jsonText) {
+  return res.status(200).json(buildFallback('empty_response', fileName || '', {
+    providers: errors,
+    provider_used: result.model,
+    raw_response_preview: rawText.slice(0, 200) // Primeros 200 chars para diagnóstico
+  }));
+}
   if (!jsonText) return res.status(200).json(buildFallback('empty_response', fileName || '', { providers: errors }));
   let parsed;
   try { parsed = normalizeKeys(JSON.parse(jsonText)); } catch { return res.status(200).json(buildFallback('invalid_json', fileName || '', { providers: errors })); }
