@@ -11,6 +11,32 @@ const DocumentProcessor = (() => {
       .replaceAll("'", '&#39;');
   }
 
+  // ── FIX 413: compresión client-side para fotos de cámara ────────────────
+// Vercel rechaza bodies > ~4.5MB (HTTP 413). Reducimos a máx. 1280px / JPEG 0.8
+// (~200–400 KB) sin perder legibilidad de RFC/montos para Gemini Vision.
+function compressImage(file, maxDim = 1280, quality = 0.8) {
+  return new Promise((resolve) => {
+    if (!file || !file.type?.startsWith('image/')) { resolve(file); return; }
+    const url = URL.createObjectURL(file);
+    const img = new Image();
+    img.onload = () => {
+      URL.revokeObjectURL(url);
+      const scale = Math.min(1, maxDim / Math.max(img.width, img.height));
+      if (scale === 1 && file.size < 900 * 1024) { resolve(file); return; }
+      const canvas = document.createElement('canvas');
+      canvas.width = Math.round(img.width * scale);
+      canvas.height = Math.round(img.height * scale);
+      canvas.getContext('2d').drawImage(img, 0, 0, canvas.width, canvas.height);
+      canvas.toBlob(blob => {
+        if (!blob) { resolve(file); return; }
+        resolve(new File([blob], (file.name || 'documento').replace(/\.\w+$/, '') + '.jpg', { type: 'image/jpeg' }));
+      }, 'image/jpeg', quality);
+    };
+    img.onerror = () => { URL.revokeObjectURL(url); resolve(file); };
+    img.src = url;
+  });
+}
+
   function fileToBase64(file) {
     return new Promise((resolve, reject) => {
       const reader = new FileReader();
@@ -131,9 +157,14 @@ const DocumentProcessor = (() => {
     showProcessingIndicator(true);
  if (output) output.innerHTML = '';
  
-    try {
-      const base64Data = await fileToBase64(file);
+     try {
+      const compact = await compressImage(file); // FIX 413
+      const base64Data = await fileToBase64(compact);
+      if (base64Data.length > 3500000) {
+        throw new Error('Imagen demasiado pesada incluso comprimida. Toma la foto con mejor iluminación y sin zoom.');
+      }
       const session = await window.APP_STATE?.supabase?.auth?.getSession?.();
+
       const token = session?.data?.session?.access_token;
 
       const headers = { 'Content-Type': 'application/json' };
@@ -145,7 +176,7 @@ const DocumentProcessor = (() => {
         headers,
         body: JSON.stringify({
           fileName: file.name,
-          mimeType: file.type || 'application/octet-stream',
+          mimeType: compact.type || file.type || 'application/octet-stream',
           base64Data,
           // Prompt estructurado — extracción con precisión objetivo 97%
           extractionSchema: {

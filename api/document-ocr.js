@@ -162,16 +162,21 @@ export default async function handler(req, res) {
   ].join('\n');
 
   try {
-    const upstream = await fetch(`${GEMINI_ENDPOINT}?key=${apiKey}`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        contents: [{ role: 'user', parts: [{ text: prompt }, { inline_data: { mime_type: mimeType, data: base64Data } }] }],
-        generationConfig: { temperature: 0.05, topP: 0.9, maxOutputTokens: 700 }
-      })
-    });
-    const data = await upstream.json().catch(() => ({}));
-    if (!upstream.ok || data?.error) return res.status(200).json(buildFallback('gemini_error', fileName));
+    // ── FIX gemini_error: bucle multi-modelo (espejo de gemini-proxy) ─────
+    const geminiBody = {
+      contents: [{ role: 'user', parts: [{ text: prompt }, { inline_data: { mime_type: mimeType, data: base64Data } }] }],
+      generationConfig: { temperature: 0.05, topP: 0.9, maxOutputTokens: 700 }
+    };
+    const MODELS = [...new Set([process.env.GEMINI_MODEL || 'gemini-2.0-flash', 'gemini-2.5-flash', 'gemini-2.0-flash', 'gemini-1.5-flash'])];
+    let upstream = null, data = null, usedModel = null;
+    for (const m of MODELS) {
+      upstream = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${m}:generateContent?key=${apiKey}`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(geminiBody)
+      });
+      data = await upstream.json().catch(() => ({}));
+      if (upstream.ok && !data?.error) { usedModel = m; break; }
+    }
+    if (!usedModel) return res.status(200).json(buildFallback('gemini_error', fileName));
     const jsonText = extractJSON(extractReplyText(data));
     if (!jsonText) return res.status(200).json(buildFallback('empty_response', fileName));
     let parsed;
@@ -216,7 +221,7 @@ export default async function handler(req, res) {
         } catch (e) { console.warn('[document-ocr] validación receptor:', e.message); }
       }
     }
-    return res.status(200).json({ ok: true, engine: ENGINE, is_fallback: false, document: doc, needsHumanReview: safetyFlag, model: GEMINI_MODEL });
+    return res.status(200).json({ ok: true, engine: ENGINE, is_fallback: false, document: doc, needsHumanReview: safetyFlag, model: usedModel });
   } catch (error) {
     return res.status(200).json(buildFallback(error?.message || 'network_error', fileName));
   }
