@@ -1,7 +1,10 @@
-// api/rfc-consult.js — v2.0 HARDENED (FIX T3)
-// La validación de RFC es información PÚBLICA: sin 401 anónimo, con rate-limit.
+// api/rfc-consult.js — v3.1 CERTIFICADO (Algoritmo oficial SAT — Anexo 3 CFF)
+// PF (13 chars): checkDigit(primeros 12) vs carácter 13
+// PM (12 chars): checkDigit(' ' + primeros 11) vs carácter 12
+// Marca de versión: toda respuesta incluye "engine":"rfc-v3.1"
 const SUPABASE_URL = process.env.SUPABASE_URL || '';
 const SUPABASE_SERVICE_KEY = process.env.SUPABASE_SERVICE_KEY || '';
+const ENGINE = 'rfc-v3.1';
 const ALLOWED_ORIGINS = [
   'https://aliado-resico.vercel.app','https://aliadoresico.com','https://www.aliadoresico.com',
   'http://localhost:3000','http://127.0.0.1:3000','http://localhost:5500','http://127.0.0.1:5500'
@@ -21,24 +24,41 @@ function setHeaders(req, res) {
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, x-demo-mode');
   res.setHeader('Vary', 'Origin');
   res.setHeader('Cache-Control', 'no-store');
+  res.setHeader('X-Content-Type-Options', 'nosniff');
 }
+// Tabla oficial de valores del dígito verificador
 const M = {'0':0,'1':1,'2':2,'3':3,'4':4,'5':5,'6':6,'7':7,'8':8,'9':9,'A':10,'B':11,'C':12,'D':13,'E':14,'F':15,'G':16,'H':17,'I':18,'J':19,'K':20,'L':21,'M':22,'N':23,'&':24,'O':25,'P':26,'Q':27,'R':28,'S':29,'T':30,'U':31,'V':32,'W':33,'X':34,'Y':35,'Z':36,' ':37,'Ñ':38};
-function validateRFC(rfc) {
-  const c = String(rfc || '').trim().toUpperCase();
-  if (!c) return { valid: false, reason: 'RFC vacío' };
-  if (c === 'XAXX010101000' || c === 'XEXX010101000') return { valid: true, isGeneric: true, reason: 'RFC genérico válido (público en general)' };
-  if (c.length !== 12 && c.length !== 13) return { valid: false, reason: `Longitud inválida (${c.length}). PF=13, PM=12.` };
-  const calc = c.length === 13 ? ' ' + c.substring(0, 12) : c.substring(0, 11);
+// base12 = exactamente 12 caracteres; pesos 13..2
+function checkDigit(base12) {
   let sum = 0;
-  for (let i = 0; i < 11; i++) {
-    const v = M[calc[i]];
-    if (v === undefined) return { valid: false, reason: `Carácter inválido: ${calc[i]}` };
+  for (let i = 0; i < 12; i++) {
+    const v = M[base12[i]];
+    if (v === undefined) return null;
     sum += v * (13 - i);
   }
   const rem = sum % 11;
-  const exp = rem === 0 ? '0' : rem === 1 ? 'A' : String(11 - rem);
-  if (exp !== c.charAt(c.length - 1)) return { valid: false, reason: `Dígito verificador incorrecto. Esperado: ${exp}, recibido: ${c.charAt(c.length - 1)}.` };
-  return { valid: true, isGeneric: false, reason: `RFC válido (${c.length === 13 ? 'Persona Física' : 'Persona Moral'}) con homoclave correcta` };
+  if (rem === 0) return '0';
+  const d = 11 - rem;
+  return d === 10 ? 'A' : String(d);
+}
+function validateRFC(rfc) {
+  const c = String(rfc || '').trim().toUpperCase();
+  if (!c) return { valid: false, reason: 'RFC vacío' };
+  if (c === 'XAXX010101000' || c === 'XEXX010101000')
+    return { valid: true, isGeneric: true, type: c === 'XEXX010101000' ? 'EXTRANJERO' : 'PUBLICO', reason: 'RFC genérico válido (público en general). No permite acreditamiento de IVA.' };
+  if (c.length === 13) {
+    const exp = checkDigit(c.substring(0, 12));
+    if (exp === null) return { valid: false, reason: 'Carácter inválido en el RFC.' };
+    if (exp !== c.charAt(12)) return { valid: false, reason: `Dígito verificador incorrecto. Esperado: ${exp}, recibido: ${c.charAt(12)}.` };
+    return { valid: true, isGeneric: false, type: 'PF', reason: 'RFC válido (Persona Física) con homoclave correcta.' };
+  }
+  if (c.length === 12) {
+    const exp = checkDigit(' ' + c.substring(0, 11));
+    if (exp === null) return { valid: false, reason: 'Carácter inválido en el RFC.' };
+    if (exp !== c.charAt(11)) return { valid: false, reason: `Dígito verificador incorrecto. Esperado: ${exp}, recibido: ${c.charAt(11)}.` };
+    return { valid: true, isGeneric: false, type: 'PM', reason: 'RFC válido (Persona Moral) con homoclave correcta.' };
+  }
+  return { valid: false, reason: `Longitud inválida (${c.length}). PF=13, PM=12.` };
 }
 async function checkEFOS(rfc) {
   if (!SUPABASE_URL || !SUPABASE_SERVICE_KEY) return { inList: false };
@@ -53,17 +73,27 @@ async function checkEFOS(rfc) {
 export default async function handler(req, res) {
   setHeaders(req, res);
   if (req.method === 'OPTIONS') return res.status(204).end();
-  if (req.method !== 'POST') return res.status(405).json({ ok: false, error: 'Method Not Allowed' });
+  if (req.method !== 'POST') return res.status(405).json({ ok: false, error: 'Method Not Allowed', engine: ENGINE });
   try {
     if (!rateLimit(String(req.headers['x-forwarded-for'] || 'anon')))
-      return res.status(429).json({ ok: false, error: 'Demasiadas consultas. Intenta en un minuto.' });
+      return res.status(429).json({ ok: false, error: 'Demasiadas consultas. Intenta en un minuto.', engine: ENGINE });
     const body = typeof req.body === 'string' ? JSON.parse(req.body || '{}') : (req.body || {});
     const rfc = String(body.rfc || '').trim().toUpperCase();
-    if (!rfc) return res.status(400).json({ ok: false, error: 'RFC requerido' });
+    if (!rfc) return res.status(400).json({ ok: false, error: 'RFC requerido', engine: ENGINE });
     const check = validateRFC(rfc);
-    if (!check.valid) return res.status(200).json({ ok: true, rfc, valid: false, riskLevel: 'HIGH', reason: check.reason, recommendation: '⚠️ RFC inválido. No emitas ni aceptes CFDI con este RFC.', legalReference: 'Art. 29-A CFF' });
+    if (!check.valid)
+      return res.status(200).json({ ok: true, engine: ENGINE, rfc, valid: false, riskLevel: 'HIGH', reason: check.reason, recommendation: '⚠️ RFC inválido. No emitas ni aceptes CFDI con este RFC.', legalReference: 'Art. 29-A CFF' });
     const efos = await checkEFOS(rfc);
-    if (efos.inList) return res.status(200).json({ ok: true, rfc, valid: true, inEFOSList: true, efosData: efos.data, riskLevel: 'CRITICAL', reason: check.reason, recommendation: `🚨 ALERTA EFOS (Art. 69-B CFF): ${efos.data.rfc_emisor || 'Emisor simulado'}. NO aceptes facturas de este RFC.`, legalReference: 'Art. 69-B CFF' });
-    return res.status(200).json({ ok: true, rfc, valid: true, inEFOSList: false, riskLevel: check.isGeneric ? 'INFO' : 'LOW', reason: check.reason, recommendation: check.isGeneric ? 'ℹ️ RFC genérico: solo para CFDI global. No permite acreditamiento de IVA.' : '✅ RFC válido y sin alertas EFOS. Puedes proceder con la operación.', legalReference: 'Art. 69-B CFF · RMF 2026' });
-  } catch { return res.status(200).json({ ok: false, error: 'Error interno al consultar RFC' }); }
+    if (efos.inList)
+      return res.status(200).json({ ok: true, engine: ENGINE, rfc, valid: true, inEFOSList: true, efosData: efos.data, riskLevel: 'CRITICAL', reason: check.reason, recommendation: `🚨 ALERTA EFOS (Art. 69-B CFF): ${efos.data?.rfc_emisor || 'Emisor simulado'}. NO aceptes facturas de este RFC.`, legalReference: 'Art. 69-B CFF' });
+    return res.status(200).json({
+      ok: true, engine: ENGINE, rfc, valid: true, inEFOSList: false,
+      riskLevel: check.isGeneric ? 'INFO' : 'LOW',
+      reason: check.reason,
+      recommendation: check.isGeneric
+        ? 'ℹ️ RFC genérico: solo para CFDI global. No permite acreditamiento de IVA.'
+        : `✅ RFC válido (${check.type === 'PF' ? 'Persona Física' : 'Persona Moral'}) y sin alertas EFOS. Puedes proceder con la operación.`,
+      legalReference: 'Art. 29-A CFF · Art. 69-B CFF · RMF 2026'
+    });
+  } catch { return res.status(200).json({ ok: false, error: 'Error interno al consultar RFC', engine: ENGINE }); }
 }
