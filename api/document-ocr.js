@@ -3,7 +3,7 @@
 // + debug completo en fallbacks. Safety Flag 85% (DOC02 TRD).
 import crypto from 'node:crypto';
 
-const ENGINE = 'ocr-v6.2';
+const ENGINE = 'ocr-v6.3';
 const ALLOWED_ORIGINS = [
   'https://aliado-resico.vercel.app','https://aliadoresico.com','https://www.aliadoresico.com',
   'http://localhost:3000','http://127.0.0.1:3000','http://localhost:5500','http://127.0.0.1:5500'
@@ -155,7 +155,7 @@ const PROMPT = [
 function geminiBody(mimeType, base64Data) {
   return {
     contents: [{ role: 'user', parts: [{ text: PROMPT }, { inline_data: { mime_type: mimeType, data: base64Data } }] }],
-    generationConfig: { temperature: 0.05, topP: 0.9, maxOutputTokens: 700 }
+    generationConfig: { temperature: 0.05, topP: 0.9, maxOutputTokens: 1024, responseMimeType: 'application/json' }
   };
 }
 // ── Cascada con reintento por parseo: AI Studio → Vertex ────────────────

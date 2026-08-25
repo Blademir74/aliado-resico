@@ -208,7 +208,14 @@ function compressImage(file, maxDim = 1280, quality = 0.8) {
 
        showProcessingIndicator(false); // FIX: destrabar botón en ruta de éxito
         const safety = computeSafetyFlag(payload.document.confidence);
-        if (output) output.innerHTML = renderResult(payload);
+   if (output) output.innerHTML = renderResult(payload);
+   if (payload.is_fallback && output) {
+     const tried = payload.debug?.tried?.[0];
+     output.innerHTML += `<div style="margin-top:8px;font-size:12px;color:#f59e0b;">
+       🔎 Diagnóstico: ${esc(payload.reason || 'sin datos')} · engine ${esc(payload.engine || '-')}
+       ${tried?.raw_preview ? ` · Gemini dijo: "${esc(String(tried.raw_preview).slice(0, 120))}…"` : ''}
+     </div>`;
+   }
 
       // Enriquecer el documento antes de guardarlo
       const extractedData = payload.document.extracted_data || {};
