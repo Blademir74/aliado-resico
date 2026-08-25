@@ -1,5 +1,5 @@
-// api/document-ocr.js — v4.0 CERTIFICADO
-// OCR fiscal real con Gemini Vision. Acepta sesión real O modo demo (rate-limited).
+// api/document-ocr.js — v5.0 CERTIFICADO
+// OCR fiscal real con Gemini Vision. Acepta sesión real O demo (rate-limited).
 // Cumplimiento: Art. 17-D CFF (e.firma) · Diferenciador ISR/IVA (DOC02 TRD).
 import crypto from 'node:crypto';
 
@@ -13,7 +13,7 @@ const SUPABASE_JWT_SECRET = process.env.SUPABASE_JWT_SECRET || '';
 const SUPABASE_URL = process.env.SUPABASE_URL || '';
 const SUPABASE_SERVICE_KEY = process.env.SUPABASE_SERVICE_KEY || '';
 
-// ── Rate limit (demo: 10 req/min por IP; autenticado: 30) ────────────────
+// ── Rate limit (demo: 10/min por IP; autenticado: 30/min) ───────────────
 const _rl = new Map();
 function rateLimit(key, max) {
   const now = Date.now();
@@ -42,8 +42,11 @@ async function validateSupabaseJWT(authHeader) {
   } catch { return null; }
 }
 
-// ── Magic number: MIME real desde bytes, no extensión ────────────────────
-const MAGIC_SIGNATURES = { 'image/jpeg': ['FFD8FF'], 'image/png': ['89504E47'], 'image/webp': ['52494646'], 'application/pdf': ['25504446'] };
+// ── Magic number: MIME real desde bytes, no extensión ───────────────────
+const MAGIC_SIGNATURES = {
+  'image/jpeg': ['FFD8FF'], 'image/png': ['89504E47'],
+  'image/webp': ['52494646'], 'application/pdf': ['25504446']
+};
 function validateMagicNumber(base64Data, claimedMime) {
   if (!base64Data || typeof base64Data !== 'string') return { valid: false, reason: 'Datos vacíos' };
   try {
@@ -58,32 +61,36 @@ function validateMagicNumber(base64Data, claimedMime) {
   } catch (e) { return { valid: false, reason: 'Error al validar: ' + e.message }; }
 }
 
+function resolveOrigin(origin = '') {
+  return ALLOWED_ORIGINS.includes(origin) ? origin : ALLOWED_ORIGINS[0];
+}
 function setHeaders(req, res) {
-  const origin = req.headers.origin || '';
-  res.setHeader('Access-Control-Allow-Origin', ALLOWED_ORIGINS.includes(origin) ? origin : ALLOWED_ORIGINS[0]);
+  res.setHeader('Access-Control-Allow-Origin', resolveOrigin(req.headers.origin || ''));
   res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, x-demo-mode');
   res.setHeader('Vary', 'Origin');
-  res.setHeader('Cache-Control', 'no-store');
+  res.setHeader('Content-Type', 'application/json; charset=utf-8');
+  res.setHeader('Cache-Control', 'no-store, max-age=0');
   res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
 }
 function parseBody(req) {
   if (!req?.body) return {};
   if (typeof req.body === 'object') return req.body;
   try { return JSON.parse(req.body); } catch { return {}; }
 }
-function normalizeDocType(v) {
-  const t = String(v || '').trim().toUpperCase();
-  return new Set(['CFDI','TICKET','CONSTANCIA','OPINION','EFIRMA','OTRO']).has(t) ? t : 'OTRO';
+function normalizeDocType(value) {
+  const v = String(value || '').trim().toUpperCase();
+  return new Set(['CFDI','TICKET','CONSTANCIA','OPINION','EFIRMA','OTRO']).has(v) ? v : 'OTRO';
 }
-// ── FIX CRÍTICO: normaliza llaves (Gemini a veces devuelve espacios) ─────
+// ── FIX CRÍTICO: normaliza llaves (Gemini a veces devuelve espacios) ────
 function normalizeKeys(obj) {
   const out = {};
   for (const [k, v] of Object.entries(obj || {})) out[k.trim()] = v;
   return out;
 }
 function extractReplyText(data) {
-  return (data?.candidates?.[0]?.content?.parts?.map(p => p?.text || '').join('\n').trim()) || '';
+  return data?.candidates?.[0]?.content?.parts?.map(p => p?.text || '').join('\n').trim() || '';
 }
 function extractJSON(text) {
   if (!text) return null;
@@ -123,13 +130,13 @@ export default async function handler(req, res) {
   const body = parseBody(req);
   const { fileName, mimeType, base64Data } = body;
   const magicCheck = validateMagicNumber(base64Data, mimeType);
-  if (!magicCheck.valid) return res.status(400).json({ ok: false, error: `Archivo inválido: ${magicCheck.reason}`, hint: 'Sube JPG/PNG/WEBP o PDF válido.' });
+  if (!magicCheck.valid) return res.status(400).json({ ok: false, error: `Archivo inválido: ${magicCheck.reason}`, hint: 'Sube una imagen (JPG/PNG/WEBP) o PDF válido.' });
 
   const apiKey = process.env.GEMINI_API_KEY || '';
   if (!apiKey) return res.status(200).json(buildFallback('missing_api_key', fileName || ''));
   if (!fileName || !mimeType || !base64Data) return res.status(400).json({ ok: false, error: 'fileName, mimeType y base64Data son requeridos.' });
 
-  // ── PROMPT con llaves LIMPIAS (sin espacios) ───────────────────────────
+  // ── PROMPT con llaves LIMPIAS (sin espacios) ──────────────────────────
   const prompt = [
     'Eres un extractor fiscal mexicano especializado en RESICO 2026.',
     'Analiza el documento y responde SOLO JSON válido, sin markdown.',
@@ -150,7 +157,7 @@ export default async function handler(req, res) {
     '  "summary": "breve",',
     '  "tax_usefulness": "IVA|ISR|AMBOS|NINGUNO"',
     '}',
-    'Regla fiscal: ISR RESICO no deduce gastos; IVA solo acreditable con CFDI válido y gasto indispensable.'
+    'Regla fiscal pedagógica: ISR RESICO no deduce gastos; IVA solo acreditable con CFDI válido y gasto indispensable.'
   ].join('\n');
 
   try {
@@ -200,8 +207,10 @@ export default async function handler(req, res) {
           const userRfc = Array.isArray(profiles) && profiles[0]?.rfc ? profiles[0].rfc.toUpperCase().trim() : null;
           if (userRfc && rec !== userRfc) {
             doc.extracted_data.rfc_receptor_mismatch = true;
-            doc.extracted_data.warning = `⚠️ El RFC receptor (${rec}) no coincide con tu RFC (${userRfc}). NO acreditable para IVA.`;
-            doc.safety_flag = true; doc.needs_review = true; doc.validation_status = 'RFC_receptor_no_coincide';
+            doc.extracted_data.rfc_receptor_expected = userRfc;
+            doc.safety_flag = true; doc.needs_review = true;
+            doc.validation_status = 'RFC_receptor_no_coincide';
+            doc.extracted_data.warning = `⚠️ El RFC receptor (${rec}) no coincide con tu RFC (${userRfc}). Este documento NO es acreditable para IVA.`;
           }
         } catch (e) { console.warn('[document-ocr] validación receptor:', e.message); }
       }

@@ -131,7 +131,9 @@ button { cursor: pointer; border: none; }
 .auth-logo h1 {
   font-size: 1.65rem; font-weight: 700;
   background: linear-gradient(135deg, #f1f5f9 0%, #10b981 100%);
-  -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
   margin-bottom: 4px;
 }
 .auth-logo p { color: var(--text-secondary); font-size: .84rem; }
