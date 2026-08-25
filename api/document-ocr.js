@@ -1,10 +1,9 @@
-// api/document-ocr.js — v6.0 CERTIFICADO
-// OCR fiscal real: Vertex AI → AI Studio (multi-modelo) → fallback pedagógico.
-// Acepta sesión real O demo (rate-limited). Safety Flag 85% (DOC02 TRD).
-// Art. 17-D CFF (e.firma) · Diferenciador ISR/IVA (DOC02 TRD).
+// api/document-ocr.js — v6.1 CERTIFICADO
+// FIX: Manejo robusto de GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY (múltiples formatos)
+// Cascada: AI Studio (simple) → Vertex (service account) → fallback pedagógico
 import crypto from 'node:crypto';
 
-const ENGINE = 'ocr-v6.0';
+const ENGINE = 'ocr-v6.1';
 const ALLOWED_ORIGINS = [
   'https://aliado-resico.vercel.app','https://aliadoresico.com','https://www.aliadoresico.com',
   'http://localhost:3000','http://127.0.0.1:3000','http://localhost:5500','http://127.0.0.1:5500'
@@ -17,7 +16,6 @@ const VERTEX_LOCATION = process.env.VERTEX_LOCATION || 'us-central1';
 const VERTEX_PROJECT_ID = process.env.VERTEX_PROJECT_ID || process.env.GOOGLE_CLOUD_PROJECT || '';
 const AI_MODELS = ['gemini-2.5-flash', 'gemini-2.0-flash', 'gemini-1.5-flash'];
 
-// ── Rate limit (demo 10/min IP; autenticado 30/min) ─────────────────────
 const _rl = new Map();
 function rateLimit(key, max) {
   const now = Date.now();
@@ -44,7 +42,6 @@ async function validateSupabaseJWT(authHeader) {
     return { uid: payload.sub || null, email: payload.email || null };
   } catch { return null; }
 }
-// ── Magic number: MIME real desde bytes ─────────────────────────────────
 const MAGIC_SIGNATURES = { 'image/jpeg': ['FFD8FF'], 'image/png': ['89504E47'], 'image/webp': ['52494646'], 'application/pdf': ['25504446'] };
 function validateMagicNumber(base64Data, claimedMime) {
   if (!base64Data || typeof base64Data !== 'string') return { valid: false, reason: 'Datos vacíos' };
@@ -90,9 +87,9 @@ function extractJSON(text) {
   if (s === -1 || e <= s) return null;
   return cleaned.slice(s, e + 1);
 }
-function buildFallback(reason, fileName = '') {
+function buildFallback(reason, fileName = '', debug = {}) {
   return {
-    ok: true, is_fallback: true, reason, engine: ENGINE,
+    ok: true, is_fallback: true, reason, engine: ENGINE, debug,
     document: {
       file_name: fileName || 'documento', doc_type: 'OTRO', document_type: 'OTRO',
       confidence: 0.5, file_url: `local:${fileName || 'documento'}`,
@@ -104,10 +101,28 @@ function buildFallback(reason, fileName = '') {
     needsHumanReview: true
   };
 }
-// ── Vertex AI: Service Account → token (cache 55 min) ───────────────────
-function base64url(input) {
-  return Buffer.from(input).toString('base64').replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/g, '');
+
+// ── FIX v6.1: Normalización robusta de clave privada ─────────────────────
+function normalizePrivateKey(raw) {
+  if (!raw) return null;
+  let key = String(raw);
+  // 1. Convertir \n literales a saltos de línea reales (Vercel env vars)
+  key = key.replace(/\\n/g, '\n').replace(/\\\\n/g, '\n');
+  // 2. Si no tiene headers PEM, agregarlos (formato PKCS#8)
+  if (!key.includes('-----BEGIN')) {
+    key = `-----BEGIN PRIVATE KEY-----\n${key.trim()}\n-----END PRIVATE KEY-----`;
+  }
+  // 3. Normalizar saltos de línea (Windows \r\n → \n)
+  key = key.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+  // 4. Asegurar que cada línea tenga longitud correcta (64 chars para PEM)
+  const lines = key.split('\n');
+  const header = lines[0];
+  const footer = lines[lines.length - 1];
+  const body = lines.slice(1, -1).join('').replace(/\s/g, '');
+  const formattedBody = body.match(/.{1,64}/g)?.join('\n') || body;
+  return `${header}\n${formattedBody}\n${footer}`;
 }
+
 const _tok = { token: null, exp: 0 };
 function canUseVertex() {
   return Boolean(VERTEX_PROJECT_ID && process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL && process.env.GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY);
@@ -115,21 +130,28 @@ function canUseVertex() {
 async function googleToken() {
   if (_tok.token && _tok.exp > Date.now() + 60000) return _tok.token;
   const email = process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL;
-  const key = (process.env.GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY || '').replace(/\\n/g, '\n');
+  const rawKey = process.env.GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY;
+  const key = normalizePrivateKey(rawKey);
+  if (!key) throw new Error('missing_or_invalid_private_key');
   const now = Math.floor(Date.now() / 1000);
-  const head = base64url(JSON.stringify({ alg: 'RS256', typ: 'JWT' }));
-  const claims = base64url(JSON.stringify({ iss: email, scope: 'https://www.googleapis.com/auth/cloud-platform', aud: 'https://oauth2.googleapis.com/token', iat: now, exp: now + 3600 }));
-  const sig = crypto.createSign('RSA-SHA256').update(`${head}.${claims}`).sign(key, 'base64');
+  const head = Buffer.from(JSON.stringify({ alg: 'RS256', typ: 'JWT' })).toString('base64url');
+  const claims = Buffer.from(JSON.stringify({ iss: email, scope: 'https://www.googleapis.com/auth/cloud-platform', aud: 'https://oauth2.googleapis.com/token', iat: now, exp: now + 3600 })).toString('base64url');
+  let sig;
+  try {
+    sig = crypto.createSign('RSA-SHA256').update(`${head}.${claims}`).sign(key, 'base64url');
+  } catch (signErr) {
+    throw new Error(`sign_error: ${signErr.message}`);
+  }
   const r = await fetch('https://oauth2.googleapis.com/token', {
     method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
     body: `grant_type=urn:ietf:params:oauth:grant-type:jwt-bearer&assertion=${head}.${claims}.${sig}`
   });
   const d = await r.json().catch(() => ({}));
-  if (!r.ok || !d.access_token) throw new Error('oauth_token_error');
+  if (!r.ok || !d.access_token) throw new Error(`oauth_token_error: ${d.error || r.status}`);
   _tok = { token: d.access_token, exp: Date.now() + 55 * 60 * 1000 };
   return d.access_token;
 }
-// ── Prompt con llaves LIMPIAS (sin espacios) ────────────────────────────
+
 const PROMPT = [
   'Eres un extractor fiscal mexicano especializado en RESICO 2026.',
   'Analiza el documento y responde SOLO JSON válido, sin markdown.',
@@ -166,7 +188,9 @@ async function callVertex(body) {
   return { data: await r.json(), model: `vertex:${VERTEX_MODEL}` };
 }
 async function callAIStudio(model, body) {
-  const r = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${process.env.GEMINI_API_KEY}`, {
+  const apiKey = process.env.GEMINI_API_KEY;
+  if (!apiKey) throw new Error('missing_gemini_api_key');
+  const r = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`, {
     method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body)
   });
   if (!r.ok) throw new Error(`AIStudio HTTP ${r.status}`);
@@ -178,7 +202,6 @@ export default async function handler(req, res) {
   if (req.method === 'OPTIONS') return res.status(204).end();
   if (req.method !== 'POST') return res.status(405).json({ ok: false, error: 'Method Not Allowed', engine: ENGINE });
 
-  // AUTH: sesión real O demo con rate-limit
   const isDemo = req.headers['x-demo-mode'] === 'true';
   const user = await validateSupabaseJWT(req.headers.authorization);
   if (!user && !isDemo) return res.status(401).json({ ok: false, error: 'No autorizado. Se requiere sesión activa o modo demo.', engine: ENGINE });
@@ -190,26 +213,27 @@ export default async function handler(req, res) {
   const { fileName, mimeType, base64Data } = body;
   const magicCheck = validateMagicNumber(base64Data, mimeType);
   if (!magicCheck.valid) return res.status(400).json({ ok: false, error: `Archivo inválido: ${magicCheck.reason}`, engine: ENGINE });
-  if (!canUseVertex() && !process.env.GEMINI_API_KEY) return res.status(200).json(buildFallback('missing_credentials', fileName || ''));
   if (!fileName || !mimeType || !base64Data) return res.status(400).json({ ok: false, error: 'fileName, mimeType y base64Data requeridos.', engine: ENGINE });
 
   const gBody = geminiBody(mimeType, base64Data);
   const errors = [];
   let result = null;
-  if (canUseVertex()) {
-    try { result = await callVertex(gBody); } catch (e) { errors.push('vertex: ' + e.message); }
-  }
-  if (!result && process.env.GEMINI_API_KEY) {
+
+  // ── Cascada v6.1: AI Studio primero (más simple) → Vertex (service account) ──
+  if (process.env.GEMINI_API_KEY) {
     for (const m of AI_MODELS) {
-      try { result = await callAIStudio(m, gBody); break; } catch (e) { errors.push(m + ': ' + e.message); }
+      try { result = await callAIStudio(m, gBody); break; } catch (e) { errors.push(`${m}: ${e.message}`); }
     }
   }
-  if (!result) return res.status(200).json({ ...buildFallback('gemini_error', fileName || ''), debug: { providers: errors } });
+  if (!result && canUseVertex()) {
+    try { result = await callVertex(gBody); } catch (e) { errors.push(`vertex: ${e.message}`); }
+  }
+  if (!result) return res.status(200).json(buildFallback('all_providers_failed', fileName || '', { providers: errors, gemini_key_configured: !!process.env.GEMINI_API_KEY, vertex_configured: canUseVertex() }));
 
   const jsonText = extractJSON(extractReplyText(result.data));
-  if (!jsonText) return res.status(200).json({ ...buildFallback('empty_response', fileName || ''), debug: { providers: errors } });
+  if (!jsonText) return res.status(200).json(buildFallback('empty_response', fileName || '', { providers: errors }));
   let parsed;
-  try { parsed = normalizeKeys(JSON.parse(jsonText)); } catch { return res.status(200).json({ ...buildFallback('invalid_json', fileName || ''), debug: { providers: errors } }); }
+  try { parsed = normalizeKeys(JSON.parse(jsonText)); } catch { return res.status(200).json(buildFallback('invalid_json', fileName || '', { providers: errors })); }
 
   const docType = normalizeDocType(parsed.document_type);
   const confidence = Number(parsed.confidence || 0);
@@ -229,7 +253,6 @@ export default async function handler(req, res) {
     pedagogical_note: 'ISR RESICO: sin deducciones. IVA: requiere CFDI válido y gasto indispensable para acreditamiento.'
   };
 
-  // Validación de RFC receptor contra user_profiles (solo sesión real)
   if (user && SUPABASE_URL && SUPABASE_SERVICE_KEY) {
     const rec = String(doc.extracted_data.rfc_receptor || '').toUpperCase().trim();
     if (rec && rec !== 'XAXX010101000' && rec !== 'XEXX010101000') {
