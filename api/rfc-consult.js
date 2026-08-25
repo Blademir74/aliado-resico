@@ -1,10 +1,9 @@
-// api/rfc-consult.js — v3.1 CERTIFICADO (Algoritmo oficial SAT — Anexo 3 CFF)
-// PF (13 chars): checkDigit(primeros 12) vs carácter 13
-// PM (12 chars): checkDigit(' ' + primeros 11) vs carácter 12
-// Marca de versión: toda respuesta incluye "engine":"rfc-v3.1"
+// api/rfc-consult.js — v3.2 CERTIFICADO (Algoritmo oficial SAT — Anexo 3 CFF)
+// PF: base = primeros 12 chars · PM: base = ' ' + primeros 11 chars · pesos 13..2
+// TODA respuesta incluye "engine":"rfc-v3.2" para certificar el despliegue.
 const SUPABASE_URL = process.env.SUPABASE_URL || '';
 const SUPABASE_SERVICE_KEY = process.env.SUPABASE_SERVICE_KEY || '';
-const ENGINE = 'rfc-v3.1';
+const ENGINE = 'rfc-v3.2';
 const ALLOWED_ORIGINS = [
   'https://aliado-resico.vercel.app','https://aliadoresico.com','https://www.aliadoresico.com',
   'http://localhost:3000','http://127.0.0.1:3000','http://localhost:5500','http://127.0.0.1:5500'
@@ -26,9 +25,7 @@ function setHeaders(req, res) {
   res.setHeader('Cache-Control', 'no-store');
   res.setHeader('X-Content-Type-Options', 'nosniff');
 }
-// Tabla oficial de valores del dígito verificador
 const M = {'0':0,'1':1,'2':2,'3':3,'4':4,'5':5,'6':6,'7':7,'8':8,'9':9,'A':10,'B':11,'C':12,'D':13,'E':14,'F':15,'G':16,'H':17,'I':18,'J':19,'K':20,'L':21,'M':22,'N':23,'&':24,'O':25,'P':26,'Q':27,'R':28,'S':29,'T':30,'U':31,'V':32,'W':33,'X':34,'Y':35,'Z':36,' ':37,'Ñ':38};
-// base12 = exactamente 12 caracteres; pesos 13..2
 function checkDigit(base12) {
   let sum = 0;
   for (let i = 0; i < 12; i++) {
