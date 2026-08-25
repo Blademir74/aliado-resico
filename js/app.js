@@ -652,11 +652,27 @@ const App = (() => {
   }
 
   function initRiskAlertListener() {
-    window.Store?.on?.('riskThresholdCrossed', (payload) => {
-      console.info('[App] Umbral cruzado — payload listo para n8n:', payload);
-      window.__lastWhatsAppAlertPayload = payload;
-    });
-  }
+  let lastSent = 0;
+  window.Store?.on?.('riskThresholdCrossed', async (payload) => {
+    console.info('[App] Umbral cruzado — nivel:', payload.new_level);
+    window.__lastWhatsAppAlertPayload = payload;
+    const now = Date.now();
+    if (now - lastSent < 60000) return; // debounce 60s (anti-ráfaga)
+    lastSent = now;
+    try {
+      const session = await window.APP_STATE?.supabase?.auth?.getSession?.();
+      const token = session?.data?.session?.access_token || '';
+      const headers = { 'Content-Type': 'application/json' };
+      if (token) headers.Authorization = `Bearer ${token}`;
+      if (window.APP_STATE?.isDemo) headers['x-demo-mode'] = 'true';
+      const res = await fetch('/api/n8n-notify-proxy', { method: 'POST', headers, body: JSON.stringify(payload) });
+      const data = await res.json().catch(() => ({}));
+      console.info('[App] Alerta WhatsApp:', data?.forwarded ? '✅ enviada a n8n' : `⏸ diferida (${data?.reason || res.status})`);
+    } catch (e) {
+      console.warn('[App] Alerta WhatsApp no enviada:', e?.message || e);
+    }
+  });
+}
 
   async function initCore() {
     await window.AppConfig?.loadServerConfig?.();

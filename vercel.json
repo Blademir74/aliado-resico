@@ -1,18 +1,45 @@
 {
   "version": 2,
-  "rewrites": [{ "source": "/((?!api/|js/|styles\\.css|logo\\.png|favicon\\.ico|foto\\.png).*)", "destination": "/index.html" }],
+  "rewrites": [
+    {
+      "source": "/((?!api/|js/|styles\\.css|logo\\.png|favicon\\.ico|foto\\.png).*)",
+      "destination": "/index.html"
+    }
+  ],
   "headers": [
-    { "source": "/(.*)", "headers": [
-      { "key": "X-Content-Type-Options", "value": "nosniff" },
-      { "key": "X-Frame-Options", "value": "DENY" },
-      { "key": "Strict-Transport-Security", "value": "max-age=31536000; includeSubDomains; preload" },
-      { "key": "Content-Security-Policy", "value": "default-src 'self'; script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://unpkg.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: blob: https:; connect-src 'self' https://*.supabase.co wss://*.supabase.co; frame-ancestors 'none';" }
-    ]}
+    {
+      "source": "/(.*)",
+      "headers": [
+        { "key": "X-Content-Type-Options", "value": "nosniff" },
+        { "key": "X-Frame-Options", "value": "DENY" },
+        { "key": "Referrer-Policy", "value": "strict-origin-when-cross-origin" },
+        { "key": "Permissions-Policy", "value": "camera=(), microphone=(), geolocation=()" },
+        { "key": "Strict-Transport-Security", "value": "max-age=31536000; includeSubDomains" }
+      ]
+    },
+    {
+      "source": "/(logo.png|favicon.ico|foto.png)",
+      "headers": [ { "key": "Cache-Control", "value": "public, max-age=604800, immutable" } ]
+    },
+    {
+      "source": "/js/(.*)",
+      "headers": [ { "key": "Cache-Control", "value": "public, max-age=3600" } ]
+    },
+    {
+      "source": "/styles.css",
+      "headers": [ { "key": "Cache-Control", "value": "public, max-age=3600" } ]
+    },
+    {
+      "source": "/api/(.*)",
+      "headers": [ { "key": "Cache-Control", "value": "no-store" } ]
+    }
   ],
   "functions": {
     "api/gemini-proxy.js": { "maxDuration": 30, "memory": 1024 },
     "api/document-ocr.js": { "maxDuration": 30, "memory": 1024 },
     "api/alegra-proxy.js": { "maxDuration": 30, "memory": 512 },
-    "api/rfc-consult.js": { "maxDuration": 15, "memory": 512 }
+    "api/rfc-consult.js": { "maxDuration": 15, "memory": 512 },
+    "api/n8n-notify-proxy.js": { "maxDuration": 15, "memory": 512 },
+    "api/config.js": { "maxDuration": 5, "memory": 256 }
   }
 }
