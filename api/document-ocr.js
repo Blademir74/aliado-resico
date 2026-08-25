@@ -1,8 +1,10 @@
 // api/document-ocr.js — v5.0 CERTIFICADO
 // OCR fiscal real con Gemini Vision. Acepta sesión real O demo (rate-limited).
+// TODA respuesta incluye "engine":"ocr-v5.0" para certificar despliegue.
 // Cumplimiento: Art. 17-D CFF (e.firma) · Diferenciador ISR/IVA (DOC02 TRD).
 import crypto from 'node:crypto';
 
+const ENGINE = 'ocr-v5.0';
 const ALLOWED_ORIGINS = [
   'https://aliado-resico.vercel.app','https://aliadoresico.com','https://www.aliadoresico.com',
   'http://localhost:3000','http://127.0.0.1:3000','http://localhost:5500','http://127.0.0.1:5500'
@@ -83,7 +85,6 @@ function normalizeDocType(value) {
   const v = String(value || '').trim().toUpperCase();
   return new Set(['CFDI','TICKET','CONSTANCIA','OPINION','EFIRMA','OTRO']).has(v) ? v : 'OTRO';
 }
-// ── FIX CRÍTICO: normaliza llaves (Gemini a veces devuelve espacios) ────
 function normalizeKeys(obj) {
   const out = {};
   for (const [k, v] of Object.entries(obj || {})) out[k.trim()] = v;
@@ -101,7 +102,7 @@ function extractJSON(text) {
 }
 function buildFallback(reason, fileName = '') {
   return {
-    ok: true, is_fallback: true, reason,
+    ok: true, is_fallback: true, reason, engine: ENGINE,
     document: {
       file_name: fileName || 'documento', doc_type: 'OTRO', document_type: 'OTRO',
       confidence: 0.5, file_url: `local:${fileName || 'documento'}`,
@@ -117,24 +118,24 @@ function buildFallback(reason, fileName = '') {
 export default async function handler(req, res) {
   setHeaders(req, res);
   if (req.method === 'OPTIONS') return res.status(204).end();
-  if (req.method !== 'POST') return res.status(405).json({ ok: false, error: 'Method Not Allowed' });
+  if (req.method !== 'POST') return res.status(405).json({ ok: false, error: 'Method Not Allowed', engine: ENGINE });
 
   // ── AUTH: sesión real O demo con rate-limit estricto ──────────────────
   const isDemo = req.headers['x-demo-mode'] === 'true';
   const user = await validateSupabaseJWT(req.headers.authorization);
-  if (!user && !isDemo) return res.status(401).json({ ok: false, error: 'No autorizado. Se requiere sesión activa de Supabase.' });
+  if (!user && !isDemo) return res.status(401).json({ ok: false, error: 'No autorizado. Se requiere sesión activa de Supabase o modo demo.', engine: ENGINE });
   const ip = String(req.headers['x-forwarded-for'] || 'local');
-  if (!user && !rateLimit(ip, 10)) return res.status(429).json({ ok: false, error: 'Límite de OCR en demo alcanzado. Inicia sesión para continuar.' });
-  if (user && !rateLimit(user.uid, 30)) return res.status(429).json({ ok: false, error: 'Límite de procesamiento alcanzado. Intenta en un minuto.' });
+  if (!user && !rateLimit(ip, 10)) return res.status(429).json({ ok: false, error: 'Límite de OCR en demo alcanzado. Inicia sesión para continuar.', engine: ENGINE });
+  if (user && !rateLimit(user.uid, 30)) return res.status(429).json({ ok: false, error: 'Límite de procesamiento alcanzado. Intenta en un minuto.', engine: ENGINE });
 
   const body = parseBody(req);
   const { fileName, mimeType, base64Data } = body;
   const magicCheck = validateMagicNumber(base64Data, mimeType);
-  if (!magicCheck.valid) return res.status(400).json({ ok: false, error: `Archivo inválido: ${magicCheck.reason}`, hint: 'Sube una imagen (JPG/PNG/WEBP) o PDF válido.' });
+  if (!magicCheck.valid) return res.status(400).json({ ok: false, error: `Archivo inválido: ${magicCheck.reason}`, hint: 'Sube una imagen (JPG/PNG/WEBP) o PDF válido.', engine: ENGINE });
 
   const apiKey = process.env.GEMINI_API_KEY || '';
   if (!apiKey) return res.status(200).json(buildFallback('missing_api_key', fileName || ''));
-  if (!fileName || !mimeType || !base64Data) return res.status(400).json({ ok: false, error: 'fileName, mimeType y base64Data son requeridos.' });
+  if (!fileName || !mimeType || !base64Data) return res.status(400).json({ ok: false, error: 'fileName, mimeType y base64Data son requeridos.', engine: ENGINE });
 
   // ── PROMPT con llaves LIMPIAS (sin espacios) ──────────────────────────
   const prompt = [
@@ -210,12 +211,12 @@ export default async function handler(req, res) {
             doc.extracted_data.rfc_receptor_expected = userRfc;
             doc.safety_flag = true; doc.needs_review = true;
             doc.validation_status = 'RFC_receptor_no_coincide';
-            doc.extracted_data.warning = `⚠️ El RFC receptor (${rec}) no coincide con tu RFC (${userRfc}). Este documento NO es acreditable para IVA.`;
+            doc.extracted_data.warning = `⚠️ El RFC receptor (${rec}) no coincide con tu RFC (${userRfc}). NO acreditable para IVA.`;
           }
         } catch (e) { console.warn('[document-ocr] validación receptor:', e.message); }
       }
     }
-    return res.status(200).json({ ok: true, is_fallback: false, document: doc, needsHumanReview: safetyFlag, model: GEMINI_MODEL });
+    return res.status(200).json({ ok: true, engine: ENGINE, is_fallback: false, document: doc, needsHumanReview: safetyFlag, model: GEMINI_MODEL });
   } catch (error) {
     return res.status(200).json(buildFallback(error?.message || 'network_error', fileName));
   }
