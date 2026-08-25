@@ -143,8 +143,8 @@ const IntentClassifier = (() => {
     } catch (_) { /* silent — el proxy usa fallback si no hay token en dev */ }
 
     const headers = { 'Content-Type': 'application/json' };
-    if (supabaseToken) headers['Authorization'] = `Bearer ${supabaseToken}`;
-    if (window.APP_STATE?.isDemo) headers['x-demo-mode'] = 'true'; // FIX D4
+      if (supabaseToken) headers['Authorization'] = `Bearer ${supabaseToken}`;
+      if (window.APP_STATE?.isDemo) headers['x-demo-mode'] = 'true'; // [PASO 1] demo sin 401
 
     const response = await fetch('/api/gemini-proxy', {
       method: 'POST',

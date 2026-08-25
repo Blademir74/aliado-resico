@@ -681,7 +681,10 @@ const App = (() => {
     if (booted) return;
     booted = true;
     initTheme(); initNavigation(); initRFC(); initClassifier(); initCarpetaFiscalUploads();
-    setWizardStep(1); resetWizard();
+    setWizardStep(1); resetWizard(); 
+    window.wizardNext = wizardNext;
+    window.resetWizard = resetWizard;
+    window.saveDiagnostic = saveDiagnostic;
     window.DocumentsManager?.init?.();
     window.DocumentProcessor?.init?.();
     window.Invoicing?.init?.();
@@ -690,6 +693,7 @@ const App = (() => {
     window.Store?.on?.('documentAdded', syncAndRender);
     window.Store?.on?.('conversationAdded', syncAndRender);
     window.Store?.on?.('carpetaUpdated', renderCarpetaFiscal);
+    
     syncAndRender();
     initRiskAlertListener();
     try { window.AuthManager?.init?.(); } catch (err) { console.error('[App] ⚠️ AuthManager.init() falló:', err?.message || err); }
