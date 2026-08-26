@@ -647,6 +647,22 @@ function wizardNext() {
     ['res-income','res-salarios','res-intereses','res-anual','res-multa','res-buzon','res-risk','res-pedagogia','res-notas','res-recomendacion'].forEach(id => { const el = byId(id); if (el) el.textContent = '--'; });
     hideWizardMessage();
   }
+
+  // ── FIX W-7: confirmación visible EN el Dashboard (no se pierde al navegar) ──
+function showDashboardToast(text) {
+  let toast = byId('dashboard-toast');
+  if (!toast) {
+    toast = document.createElement('div');
+    toast.id = 'dashboard-toast';
+    toast.style.cssText = 'position:fixed;bottom:24px;left:50%;transform:translateX(-50%);z-index:99999;background:#065f46;color:#d1fae5;border:1px solid #10b981;padding:12px 20px;border-radius:10px;font-size:14px;font-weight:600;box-shadow:0 8px 24px rgba(0,0,0,.4);max-width:92vw;text-align:center;';
+    document.body.appendChild(toast);
+  }
+  toast.textContent = text;
+  toast.hidden = false;
+  clearTimeout(toast.__t);
+  toast.__t = setTimeout(() => { toast.hidden = true; }, 6000);
+}
+
   function saveDiagnostic() {
   console.info('[Wizard] saveDiagnostic() iniciado');
   const d = window.Store?.getState?.()?.diagnostic;
@@ -661,11 +677,18 @@ function wizardNext() {
     alertLevel: d.riesgoBuzon ? 'danger' : 'safe',
     lastAuditDate: new Date().toISOString()
   });
-  syncAndRender();
+   syncAndRender();
   showWizardMessage('✅ Diagnóstico guardado. Abriendo tu Dashboard…', 'success');
   console.info('[Wizard] saveDiagnostic() finalizado — income:', d.income, '· buzón activo:', d.buzonActivo);
-  // ── FIX W-6: evidencia visible (DOC04 AppFlow: guardar → abrir Dashboard) ──
-  setTimeout(() => navigateTo('dashboard'), 600);
+  // ── FIX W-7: 1.6s para leer el banner + toast de confirmación en Dashboard ──
+  setTimeout(() => {
+    navigateTo('dashboard');
+    showDashboardToast(
+      `✅ Diagnóstico guardado: ${money(d.income)} aplicados al Monitor · ` +
+      (d.anualObligatoria ? 'Declaración anual OBLIGATORIA (Art. 113-F LISR)' : 'Sin obligación de anual') +
+      (d.riesgoBuzon ? ' · ⚠️ Buzón inactivo (Art. 17-K CFF)' : '')
+    );
+  }, 1600);
 }
 
   // ── Carpeta Fiscal uploads ─────────────────────────────────

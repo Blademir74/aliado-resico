@@ -148,10 +148,17 @@ const AuthManager = (() => {
     window.APP_STATE.isDemo = true; window.APP_STATE.currentUser = null; window.APP_STATE.authInitialized = true;
     _showDemoBanner();
     window.MockData?.load?.(window.Store);
-    try {
-      window.Store?.updateIncome?.(1420000);
-      window.Store?.updateSaludFiscal?.({ buzonTributarioActivo: true, eFirmaVigente: true, eFirmaExpiry: '2027-12-31', alertLevel: 'safe', lastAuditDate: new Date().toISOString() });
-    } catch (e) { console.warn('[Auth] demo bootstrap:', e?.message); }
+    // ── FIX W-7: el demo respeta los datos que el usuario ya guardó ──
+try {
+  const st = window.Store?.getState?.() || {};
+  const tieneDatosPropios = !!st.diagnostic?.completedAt || Number(st.incomeYTD || 0) > 0;
+  if (!tieneDatosPropios) {
+    window.Store?.updateIncome?.(1420000);
+    window.Store?.updateSaludFiscal?.({ buzonTributarioActivo: true, eFirmaVigente: true, eFirmaExpiry: '2027-12-31', alertLevel: 'safe', lastAuditDate: new Date().toISOString() });
+  } else {
+    console.info('[Auth][DEMO] Respetando datos guardados del usuario (income:', st.incomeYTD, ')');
+  }
+} catch (e) { console.warn('[Auth] demo bootstrap:', e.message); }
     removeBunkerGuard(); _setOverlayState(false); _showAppChrome(null);
     _ensureAppBootstrapped().then(() => setTimeout(() => {
       window.App?.navigateTo?.('dashboard'); window.Dashboard?.syncAndRender?.(); _injectWelcomeMessage();
