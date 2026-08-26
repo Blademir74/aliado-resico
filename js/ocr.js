@@ -14,7 +14,7 @@ const DocumentProcessor = (() => {
   // ── FIX 413: compresión client-side para fotos de cámara ────────────────
 // Vercel rechaza bodies > ~4.5MB (HTTP 413). Reducimos a máx. 1280px / JPEG 0.8
 // (~200–400 KB) sin perder legibilidad de RFC/montos para Gemini Vision.
-function compressImage(file, maxDim = 1280, quality = 0.8) {
+function compressImage(file, maxDim = 1920, quality = 0.85) {
   return new Promise((resolve) => {
     if (!file || !file.type?.startsWith('image/')) { resolve(file); return; }
     const url = URL.createObjectURL(file);
@@ -122,7 +122,13 @@ function compressImage(file, maxDim = 1280, quality = 0.8) {
                        font-size:12px;font-weight:700;">
            ✅ Validado IA (${safety.confidence_pct}% confianza)
          </span>`;
-
+     const hintBlock = safety.needs_review
+   ? `<div style="margin-top:10px;padding:10px;background:rgba(245,158,11,0.12);border-left:3px solid #f59e0b;border-radius:4px;font-size:13px;color:#fde68a;">
+        📷 Consejo: toma la foto con buena luz, sin reflejos y encuadra solo el comprobante.
+        Los impresos borrosos pueden leerse incorrectamente; por seguridad se marcó Verificación Humana.
+      </div>`
+   : '';
+   
     const noteBlock = fiscalNote.applies
       ? `<div style="margin-top:10px;padding:10px;background:rgba(16,185,129,0.1);
                      border-left:3px solid #10b981;border-radius:4px;font-size:13px;">

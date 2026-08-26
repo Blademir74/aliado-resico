@@ -3,7 +3,7 @@
 // + debug completo en fallbacks. Safety Flag 85% (DOC02 TRD).
 import crypto from 'node:crypto';
 
-const ENGINE = 'ocr-v6.3';
+const ENGINE = 'ocr-v6.4';
 const ALLOWED_ORIGINS = [
   'https://aliado-resico.vercel.app','https://aliadoresico.com','https://www.aliadoresico.com',
   'http://localhost:3000','http://127.0.0.1:3000','http://localhost:5500','http://127.0.0.1:5500'
@@ -87,10 +87,22 @@ function extractJSON(text) {
   if (s === -1 || e <= s) return null;
   return cleaned.slice(s, e + 1);
 }
+function tolerantParse(jsonText) {
+  try { return JSON.parse(jsonText); } catch {}
+  // ── Reparar JSON truncado (corte por maxOutputTokens) ─────────────────
+  let s = jsonText;
+  s = s.replace(/,\s*"[^"]*"?\s*$/, '');          // coma o clave incompleta al final
+  s = s.replace(/:\s*"[^"]*$/, ': null');          // valor de texto cortado
+  const openB = (s.match(/{/g) || []).length - (s.match(/}/g) || []).length;
+  const openK = (s.match(/\[/g) || []).length - (s.match(/]/g) || []).length;
+  s += ']'.repeat(Math.max(0, openK)) + '}'.repeat(Math.max(0, openB));
+  try { return JSON.parse(s); } catch { return null; }
+}
 function safeParse(raw) {
   const jsonText = extractJSON(raw);
   if (!jsonText) return null;
-  try { return normalizeKeys(JSON.parse(jsonText)); } catch { return null; }
+  const parsed = tolerantParse(jsonText);
+  return parsed ? normalizeKeys(parsed) : null;
 }
 function buildFallback(reason, fileName = '', debug = {}) {
   return {
@@ -155,7 +167,7 @@ const PROMPT = [
 function geminiBody(mimeType, base64Data) {
   return {
     contents: [{ role: 'user', parts: [{ text: PROMPT }, { inline_data: { mime_type: mimeType, data: base64Data } }] }],
-    generationConfig: { temperature: 0.05, topP: 0.9, maxOutputTokens: 1024, responseMimeType: 'application/json' }
+    generationConfig: { temperature: 0.05, topP: 0.9, maxOutputTokens: 2048, responseMimeType: 'application/json' }
   };
 }
 // ── Cascada con reintento por parseo: AI Studio → Vertex ────────────────
@@ -218,7 +230,15 @@ export default async function handler(req, res) {
 
   const parsed = outcome.parsed;
   const docType = normalizeDocType(parsed.document_type);
-  const confidence = Number(parsed.confidence || 0);
+  let confidence = Number(parsed.confidence || 0);
+  // ── Heurística de auditoría: subtotal + IVA ≈ total (Art. 29-A CFF) ────
+  const sub = Number(parsed.subtotal ?? 0), iv = Number(parsed.iva ?? 0), tot = Number(parsed.total ?? 0);
+  const hasNums = tot > 0;
+  const sumOk = !hasNums || Math.abs(sub + iv - tot) <= Math.max(1, tot * 0.05);
+  const ivaOk = !hasNums || iv <= tot;
+  if (hasNums && (!sumOk || !ivaOk)) {
+    confidence = Math.min(confidence, 0.7); // fuerza Verificación Humana (<85%)
+  }
   const safetyFlag = confidence < 0.85;
   const doc = {
     file_name: fileName, doc_type: docType, document_type: docType, confidence,
