@@ -456,13 +456,15 @@ const App = (() => {
   }
 
   // ── Wizard Fiscal (Art. 113-F LISR) ─────────────────────────
-  function showWizardMessage(text, tone = 'error') {
-    const msg = byId('wizard-msg');
-    if (!msg) return;
-    msg.style.display = 'block';
-    msg.style.background = tone === 'success' ? 'rgba(16,185,129,0.12)' : 'rgba(239,68,68,0.12)';
-    msg.style.color = tone === 'success' ? '#d1fae5' : '#fecaca';
-    msg.textContent = text;
+ function showWizardMessage(text, tone = 'error') {
+  let msg = byId('wizard-msg');
+  if (!msg) {
+    // FIX W-6: el contenedor no existe en el HTML → crearlo (nunca más silencio)
+    msg = document.createElement('div');
+    msg.id = 'wizard-msg';
+    msg.style.cssText = 'margin:10px 0;padding:10px 14px;border-radius:8px;font-size:13px;';
+    const anchor = byId('wizard-tab') || document.querySelector('.wizard-step')?.parentElement || document.body;
+    anchor.prepend(msg);
   }
   function hideWizardMessage() {
     const msg = byId('wizard-msg');
@@ -657,9 +659,11 @@ function wizardNext() {
     alertLevel: d.riesgoBuzon ? 'danger' : 'safe',
     lastAuditDate: new Date().toISOString()
   });
-  syncAndRender();
-  showWizardMessage('Diagnóstico guardado correctamente. Monitor y Salud Fiscal actualizados.', 'success');
+   syncAndRender();
+  showWizardMessage('✅ Diagnóstico guardado. Abriendo tu Dashboard…', 'success');
   console.info('[Wizard] saveDiagnostic() finalizado — income:', d.income, '· buzón activo:', d.buzonActivo);
+  // ── FIX W-6: evidencia visible (DOC04 AppFlow: guardar → abrir Dashboard) ──
+  setTimeout(() => navigateTo('dashboard'), 600);
 }
 
   // ── Carpeta Fiscal uploads ─────────────────────────────────
