@@ -3,7 +3,7 @@
 // + debug completo en fallbacks. Safety Flag 85% (DOC02 TRD).
 import crypto from 'node:crypto';
 
-const ENGINE = 'ocr-v6.4';
+const ENGINE = 'ocr-v6.5';
 const ALLOWED_ORIGINS = [
   'https://aliado-resico.vercel.app','https://aliadoresico.com','https://www.aliadoresico.com',
   'http://localhost:3000','http://127.0.0.1:3000','http://localhost:5500','http://127.0.0.1:5500'
@@ -89,14 +89,21 @@ function extractJSON(text) {
 }
 function tolerantParse(jsonText) {
   try { return JSON.parse(jsonText); } catch {}
-  // ── Reparar JSON truncado (corte por maxOutputTokens) ─────────────────
   let s = jsonText;
-  s = s.replace(/,\s*"[^"]*"?\s*$/, '');          // coma o clave incompleta al final
-  s = s.replace(/:\s*"[^"]*$/, ': null');          // valor de texto cortado
+  s = s.replace(/,\s*"[^"]*"?\s*$/, '');
+  s = s.replace(/:\s*"[^"]*$/, ': null');
   const openB = (s.match(/{/g) || []).length - (s.match(/}/g) || []).length;
   const openK = (s.match(/\[/g) || []).length - (s.match(/]/g) || []).length;
   s += ']'.repeat(Math.max(0, openK)) + '}'.repeat(Math.max(0, openB));
-  try { return JSON.parse(s); } catch { return null; }
+  try { return JSON.parse(s); } catch {}
+  // ── Tercer intento: cortar en la última llave completa y cerrar ────────
+  const cut = s.lastIndexOf('}');
+  if (cut > s.indexOf('{')) {
+    const head = s.slice(0, cut + 1);
+    const ob = (head.match(/{/g) || []).length - (head.match(/}/g) || []).length;
+    try { return JSON.parse(head + '}'.repeat(Math.max(0, ob))); } catch {}
+  }
+  return null;
 }
 function safeParse(raw) {
   const jsonText = extractJSON(raw);
@@ -159,7 +166,8 @@ const PROMPT = [
   '  "total": 143.21,',
   '  "folio": "string|null",',
   '  "fecha": "YYYY-MM-DD|null",',
-  '  "summary": "breve",',
+  '  "summary": "máximo 6 palabras o null",',
+  '  IMPORTANTE: textos cortos (máx. 6 palabras). Montos: solo números exactos como aparecen.',
   '  "tax_usefulness": "IVA|ISR|AMBOS|NINGUNO"',
   '}',
   'Regla fiscal pedagógica: ISR RESICO no deduce gastos; IVA solo acreditable con CFDI válido y gasto indispensable.'
@@ -167,7 +175,7 @@ const PROMPT = [
 function geminiBody(mimeType, base64Data) {
   return {
     contents: [{ role: 'user', parts: [{ text: PROMPT }, { inline_data: { mime_type: mimeType, data: base64Data } }] }],
-    generationConfig: { temperature: 0.05, topP: 0.9, maxOutputTokens: 2048, responseMimeType: 'application/json' }
+    generationConfig: { temperature: 0.05, topP: 0.9, maxOutputTokens: 1024, responseMimeType: 'application/json' }
   };
 }
 // ── Cascada con reintento por parseo: AI Studio → Vertex ────────────────
