@@ -246,8 +246,9 @@ export default async function handler(req, res) {
   const ivaOk = !hasNums || iv <= tot;
   if (hasNums && (!sumOk || !ivaOk)) {
     confidence = Math.min(confidence, 0.7); // fuerza Verificación Humana (<85%)
+    parsed.warning_aritmetica = '⚠️ Subtotal + IVA no coincide con el total leído. Confianza reducida para revisión humana (Art. 29-A CFF).';
   }
-  const safetyFlag = confidence < 0.85;
+  const safetyFlag = confidence < 0.85; 
   const doc = {
     file_name: fileName, doc_type: docType, document_type: docType, confidence,
     file_url: `local:${fileName}`,
@@ -262,7 +263,7 @@ export default async function handler(req, res) {
     source: isDemo ? 'ocr_ai_demo' : 'ocr_ai',
     pedagogical_note: 'ISR RESICO: sin deducciones. IVA: requiere CFDI válido y gasto indispensable para acreditamiento.'
   };
-
+  if (parsed.warning_aritmetica) parsed.warning = parsed.warning_aritmetica;
   if (user && SUPABASE_URL && SUPABASE_SERVICE_KEY) {
     const rec = String(doc.extracted_data.rfc_receptor || '').toUpperCase().trim();
     if (rec && rec !== 'XAXX010101000' && rec !== 'XEXX010101000') {

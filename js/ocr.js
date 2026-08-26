@@ -122,6 +122,10 @@ function compressImage(file, maxDim = 1920, quality = 0.85) {
                        font-size:12px;font-weight:700;">
            ✅ Validado IA (${safety.confidence_pct}% confianza)
          </span>`;
+         
+     const warnBlock = data.warning
+   ? `<div style="margin-top:10px;padding:10px;background:rgba(245,158,11,0.12);border-left:3px solid #f59e0b;border-radius:4px;font-size:13px;color:#fde68a;">${esc(data.warning)}</div>`
+   : '';
      const hintBlock = safety.needs_review
    ? `<div style="margin-top:10px;padding:10px;background:rgba(245,158,11,0.12);border-left:3px solid #f59e0b;border-radius:4px;font-size:13px;color:#fde68a;">
         📷 Consejo: toma la foto con buena luz, sin reflejos y encuadra solo el comprobante.
