@@ -644,13 +644,23 @@ function wizardNext() {
     hideWizardMessage();
   }
   function saveDiagnostic() {
-    const d = window.Store?.getState?.()?.diagnostic;
-    if (!d || !d.completedAt) { showWizardMessage('Primero pulsa "Calcular diagnóstico".', 'error'); return; }
-    window.Store?.updateIncome?.(Number(d.income || 0));
-    window.Store?.updateSaludFiscal?.({ buzonTributarioActivo: !!d.buzonActivo, alertLevel: d.riesgoBuzon ? 'danger' : 'safe', lastAuditDate: new Date().toISOString() });
-    syncAndRender();
-    showWizardMessage('Diagnóstico guardado correctamente.', 'success');
+  console.info('[Wizard] saveDiagnostic() iniciado');
+  const d = window.Store?.getState?.()?.diagnostic;
+  if (!d || !d.completedAt) {
+    showWizardMessage('Primero completa los 4 pasos y pulsa "Calcular diagnóstico".', 'error');
+    return;
   }
+  // ── Persistir y sincronizar Monitor + Salud Fiscal (Art. 113-E / 17-K) ──
+  window.Store?.updateIncome?.(Number(d.income || 0));
+  window.Store?.updateSaludFiscal?.({
+    buzonTributarioActivo: !!d.buzonActivo,
+    alertLevel: d.riesgoBuzon ? 'danger' : 'safe',
+    lastAuditDate: new Date().toISOString()
+  });
+  syncAndRender();
+  showWizardMessage('Diagnóstico guardado correctamente. Monitor y Salud Fiscal actualizados.', 'success');
+  console.info('[Wizard] saveDiagnostic() finalizado — income:', d.income, '· buzón activo:', d.buzonActivo);
+}
 
   // ── Carpeta Fiscal uploads ─────────────────────────────────
   function setUploadStatus(id, text, color = '#94a3b8') {
@@ -860,6 +870,33 @@ window.resetWizard = App.resetWizard;
 window.completeWizard = App.completeWizard;
 window.saveDiagnostic = App.saveDiagnostic;
 window.Dashboard = App.syncAndRender;
+
+// ── FIX W-5: cableado garantizado de los botones de acción del wizard ────
+// Funciona aunque el HTML tenga onclick inline muerto o ningún handler.
+(function bindWizardActionButtons() {
+  function run() {
+    document.querySelectorAll('button').forEach(btn => {
+      if (btn.dataset.boundWizAction) return;
+      const t = (btn.textContent || '').trim().toLowerCase();
+      const fn = t.includes('guardar diagnóstico') ? 'saveDiagnostic'
+        : t.includes('calcular diagnóstico') ? 'completeWizard'
+        : t === 'reiniciar' ? 'resetWizard' : null;
+      if (!fn) return;
+      btn.dataset.boundWizAction = '1';
+      btn.removeAttribute('onclick'); // mata handlers inline muertos
+      btn.addEventListener('click', (e) => {
+        e.preventDefault();
+        console.info('[Wizard] Botón pulsado:', fn);
+        const target = window.App?.[fn] || window[fn];
+        if (typeof target === 'function') target();
+        else console.warn('[Wizard] función no disponible:', fn);
+      });
+    });
+    console.info('[Wizard] botones de acción vinculados (FIX W-5)');
+  }
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', run);
+  else run();
+})();
 
 if (document.readyState === 'loading') {
   document.addEventListener('DOMContentLoaded', () => App.init());
