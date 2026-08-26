@@ -6,92 +6,45 @@ const AuthRegisterUI = (() => {
   const PHONE_REGEX = /^\d{10}$/;
   const PASSWORD_MIN = 12;
   const PASSWORD_MAX = 18;
-  // ── FIX FASE 1.2: Validación oficial del carácter verificador RFC ───────
-  // Algoritmo del SAT (Anexo 21 RMF) — detecta homoclaves incorrectas
-  const RFC_CHAR_MAP = {
-    '0':0,'1':1,'2':2,'3':3,'4':4,'5':5,'6':6,'7':7,'8':8,'9':9,
-    'A':10,'B':11,'C':12,'D':13,'E':14,'F':15,'G':16,'H':17,'I':18,
-    'J':19,'K':20,'L':21,'M':22,'N':23,'&':24,'O':25,'P':26,'Q':27,
-    'R':28,'S':29,'T':30,'U':31,'V':32,'W':33,'X':34,'Y':35,'Z':36,
-    ' ':37,'Ñ':38
-  };
-
-  // ── FIX ERROR 1: Algoritmo RFC corregido (Anexo 21 RMF) ───────────────
+// ── FIX R-110: Algoritmo oficial SAT (Anexo 3 CFF) ──────────────────────
+// PF (13): dígito = checkDigit(primeros 12) · PM (12): dígito = checkDigit(' ' + primeros 11)
+// Pesos 13..2 · Tabla: 0-9, A=10..Z=36, &=24, ' '=37, Ñ=38
+function checkDigitSAT(base12) {
+  const M = {'0':0,'1':1,'2':2,'3':3,'4':4,'5':5,'6':6,'7':7,'8':8,'9':9,
+    'A':10,'B':11,'C':12,'D':13,'E':14,'F':15,'G':16,'H':17,'I':18,'J':19,
+    'K':20,'L':21,'M':22,'N':23,'&':24,'O':25,'P':26,'Q':27,'R':28,'S':29,
+    'T':30,'U':31,'V':32,'W':33,'X':34,'Y':35,'Z':36,' ':37,'Ñ':38};
+  let sum = 0;
+  for (let i = 0; i < 12; i++) {
+    const v = M[base12[i]];
+    if (v === undefined) return null;
+    sum += v * (13 - i);
+  }
+  const rem = sum % 11;
+  if (rem === 0) return '0';
+  const d = 11 - rem;
+  return d === 10 ? 'A' : String(d);
+}
 function validateRFCChecksum(rfc) {
-  if (!rfc) return { valid: false, reason: 'RFC vacío' };
-  const clean = String(rfc).trim().toUpperCase();
-  
-  // RFCs genéricos siempre válidos
-  if (clean === 'XAXX010101000' || clean === 'XEXX010101000') {
-    return { valid: true, reason: 'RFC genérico válido', isGeneric: true };
+  const clean = String(rfc || '').trim().toUpperCase();
+  if (!clean) return { valid: false, reason: 'RFC vacío' };
+  if (clean === 'XAXX010101000' || clean === 'XEXX010101000')
+    return { valid: true, isGeneric: true, reason: 'RFC genérico válido (público en general)' };
+  if (clean.length === 13) {
+    const exp = checkDigitSAT(clean.substring(0, 12));
+    if (exp === null) return { valid: false, reason: 'Carácter inválido en el RFC.' };
+    if (exp !== clean.charAt(12))
+      return { valid: false, reason: `Dígito verificador incorrecto. Esperado: ${exp}, recibido: ${clean.charAt(12)}.` };
+    return { valid: true, isGeneric: false, type: 'PF', reason: 'RFC válido (Persona Física) con homoclave correcta.' };
   }
-  
-  // Validar longitud
-  if (clean.length !== 12 && clean.length !== 13) {
-    return { valid: false, reason: `Longitud inválida (${clean.length}). PF=13, PM=12` };
+  if (clean.length === 12) {
+    const exp = checkDigitSAT(' ' + clean.substring(0, 11));
+    if (exp === null) return { valid: false, reason: 'Carácter inválido en el RFC.' };
+    if (exp !== clean.charAt(11))
+      return { valid: false, reason: `Dígito verificador incorrecto. Esperado: ${exp}, recibido: ${clean.charAt(11)}.` };
+    return { valid: true, isGeneric: false, type: 'PM', reason: 'RFC válido (Persona Moral) con homoclave correcta.' };
   }
-  
-  const isPF = clean.length === 13;
-  const isPM = clean.length === 12;
-  
-  // Tabla de valores para cálculo (Anexo 21 RMF)
-  const charMap = {
-    '0':0,'1':1,'2':2,'3':3,'4':4,'5':5,'6':6,'7':7,'8':8,'9':9,
-    'A':10,'B':11,'C':12,'D':13,'E':14,'F':15,'G':16,'H':17,'I':18,
-    'J':19,'K':20,'L':21,'M':22,'N':23,'&':24,'O':25,'P':26,'Q':27,
-    'R':28,'S':29,'T':30,'U':31,'V':32,'W':33,'X':34,'Y':35,'Z':36,
-    ' ':37,'Ñ':38
-  };
-  
-  try {
-    // Para PF (13 chars): tomar posición 2-12 (índices 1-11), agregar espacio al inicio
-    // Para PM (12 chars): tomar posición 1-11 (índices 0-10), SIN espacio
-    let rfcForCalc = '';
-    if (isPF) {
-      rfcForCalc = ' ' + clean.substring(0, 12); // Espacio + primeros 12 chars
-    } else {
-      rfcForCalc = clean.substring(0, 11); // Solo primeros 11 chars
-    }
-    
-    // Calcular suma ponderada
-    let sum = 0;
-    for (let i = 0; i < 11; i++) {
-      const char = rfcForCalc[i];
-      const value = charMap[char];
-      if (value === undefined) {
-        return { valid: false, reason: `Carácter inválido: ${char}` };
-      }
-      sum += value * (13 - i); // Multiplicar por posición (13, 12, 11... 3)
-    }
-    
-    // Calcular dígito verificador
-    const remainder = sum % 11;
-    let expectedDigit;
-    if (remainder === 0) {
-      expectedDigit = '0';
-    } else if (remainder === 1) {
-      expectedDigit = 'A';
-    } else {
-      expectedDigit = String(11 - remainder);
-    }
-    
-    const actualDigit = clean.charAt(clean.length - 1);
-    
-    if (expectedDigit !== actualDigit) {
-      return {
-        valid: false,
-        reason: `Dígito verificador incorrecto. Esperado: ${expectedDigit}, recibido: ${actualDigit}`,
-      };
-    }
-    
-    return { 
-      valid: true, 
-      reason: `RFC válido (${isPF ? 'Persona Física' : 'Persona Moral'}) con homoclave correcta`,
-      isGeneric: false
-    };
-  } catch (e) {
-    return { valid: false, reason: 'Error al validar: ' + e.message };
-  }
+  return { valid: false, reason: `Longitud inválida (${clean.length}). PF=13, PM=12.` };
 }
 
   function byId(id) { return document.getElementById(id); }
