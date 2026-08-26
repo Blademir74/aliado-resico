@@ -536,6 +536,19 @@ const App = (() => {
     if (riesgoMulta) recomendaciones.push(`🚨 ALERTA LÍMITE RESICO (Art. 113-E LISR): Tus ingresos de $${income.toLocaleString('es-MX')} MXN superan el ${riskLevel === 'EXPULSION' ? '94%' : '90%'} del límite.`);
     return { income, salarios, intereses, mixtos: !!inputs.mixtos, socioPM: !!inputs.socioPM, cfdiGlobal: !!inputs.cfdiGlobal, buzonActivo: !riesgoBuzon, anualObligatoria, riesgoMulta, riesgoBuzon, riskLevel, recomendacion: recomendaciones.join('\n\n'), completedAt: new Date().toISOString() };
   }
+
+// ── FIX W-4: revelar el panel aunque esté anidado en pasos ocultos ──────
+function revealAncestors(el) {
+  const tab = byId('wizard-tab');
+  let node = el;
+  while (node && node !== tab && node !== document.body) {
+    node.hidden = false;
+    node.classList.add('active');
+    if (getComputedStyle(node).display === 'none') node.style.display = 'block';
+    node = node.parentElement;
+  }
+}
+
  function renderWizardResult(diagnosis) {
   // ── FIX W-3: Crear contenedor si no existe ─────────────────────────────
   let out = byId('wiz-result') || byId('wizard-result');
@@ -563,7 +576,8 @@ const App = (() => {
     <pre style="white-space:pre-wrap;font-size:13px;color:#e2e8f0;line-height:1.6;">${esc(diagnosis.recomendacion)}</pre>
   </div>`;
   
-  out.style.display = 'block'; // Asegurar visibilidad
+  out.style.display = 'block';
+  revealAncestors(out); // FIX W-4: destraba ancestros ocultos
   console.info('[Wizard] Resultado renderizado en wiz-result');
 }
 function completeWizard() {
@@ -599,14 +613,12 @@ function completeWizard() {
   setF('res-recomendacion', diagnosis.recomendacion);
   
   // ── FIX W-3: Mostrar el panel de resultado y hacer scroll ──────────────
-  const resultPanel = byId('res-income')?.closest('.wizard-step') || byId('res-income')?.parentElement;
-  if (resultPanel) {
-    resultPanel.style.display = 'block';
-    resultPanel.hidden = false;
+  const resPanel = byId('res-income');
+  if (resPanel) {
+    revealAncestors(resPanel); // FIX W-4: muestra el panel "Diagnóstico completado"
     console.info('[Wizard] Panel de resultado visible');
   }
-  
-  byId('res-income')?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  resPanel?.scrollIntoView({ behavior: 'smooth', block: 'center' });
   showWizardMessage('Diagnóstico completado. Revisa los resultados abajo.', 'success');
   console.info('[Wizard] completeWizard() finalizado');
 }
