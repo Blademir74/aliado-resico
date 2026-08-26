@@ -471,9 +471,16 @@ const App = (() => {
   }
   function setWizardStep(step) {
     wizardStep = Math.max(1, Math.min(WIZARD_MAX_STEPS, Number(step || 1)));
+    // Universal: cubre HTML con clase .active, atributo hidden o sin CSS
     document.querySelectorAll('.wizard-step').forEach(el => {
-      el.classList.toggle('active', Number(el.dataset.step) === wizardStep);
+      const n = Number(el.dataset.step);
+      el.classList.toggle('active', n === wizardStep);
+      el.hidden = n !== wizardStep;
+      el.style.display = n === wizardStep ? '' : 'none';
     });
+    const ind = byId('wizard-step-indicator');
+    if (ind) ind.textContent = `Paso ${wizardStep} de ${WIZARD_MAX_STEPS}`;
+    console.info('[Wizard] mostrando paso', wizardStep);
   }
   function validateStep(step) {
     const income = Number(byId('wiz-income')?.value || 0);
@@ -559,8 +566,9 @@ const App = (() => {
     byId('res-income')?.scrollIntoView({ behavior: 'smooth', block: 'center' });
   }
   function wizardNext() {
-    if (!validateStep(wizardStep)) return;
-    if (wizardStep >= WIZARD_MAX_STEPS) { completeWizard(); return; }
+    console.info('[Wizard] Siguiente pulsado en paso', wizardStep);
+    if (!validateStep(wizardStep)) { console.info('[Wizard] validación falló en paso', wizardStep); return; }
+    if (wizardStep >= WIZARD_MAX_STEPS) { console.info('[Wizard] paso final: calculando diagnóstico'); completeWizard(); return; }
     setWizardStep(wizardStep + 1);
   }
   function resetWizard() {
@@ -645,6 +653,30 @@ const App = (() => {
     bindDropzone('drop-opinion', 'carpeta-opinion-file');
   }
 
+  // ── FIX W-1: cableado defensivo del wizard (por texto, sin depender de IDs) ──
+  function bindWizardControls() {
+    if (!byId('wizard-msg')) {
+      const anchor = byId('wizard-tab') || document.querySelector('.wizard-step')?.parentElement || document.body;
+      const msg = document.createElement('div');
+      msg.id = 'wizard-msg';
+      msg.style.cssText = 'display:none;margin:10px 0;padding:10px 14px;border-radius:8px;font-size:13px;';
+      anchor.prepend(msg);
+    }
+    const wire = (btn, fn) => {
+      btn.removeAttribute('onclick'); // elimina handlers inline muertos o duplicados
+      btn.addEventListener('click', (e) => { e.preventDefault(); fn(); });
+    };
+    document.querySelectorAll('button').forEach(btn => {
+      if (btn.dataset.boundWiz) return;
+      const t = (btn.textContent || '').trim().toLowerCase();
+      if (t === 'siguiente') { btn.dataset.boundWiz = '1'; wire(btn, wizardNext); }
+      else if (t.includes('calcular diagnóstico')) { btn.dataset.boundWiz = '1'; wire(btn, completeWizard); }
+      else if (t.includes('guardar diagnóstico')) { btn.dataset.boundWiz = '1'; wire(btn, saveDiagnostic); }
+      else if (t === 'reiniciar') { btn.dataset.boundWiz = '1'; wire(btn, resetWizard); }
+    });
+    console.info('[Wizard] controles vinculados (FIX W-1)');
+  }
+
   function syncAndRender() {
     renderKPIs(); renderIncomeWithCssClasses(); renderHealth();
     renderHealthExtended(); renderFeed(); renderCarpetaFiscal();
@@ -700,6 +732,8 @@ const App = (() => {
     setWizardStep(1); resetWizard(); 
     window.wizardNext = wizardNext;
     window.resetWizard = resetWizard;
+    window.completeWizard = completeWizard;
+    bindWizardControls(); // FIX W-1: dueño único de los botones del wizard
     window.saveDiagnostic = saveDiagnostic;
     window.DocumentsManager?.init?.();
     window.DocumentProcessor?.init?.();
