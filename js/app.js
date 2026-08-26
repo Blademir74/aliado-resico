@@ -470,18 +470,30 @@ const App = (() => {
     msg.style.display = 'none'; msg.textContent = '';
   }
   function setWizardStep(step) {
-    wizardStep = Math.max(1, Math.min(WIZARD_MAX_STEPS, Number(step || 1)));
-    // Universal: cubre HTML con clase .active, atributo hidden o sin CSS
-    document.querySelectorAll('.wizard-step').forEach(el => {
-      const n = Number(el.dataset.step);
-      el.classList.toggle('active', n === wizardStep);
-      el.hidden = n !== wizardStep;
-      el.style.display = n === wizardStep ? '' : 'none';
-    });
-    const ind = byId('wizard-step-indicator');
-    if (ind) ind.textContent = `Paso ${wizardStep} de ${WIZARD_MAX_STEPS}`;
-    console.info('[Wizard] mostrando paso', wizardStep);
+  wizardStep = Math.max(1, Math.min(WIZARD_MAX_STEPS, Number(step || 1)));
+  console.info('[Wizard] setWizardStep() → paso', wizardStep);
+  
+  // Ocultar todos los pasos
+  document.querySelectorAll('.wizard-step').forEach(el => {
+    el.classList.remove('active');
+    el.hidden = true;
+    el.style.display = 'none';
+  });
+  
+  // Mostrar solo el paso activo
+  const activeStep = document.querySelector(`.wizard-step[data-step="${wizardStep}"]`);
+  if (activeStep) {
+    activeStep.classList.add('active');
+    activeStep.hidden = false;
+    activeStep.style.display = 'block';
+    console.info('[Wizard] Paso', wizardStep, 'mostrado');
+  } else {
+    console.warn('[Wizard] No se encontró .wizard-step[data-step="' + wizardStep + '"]');
   }
+  
+  const ind = byId('wizard-step-indicator');
+  if (ind) ind.textContent = `Paso ${wizardStep} de ${WIZARD_MAX_STEPS}`;
+}
   function validateStep(step) {
     const income = Number(byId('wiz-income')?.value || 0);
     const salarios = Number(byId('wiz-salarios')?.value || 0);
@@ -524,53 +536,94 @@ const App = (() => {
     if (riesgoMulta) recomendaciones.push(`🚨 ALERTA LÍMITE RESICO (Art. 113-E LISR): Tus ingresos de $${income.toLocaleString('es-MX')} MXN superan el ${riskLevel === 'EXPULSION' ? '94%' : '90%'} del límite.`);
     return { income, salarios, intereses, mixtos: !!inputs.mixtos, socioPM: !!inputs.socioPM, cfdiGlobal: !!inputs.cfdiGlobal, buzonActivo: !riesgoBuzon, anualObligatoria, riesgoMulta, riesgoBuzon, riskLevel, recomendacion: recomendaciones.join('\n\n'), completedAt: new Date().toISOString() };
   }
-  function renderWizardResult(diagnosis) {
-    const out = byId('wiz-result') || byId('wizard-result');
-    if (!out) return;
-    const color = { SEGURO: '#10b981', PREVENTIVO: '#f59e0b', RIESGO_ALTO: '#ef4444', EXPULSION: '#dc2626' }[diagnosis.riskLevel] || '#10b981';
-    const anualBadge = diagnosis.anualObligatoria
-      ? `<span style="background:#ef4444;color:#fff;padding:2px 8px;border-radius:4px;font-size:12px;">DECLARACIÓN ANUAL OBLIGATORIA — Art. 113-F LISR</span>`
-      : `<span style="background:#10b981;color:#fff;padding:2px 8px;border-radius:4px;font-size:12px;">Sin obligación de anual</span>`;
-    const buzonBadge = diagnosis.riesgoBuzon
-      ? `<span style="background:#f59e0b;color:#000;padding:2px 8px;border-radius:4px;font-size:12px;">⚠️ Multa Buzón: $${BUZON_MULTA.toLocaleString('es-MX')} MXN — Art. 17-K CFF</span>`
-      : '';
-    out.innerHTML = `<div style="border:1px solid ${color};border-radius:8px;padding:16px;margin-top:12px;">
-      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px;">${anualBadge}${buzonBadge}</div>
-      <p style="color:${color};font-weight:bold;margin:0 0 8px;">Riesgo RESICO: ${diagnosis.riskLevel}</p>
-      <pre style="white-space:pre-wrap;font-size:13px;color:#e2e8f0;line-height:1.6;">${esc(diagnosis.recomendacion)}</pre></div>`;
+ function renderWizardResult(diagnosis) {
+  // ── FIX W-3: Crear contenedor si no existe ─────────────────────────────
+  let out = byId('wiz-result') || byId('wizard-result');
+  if (!out) {
+    const wizardTab = byId('wizard-tab');
+    if (!wizardTab) { console.warn('[Wizard] No se encontró wizard-tab'); return; }
+    out = document.createElement('div');
+    out.id = 'wiz-result';
+    out.style.cssText = 'margin-top:20px;padding:16px;border-radius:12px;background:rgba(16,185,129,0.08);border:1px solid #10b981;';
+    wizardTab.appendChild(out);
+    console.info('[Wizard] Contenedor wiz-result creado dinámicamente');
   }
-  function completeWizard() {
-    const income = Number((byId('wiz-income') || {}).value || 0);
-    const salarios = Number((byId('wiz-salarios') || {}).value || 0);
-    const intereses = Number((byId('wiz-intereses') || {}).value || 0);
-    const diagnosis = computeWizardDiagnosis({
-      income, salarios, intereses,
-      socioPM: readYesNo('wiz-socio'),
-      mixtos: readYesNo('wiz-mixtos'),
-      cfdiGlobal: readYesNo('wiz-cfdi'),
-      buzonActivo: String(byId('wiz-buzon')?.value || 'si').toLowerCase() !== 'no'
-    });
-    window.Store?.updateDiagnostic?.(diagnosis);
-    renderWizardResult(diagnosis);
-    const setF = (id, val) => { const el = byId(id); if (el) el.textContent = val; };
-    const fmtM = n => `$${Number(n || 0).toLocaleString('es-MX')} MXN`;
-    setF('res-income', fmtM(diagnosis.income));
-    setF('res-salarios', fmtM(diagnosis.salarios));
-    setF('res-intereses', fmtM(diagnosis.intereses));
-    setF('res-anual', diagnosis.anualObligatoria ? '⚠️ OBLIGATORIA (Art. 113-F LISR)' : '✅ No obligatoria');
-    setF('res-multa', diagnosis.riesgoMulta ? '🔴 Riesgo de multa CFDI' : '✅ CFDI al corriente');
-    setF('res-buzon', diagnosis.riesgoBuzon ? '🔴 Inactivo — multa $10,260 MXN (Art. 17-K CFF)' : '✅ Activo');
-    setF('res-risk', `${diagnosis.riskLevel} — ${diagnosis.income > 0 ? ((diagnosis.income / 3500000) * 100).toFixed(1) : '0.0'}% del límite`);
-    setF('res-pedagogia', '📚 ISR RESICO: sobre ingresos brutos sin deducciones (1%–2.5%). IVA: acreditable solo con CFDI válido y gasto indispensable.');
-    setF('res-recomendacion', diagnosis.recomendacion);
-    byId('res-income')?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  
+  const color = { SEGURO: '#10b981', PREVENTIVO: '#f59e0b', RIESGO_ALTO: '#ef4444', EXPULSION: '#dc2626' }[diagnosis.riskLevel] || '#10b981';
+  const anualBadge = diagnosis.anualObligatoria
+    ? `<span style="background:#ef4444;color:#fff;padding:2px 8px;border-radius:4px;font-size:12px;">DECLARACIÓN ANUAL OBLIGATORIA — Art. 113-F LISR</span>`
+    : `<span style="background:#10b981;color:#fff;padding:2px 8px;border-radius:4px;font-size:12px;">Sin obligación de anual</span>`;
+  const buzonBadge = diagnosis.riesgoBuzon
+    ? `<span style="background:#f59e0b;color:#000;padding:2px 8px;border-radius:4px;font-size:12px;">⚠️ Multa Buzón: $${BUZON_MULTA.toLocaleString('es-MX')} MXN — Art. 17-K CFF</span>`
+    : '';
+  
+  out.innerHTML = `<div style="border:1px solid ${color};border-radius:8px;padding:16px;margin-top:12px;">
+    <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px;">${anualBadge}${buzonBadge}</div>
+    <p style="color:${color};font-weight:bold;margin:0 0 8px;">Riesgo RESICO: ${diagnosis.riskLevel}</p>
+    <pre style="white-space:pre-wrap;font-size:13px;color:#e2e8f0;line-height:1.6;">${esc(diagnosis.recomendacion)}</pre>
+  </div>`;
+  
+  out.style.display = 'block'; // Asegurar visibilidad
+  console.info('[Wizard] Resultado renderizado en wiz-result');
+}
+function completeWizard() {
+  console.info('[Wizard] completeWizard() iniciado');
+  const income = Number((byId('wiz-income') || {}).value || 0);
+  const salarios = Number((byId('wiz-salarios') || {}).value || 0);
+  const intereses = Number((byId('wiz-intereses') || {}).value || 0);
+  
+  const diagnosis = computeWizardDiagnosis({
+    income, salarios, intereses,
+    socioPM: readYesNo('wiz-socio'),
+    mixtos: readYesNo('wiz-mixtos'),
+    cfdiGlobal: readYesNo('wiz-cfdi'),
+    buzonActivo: String(byId('wiz-buzon')?.value || 'si').toLowerCase() !== 'no'
+  });
+  
+  console.info('[Wizard] Diagnóstico calculado:', diagnosis);
+  window.Store?.updateDiagnostic?.(diagnosis);
+  renderWizardResult(diagnosis);
+  
+  // ── FIX W-3: Llenar el panel visible "Diagnóstico completado" ──────────
+  const setF = (id, val) => { const el = byId(id); if (el) el.textContent = val; };
+  const fmtM = n => `$${Number(n || 0).toLocaleString('es-MX')} MXN`;
+  
+  setF('res-income', fmtM(diagnosis.income));
+  setF('res-salarios', fmtM(diagnosis.salarios));
+  setF('res-intereses', fmtM(diagnosis.intereses));
+  setF('res-anual', diagnosis.anualObligatoria ? '⚠️ OBLIGATORIA (Art. 113-F LISR)' : '✅ No obligatoria');
+  setF('res-multa', diagnosis.riesgoMulta ? '🔴 Riesgo de multa CFDI' : '✅ CFDI al corriente');
+  setF('res-buzon', diagnosis.riesgoBuzon ? '🔴 Inactivo — multa $10,260 MXN (Art. 17-K CFF)' : '✅ Activo');
+  setF('res-risk', `${diagnosis.riskLevel} — ${diagnosis.income > 0 ? ((diagnosis.income / 3500000) * 100).toFixed(1) : '0.0'}% del límite`);
+  setF('res-pedagogia', '📚 ISR RESICO: sobre ingresos brutos sin deducciones (1%–2.5%). IVA: acreditable solo con CFDI válido y gasto indispensable.');
+  setF('res-recomendacion', diagnosis.recomendacion);
+  
+  // ── FIX W-3: Mostrar el panel de resultado y hacer scroll ──────────────
+  const resultPanel = byId('res-income')?.closest('.wizard-step') || byId('res-income')?.parentElement;
+  if (resultPanel) {
+    resultPanel.style.display = 'block';
+    resultPanel.hidden = false;
+    console.info('[Wizard] Panel de resultado visible');
   }
-  function wizardNext() {
-    console.info('[Wizard] Siguiente pulsado en paso', wizardStep);
-    if (!validateStep(wizardStep)) { console.info('[Wizard] validación falló en paso', wizardStep); return; }
-    if (wizardStep >= WIZARD_MAX_STEPS) { console.info('[Wizard] paso final: calculando diagnóstico'); completeWizard(); return; }
-    setWizardStep(wizardStep + 1);
+  
+  byId('res-income')?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  showWizardMessage('Diagnóstico completado. Revisa los resultados abajo.', 'success');
+  console.info('[Wizard] completeWizard() finalizado');
+}
+function wizardNext() {
+  console.info('[Wizard] wizardNext() llamado en paso', wizardStep);
+  if (!validateStep(wizardStep)) {
+    console.info('[Wizard] Validación falló en paso', wizardStep);
+    return;
   }
+  if (wizardStep >= WIZARD_MAX_STEPS) {
+    console.info('[Wizard] Paso final alcanzado, llamando completeWizard()');
+    completeWizard();
+    return;
+  }
+  setWizardStep(wizardStep + 1);
+  console.info('[Wizard] Avanzando a paso', wizardStep + 1);
+}
   function resetWizard() {
     wizardStep = 1; setWizardStep(1);
     const defaults = { 'wiz-income': '', 'wiz-mixtos': 'no', 'wiz-socio': 'no', 'wiz-salarios': '0', 'wiz-intereses': '0', 'wiz-cfdi': 'si', 'wiz-buzon': 'si' };
