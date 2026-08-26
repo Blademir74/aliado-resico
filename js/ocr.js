@@ -122,17 +122,7 @@ function compressImage(file, maxDim = 1920, quality = 0.85) {
                        font-size:12px;font-weight:700;">
            ✅ Validado IA (${safety.confidence_pct}% confianza)
          </span>`;
-         
-     const warnBlock = data.warning
-   ? `<div style="margin-top:10px;padding:10px;background:rgba(245,158,11,0.12);border-left:3px solid #f59e0b;border-radius:4px;font-size:13px;color:#fde68a;">${esc(data.warning)}</div>`
-   : '';
-     const hintBlock = safety.needs_review
-   ? `<div style="margin-top:10px;padding:10px;background:rgba(245,158,11,0.12);border-left:3px solid #f59e0b;border-radius:4px;font-size:13px;color:#fde68a;">
-        📷 Consejo: toma la foto con buena luz, sin reflejos y encuadra solo el comprobante.
-        Los impresos borrosos pueden leerse incorrectamente; por seguridad se marcó Verificación Humana.
-      </div>`
-   : '';
-   
+  
     const noteBlock = fiscalNote.applies
       ? `<div style="margin-top:10px;padding:10px;background:rgba(16,185,129,0.1);
                      border-left:3px solid #10b981;border-radius:4px;font-size:13px;">
@@ -149,7 +139,7 @@ function compressImage(file, maxDim = 1920, quality = 0.85) {
           <tr><td style="padding:4px 0;color:#94a3b8;">Fecha:</td><td>${esc(data.fecha || '—')}</td></tr>
           <tr><td style="padding:4px 0;color:#94a3b8;">Folio/Autorización:</td><td>${esc(data.folio || data.autorizacion || '—')}</td></tr>
           <tr><td style="padding:4px 0;color:#94a3b8;">Subtotal:</td><td>$${Number(data.subtotal || 0).toLocaleString('es-MX')}</td></tr>
-          <tr><td style="padding:4px 0;color:#94a3b8;">IVA:</td><td>$${Number(data.iva || 0).toLocaleString('es-MX')}</td></tr>
+          ${data.descuento ? `<tr><td style="padding:4px 0;color:#f59e0b;">Descuento:</td><td style="color:#f59e0b;">-$${Number(data.descuento || 0).toLocaleString('es-MX')}</td></tr>` : ''}
           <tr><td style="padding:4px 0;color:#94a3b8;font-weight:700;">Total:</td><td style="font-weight:700;">$${Number(data.total || 0).toLocaleString('es-MX')}</td></tr>
         </table>
         ${noteBlock}

@@ -151,9 +151,10 @@ async function googleToken() {
 // ── Prompt anti-refusal: SIEMPRE JSON, aunque no lea datos ──────────────
 const PROMPT = [
   'Eres un extractor fiscal mexicano especializado en RESICO 2026.',
-  'Analiza el documento y responde SOLO JSON válido, sin markdown y sin explicaciones.',
-  'IMPORTANTE: Aunque la imagen esté borrosa o no encuentres datos, responde SIEMPRE el JSON con los campos en null y confidence 0.4.',
+  'Analiza el documento y responde SOLO JSON válido, sin markdown.',
   'Detecta si es CFDI, ticket, constancia, opinión de cumplimiento, e.firma u otro.',
+  'Si falta un dato, devuelve null. Si NO hay descuento, devuelve descuento: 0.',
+  'IMPORTANTE: incluye el campo "descuento" cuando aparezca en la nota.',
   'Responde con esta forma exacta:',
   '{',
   '  "document_type": "CFDI|TICKET|CONSTANCIA|OPINION|EFIRMA|OTRO",',
@@ -162,15 +163,15 @@ const PROMPT = [
   '  "rfc_receptor": "string|null",',
   '  "nombre_emisor": "string|null",',
   '  "subtotal": 123.45,',
+  '  "descuento": 0,',
   '  "iva": 19.76,',
   '  "total": 143.21,',
   '  "folio": "string|null",',
   '  "fecha": "YYYY-MM-DD|null",',
   '  "summary": "máximo 6 palabras o null",',
-  '  IMPORTANTE: textos cortos (máx. 6 palabras). Montos: solo números exactos como aparecen.',
   '  "tax_usefulness": "IVA|ISR|AMBOS|NINGUNO"',
   '}',
-  'Regla fiscal pedagógica: ISR RESICO no deduce gastos; IVA solo acreditable con CFDI válido y gasto indispensable.'
+  'Regla: total esperado = subtotal - descuento + IVA. ISR RESICO no deduce; IVA requiere CFDI válido.'
 ].join('\n');
 function geminiBody(mimeType, base64Data) {
   return {
@@ -240,30 +241,42 @@ export default async function handler(req, res) {
   const docType = normalizeDocType(parsed.document_type);
   let confidence = Number(parsed.confidence || 0);
   // ── Heurística de auditoría: subtotal + IVA ≈ total (Art. 29-A CFF) ────
-  const sub = Number(parsed.subtotal ?? 0), iv = Number(parsed.iva ?? 0), tot = Number(parsed.total ?? 0);
+    const sub = Number(parsed.subtotal ?? 0);
+  const desc = Number(parsed.descuento ?? 0);
+  const iv = Number(parsed.iva ?? 0);
+  const tot = Number(parsed.total ?? 0);
   const hasNums = tot > 0;
-  const sumOk = !hasNums || Math.abs(sub + iv - tot) <= Math.max(1, tot * 0.05);
+  // Art. 29-A CFF: descuentos son legítimos → total = subtotal - descuento + IVA
+  const baseGravable = Math.max(0, sub - desc);
+  const totalEsperado = baseGravable + iv;
+  const sumOk = !hasNums || Math.abs(totalEsperado - tot) <= Math.max(1, tot * 0.05);
   const ivaOk = !hasNums || iv <= tot;
-  if (hasNums && (!sumOk || !ivaOk)) {
-    confidence = Math.min(confidence, 0.7); // fuerza Verificación Humana (<85%)
-    parsed.warning_aritmetica = '⚠️ Subtotal + IVA no coincide con el total leído. Confianza reducida para revisión humana (Art. 29-A CFF).';
+  // Validación cruzada: IVA ≈ 16% de la base gravable (tolera 15-16.5% por redondeos)
+  const ivaRateOk = !hasNums || baseGravable === 0 || (iv / baseGravable >= 0.14 && iv / baseGravable <= 0.165);
+  if (hasNums && (!sumOk || !ivaOk || !ivaRateOk)) {
+    confidence = Math.min(confidence, 0.7);
+    parsed.warning_aritmetica = `⚠️ Aritmética fiscal no cuadra (subtotal ${sub} - descuento ${desc} + IVA ${iv} ≠ total ${tot}). Revisión humana requerida (Art. 29-A CFF).`;
+  } else if (hasNums && desc > 0) {
+    parsed.descuento_detected = true;
   }
-  const safetyFlag = confidence < 0.85; 
+  const safetyFlag = confidence < 0.85;
   const doc = {
     file_name: fileName, doc_type: docType, document_type: docType, confidence,
     file_url: `local:${fileName}`,
-    extracted_data: {
+        extracted_data: {
       rfc_emisor: parsed.rfc_emisor || null, rfc_receptor: parsed.rfc_receptor || null,
       nombre_emisor: parsed.nombre_emisor || null,
-      subtotal: parsed.subtotal ?? null, iva: parsed.iva ?? null, total: parsed.total ?? null,
+      subtotal: parsed.subtotal ?? null, descuento: parsed.descuento ?? 0,
+      iva: parsed.iva ?? null, total: parsed.total ?? null,
       folio: parsed.folio || null, fecha: parsed.fecha || null,
-      summary: parsed.summary || null, tax_usefulness: parsed.tax_usefulness || null
+      summary: parsed.summary || null, tax_usefulness: parsed.tax_usefulness || null,
+      descuento_detected: !!parsed.descuento_detected
     },
     safety_flag: safetyFlag, validation_status: 'pendiente', needs_review: safetyFlag,
     source: isDemo ? 'ocr_ai_demo' : 'ocr_ai',
     pedagogical_note: 'ISR RESICO: sin deducciones. IVA: requiere CFDI válido y gasto indispensable para acreditamiento.'
   };
-  if (parsed.warning_aritmetica) parsed.warning = parsed.warning_aritmetica;
+
   if (user && SUPABASE_URL && SUPABASE_SERVICE_KEY) {
     const rec = String(doc.extracted_data.rfc_receptor || '').toUpperCase().trim();
     if (rec && rec !== 'XAXX010101000' && rec !== 'XEXX010101000') {

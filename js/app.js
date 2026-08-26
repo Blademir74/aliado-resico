@@ -677,6 +677,38 @@ const App = (() => {
     console.info('[Wizard] controles vinculados (FIX W-1)');
   }
 
+// ── FIX W-2: cableado defensivo del wizard ─────────────────────────────
+// Dueño único de los botones "Siguiente", "Calcular diagnóstico",
+// "Guardar diagnóstico" y "Reiniciar". Funciona aunque el HTML tenga
+// onclick inline (los remueve) o no tenga handlers en absoluto.
+function bindWizardControls() {
+  // 1) Crear contenedor de mensajes si no existe
+  if (!byId('wizard-msg')) {
+    const anchor = byId('wizard-tab') || document.querySelector('.wizard-step')?.parentElement || document.body;
+    const msg = document.createElement('div');
+    msg.id = 'wizard-msg';
+    msg.style.cssText = 'display:none;margin:10px 0;padding:10px 14px;border-radius:8px;font-size:13px;';
+    anchor.prepend(msg);
+  }
+  // 2) Función auxiliar: wire sin duplicar listeners
+  const wire = (btn, fn) => {
+    btn.removeAttribute('onclick'); // mata handlers inline muertos
+    if (!btn.dataset.boundWiz) {
+      btn.dataset.boundWiz = '1';
+      btn.addEventListener('click', (e) => { e.preventDefault(); fn(); });
+    }
+  };
+  // 3) Búsqueda universal por texto (independiente de IDs)
+  document.querySelectorAll('button').forEach(btn => {
+    const t = (btn.textContent || '').trim().toLowerCase();
+    if (t === 'siguiente') wire(btn, wizardNext);
+    else if (t.includes('calcular diagnóstico')) wire(btn, completeWizard);
+    else if (t.includes('guardar diagnóstico')) wire(btn, saveDiagnostic);
+    else if (t === 'reiniciar') wire(btn, resetWizard);
+  });
+  console.info('[Wizard] controles vinculados (FIX W-2)');
+}
+
   function syncAndRender() {
     renderKPIs(); renderIncomeWithCssClasses(); renderHealth();
     renderHealthExtended(); renderFeed(); renderCarpetaFiscal();
@@ -749,12 +781,18 @@ const App = (() => {
     try { window.AuthManager?.init?.(); } catch (err) { console.error('[App] ⚠️ AuthManager.init() falló:', err?.message || err); }
   }
 
-  return { init, navigateTo, syncAndRender, wizardNext, resetWizard, saveDiagnostic, renderCarpetaFiscal, hideAuthOverlay, showAuthOverlay };
+  return {
+    init, navigateTo, syncAndRender,
+    wizardNext, resetWizard, completeWizard, saveDiagnostic,
+    renderCarpetaFiscal, hideAuthOverlay, showAuthOverlay,
+    bindWizardControls
+  };
 })();
 
 window.App = App;
 window.wizardNext = typeof App.wizardNext === 'function' ? App.wizardNext : function () { console.warn('[App] wizardNext no disponible todavía.'); };
 window.resetWizard = App.resetWizard;
+window.completeWizard = App.completeWizard;
 window.saveDiagnostic = App.saveDiagnostic;
 window.Dashboard = App.syncAndRender;
 
