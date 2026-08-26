@@ -902,10 +902,11 @@ window.Dashboard = App.syncAndRender;
   }
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', run);
   else run();
-})();
 
-if (document.readyState === 'loading') {
+  if (document.readyState === 'loading') {
   document.addEventListener('DOMContentLoaded', () => App.init());
 } else {
   App.init();
 }
+})();
+
