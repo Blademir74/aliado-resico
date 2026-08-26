@@ -77,13 +77,26 @@ async function callVertex(prompt) {
   if (!r.ok) throw new Error(`Vertex HTTP ${r.status}`);
   return parseGemini(await r.json());
 }
-async function callAIStudio(model, prompt) {
-  const r = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${GEMINI_KEY}`, {
-    method: 'POST', headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] })
-  });
-  if (!r.ok) throw new Error(`AIStudio HTTP ${r.status}`);
-  return parseGemini(await r.json());
+async function callGemini(model, message, context) {
+  const prompt = `Eres el asesor fiscal RESICO 2026 de Aliado RESICO (México). Contexto del usuario: ingreso acumulado $${context?.incomeYTD || 0} MXN de un límite de $3,500,000. Responde SOLO JSON válido con estas llaves exactas (sin espacios): {"respuestaFiscal": "string", "fundamentoLegal": "string", "diferenciacionIsrIva": "string", "accionConcreta": "string"} Pregunta del usuario: ${message}`;
+  let lastErr = null;
+  for (let attempt = 0; attempt < 3; attempt++) {
+    const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${GEMINI_KEY}`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] })
+    });
+    if (res.status === 429 || res.status >= 500) {           // backoff exponencial
+      lastErr = new Error(`Gemini HTTP ${res.status}`);
+      await new Promise(r => setTimeout(r, 300 * Math.pow(2, attempt)));
+      continue;
+    }
+    if (!res.ok) throw new Error(`Gemini HTTP ${res.status}`);
+    const data = await res.json();
+    const text = data?.candidates?.[0]?.content?.parts?.map(p => p.text || '').join('') || '';
+    const clean = text.replace(/```json|```/g, '').trim();
+    return JSON.parse(clean.startsWith('{') ? clean : clean.slice(clean.indexOf('{'), clean.lastIndexOf('}') + 1));
+  }
+  throw lastErr;
 }
 export default async function handler(req, res) {
   setHeaders(req, res);

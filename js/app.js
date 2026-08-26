@@ -351,42 +351,69 @@ const App = (() => {
   };
 
   function renderCarpetaFiscal() {
-    const container = byId('carpeta-fiscal-content');
-    if (!container) return;
-    const carpeta = window.Store?.getCarpetaFiscal?.();
-    if (!carpeta) return;
-    const currentMonthIdx = new Date().getMonth();
-    const monthTabs = carpeta.monthlyFolders.map((folder, idx) => {
-      const isActive = idx === (window.__carpetaActiveMonth ?? currentMonthIdx);
-      return `<button class="carpeta-month-tab" data-month-idx="${idx}" style="padding:8px 14px;border-radius:6px;border:1px solid ${isActive ? '#10b981' : '#334155'}; background:${isActive ? 'rgba(16,185,129,0.15)' : 'transparent'}; color:${isActive ? '#10b981' : '#94a3b8'};cursor:pointer;font-size:13px; white-space:nowrap;">
-        ${folder.monthName} ${folder.total > 0 ? `<span style="opacity:.7;">(${folder.total})</span>` : ''}
-      </button>`;
-    }).join('');
-    const activeIdx = window.__carpetaActiveMonth ?? currentMonthIdx;
-    const activeFolder = carpeta.monthlyFolders[activeIdx];
-    const categoryBlocks = Object.entries(CATEGORY_LABELS).map(([key, meta]) => {
-      const docs = activeFolder?.categories?.[key] || [];
-      const items = docs.length
-        ? docs.map(d => `<div style="display:flex;justify-content:space-between;align-items:center; padding:8px 10px;border-bottom:1px solid #1e293b;font-size:13px;">
-            <span>${esc(d.file_name)}</span>
-            <span style="color:${d.needs_review ? '#f59e0b' : '#10b981'};font-size:11px;">${d.needs_review ? '⚠️ Revisar' : '✅ OK'}</span>
-          </div>`).join('')
-        : `<p style="color:#64748b;font-size:12px;padding:8px 10px;">Sin documentos este mes.</p>`;
-      return `<div style="border:1px solid #1e293b;border-radius:8px;margin-bottom:10px;overflow:hidden;">
-        <div style="padding:8px 12px;background:rgba(255,255,255,0.03);border-left:3px solid ${meta.color};font-weight:600;font-size:13px;">
-          ${meta.label} <span style="opacity:.6;">(${docs.length})</span>
-        </div>${items}</div>`;
-    }).join('');
-    container.innerHTML = `<div style="display:flex;gap:6px;overflow-x:auto;padding-bottom:8px;margin-bottom:14px;">${monthTabs}</div>
-      <h4 style="margin:0 0 10px;color:#e2e8f0;">${activeFolder?.monthName || ''} ${carpeta.year} — ${activeFolder?.total || 0} documentos</h4>
-      ${categoryBlocks}`;
-    container.querySelectorAll('.carpeta-month-tab').forEach(btn => {
-      btn.addEventListener('click', () => {
-        window.__carpetaActiveMonth = Number(btn.getAttribute('data-month-idx'));
-        renderCarpetaFiscal();
-      });
-    });
+  // ── FIX C-1: contenedor defensivo (el HTML no tiene el id) ────────────
+  let container = byId('carpeta-fiscal-content');
+  if (!container) {
+    const tab = byId('carpeta-tab');
+    if (!tab) { console.warn('[Carpeta] no existe #carpeta-tab'); return; }
+    container = document.createElement('div');
+    container.id = 'carpeta-fiscal-content';
+    container.style.marginTop = '12px';
+    tab.appendChild(container);
+    console.info('[Carpeta] contenedor creado dinámicamente (FIX C-1)');
   }
+  const carpeta = window.Store?.getCarpetaFiscal?.();
+  if (!carpeta) return;
+
+  // ── Resumen documental (chips por categoría) ──────────────────────────
+  let summaryEl = byId('carpeta-summary');
+  if (!summaryEl) {
+    summaryEl = document.createElement('div');
+    summaryEl.id = 'carpeta-summary';
+    summaryEl.style.cssText = 'display:flex;gap:8px;flex-wrap:wrap;margin:0 0 14px;';
+    container.parentNode.insertBefore(summaryEl, container);
+  }
+  const s = carpeta.summary || {};
+  summaryEl.innerHTML = Object.entries(CATEGORY_LABELS).map(([key, meta]) => `
+    <span style="padding:6px 12px;border-radius:999px;border:1px solid ${meta.color};color:${meta.color};font-size:12px;font-weight:600;">
+      ${meta.label}: ${Number(s[key] || 0)}
+    </span>`).join('') + `
+    <span style="padding:6px 12px;border-radius:999px;background:rgba(255,255,255,0.06);color:#e2e8f0;font-size:12px;font-weight:700;">
+      Total: ${Number(s.total || 0)}
+    </span>`;
+
+  // ── Tabs de meses (Enero–Diciembre 2026) ──────────────────────────────
+  const currentMonthIdx = new Date().getMonth();
+  const monthTabs = carpeta.monthlyFolders.map((folder, idx) => {
+    const isActive = idx === (window.__carpetaActiveMonth ?? currentMonthIdx);
+    return `<button class="carpeta-month-tab" data-month-idx="${idx}" style="padding:8px 14px;border-radius:6px;border:1px solid ${isActive ? '#10b981' : '#334155'}; background:${isActive ? 'rgba(16,185,129,0.15)' : 'transparent'}; color:${isActive ? '#10b981' : '#94a3b8'};cursor:pointer;font-size:13px; white-space:nowrap;"> ${folder.monthName} ${folder.total > 0 ? `<span style="opacity:.7;">(${folder.total})</span>` : ''} </button>`;
+  }).join('');
+  const activeIdx = window.__carpetaActiveMonth ?? currentMonthIdx;
+  const activeFolder = carpeta.monthlyFolders[activeIdx];
+
+  // ── Bloques por categoría del mes activo ──────────────────────────────
+  const categoryBlocks = Object.entries(CATEGORY_LABELS).map(([key, meta]) => {
+    const docs = activeFolder?.categories?.[key] || [];
+    const items = docs.length
+      ? docs.map(d => `<div style="display:flex;justify-content:space-between;align-items:center; padding:8px 10px;border-bottom:1px solid #1e293b;font-size:13px;"> <span>${esc(d.file_name)}</span> <span style="color:${d.needs_review ? '#f59e0b' : '#10b981'};font-size:11px;"> ${d.needs_review ? '⚠️ Revisar' : '✅ OK'} </span> </div>`).join('')
+      : `<p style="color:#64748b;font-size:12px;padding:8px 10px;">Sin documentos este mes.</p>`;
+    return `
+      <div style="border:1px solid #1e293b;border-radius:8px;margin-bottom:10px;overflow:hidden;">
+        <div style="padding:8px 12px;background:rgba(255,255,255,0.03); border-left:3px solid ${meta.color};font-weight:600;font-size:13px;">
+          ${meta.label} <span style="opacity:.6;">(${docs.length})</span>
+        </div>${items}
+      </div>`;
+  }).join('');
+
+  container.innerHTML = `<div style="display:flex;gap:6px;overflow-x:auto;padding-bottom:8px;margin-bottom:14px;">${monthTabs}</div> <h4 style="margin:0 0 10px;color:#e2e8f0;"> ${activeFolder?.monthName || ''} ${carpeta.year} — ${activeFolder?.total || 0} documentos </h4> ${categoryBlocks}`;
+  container.querySelectorAll('.carpeta-month-tab').forEach(btn => {
+    btn.addEventListener('click', () => {
+      window.__carpetaActiveMonth = Number(btn.getAttribute('data-month-idx'));
+      renderCarpetaFiscal();
+    });
+  });
+  console.info('[Carpeta] render OK — total docs:', s.total || 0);
+}
 
   // ── Clasificador/Chat ──────────────────────────────────────
   function normalizeAssistantReply(reply) {

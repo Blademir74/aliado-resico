@@ -204,8 +204,21 @@ try {
             authResult = await client.auth.signUp({ email, password: pass });
             if (authResult.error) throw authResult.error;
             if (authResult.data?.user && !authResult.data?.session) {
-              if (msgEl) { msgEl.hidden = false; msgEl.textContent = '✅ Cuenta creada. Revisa tu correo para confirmar.'; msgEl.className = 'auth-msg success'; msgEl.style.color = '#10b981'; } return;
-            }
+              if (msgEl) {
+                msgEl.hidden = false;
+                msgEl.innerHTML = `
+                  ✅ <strong>Cuenta creada.</strong> Revisa tu correo para confirmar el registro.<br>
+                  <span style="font-size:12px;opacity:0.85;">
+                    ¿No lo ves? Revisa <strong>Spam</strong> o <strong>Promociones</strong>.<br>
+                    Si tras 5 minutos no llega, contacta a soporte con tu correo registrado.
+                  </span>
+                `;
+                msgEl.className = 'auth-msg success';
+                msgEl.style.color = '#10b981';
+                msgEl.style.fontWeight = '500';
+              }
+              return;
+}
           } else {
             authResult = await client.auth.signInWithPassword({ email, password: pass });
             if (authResult.error) throw authResult.error;

@@ -132,7 +132,7 @@ const Store = (() => {
   function applyMetricRow(row) {
     if (!row) return;
     const previousLevel = state.fiscalMetrics.riskLevel;
-    const remoteIncome = Number(row.income_ytd ?? 0);
+    const remoteIncome = Number(row.income_ytd ?? row.cumulative_income ?? 0);
     if (remoteIncome === 0 && state.incomeYTD > 0) {
       console.info('[Store] applyMetricRow: valor remoto 0 ignorado, conservando local:', state.incomeYTD);
     } else {
@@ -265,12 +265,29 @@ const Store = (() => {
     try { const { error } = await db.from('conversations').upsert(payload, { onConflict: 'id' }); if (error) logSupabaseError('upsertConversation', error, payload); }
     catch (e) { console.warn('[Store] upsertConversation exception:', e?.message || e, payload); }
   }
-  async function upsertMetrics() {
-    if (!db || !usr?.id) return;
-    const payload = { user_id: usr.id, income_ytd: Number(state.incomeYTD || 0), total_processed: Number(state.metrics?.totalProcessed || state.conversations.length || 0), avg_confidence: Number(state.metrics?.avgConfidence || 0) };
-    try { const { error } = await db.from('fiscal_metrics').upsert(payload, { onConflict: 'user_id' }); if (error) logSupabaseError('upsertMetrics', error, payload); }
-    catch (e) { console.warn('[Store] upsertMetrics exception:', e?.message || e, payload); }
+ async function upsertMetrics() {
+  if (!db || !usr?.id) return;
+  
+  const payload = {
+    user_id: usr.id,
+    income_ytd: Number(state.incomeYTD || 0),
+    total_processed: Number(state.metrics?.totalProcessed || state.conversations.length || 0),
+    avg_confidence: Number(state.metrics?.avgConfidence || 0),
+    // Nuevas columnas agregadas
+    cumulative_income: Number(state.incomeYTD || 0),
+    annual_limit: DEFAULT_LIMIT,
+    risk_level: state.fiscalMetrics.riskLevel || 'SEGURO'
+  };
+  
+  try { 
+    const { error } = await db.from('fiscal_metrics').upsert(payload, { onConflict: 'user_id' }); 
+    if (error) logSupabaseError('upsertMetrics', error, payload); 
   }
+  catch (e) { 
+    console.warn('[Store] upsertMetrics exception:', e?.message || e, payload); 
+  }
+}
+
   async function saveDocumentRemote(doc) {
     if (!db || !usr?.id) return;
     const normalizedType = doc.document_type || doc.doc_type || 'OTRO';
@@ -428,10 +445,24 @@ const Store = (() => {
     state.invoiceProfiles = Array.isArray(list) ? list.slice(0, 50) : [];
     persist(); emitAll();
   }
-  function updateDiagnostic(data) {
-    state.diagnostic = { ...state.diagnostic, ...data, completedAt: data?.completedAt || state.diagnostic.completedAt || new Date().toISOString() };
-    persist(); emit('diagnosticUpdated', state.diagnostic); emitAll();
-  }
+ function updateDiagnostic(data) {
+  state.diagnostic = { ...state.diagnostic, ...data, completedAt: data?.completedAt || state.diagnostic.completedAt || new Date().toISOString() };
+  persist(); emit('diagnosticUpdated', state.diagnostic); emitAll();
+  persistDiagnosticRemote(state.diagnostic); // Tarea 1.4: auditoría en Supabase
+}
+async function persistDiagnosticRemote(d) {
+  if (!db || !usr?.id || !d?.completedAt) return;
+  const payload = {
+    user_id: usr.id, income: Number(d.income || 0), salarios: Number(d.salarios || 0),
+    intereses: Number(d.intereses || 0), mixtos: !!d.mixtos, socio_pm: !!d.socioPM,
+    cfdi_global: !!d.cfdiGlobal, buzon_activo: !!d.buzonActivo,
+    anual_obligatoria: !!d.anualObligatoria, riesgo_multa: !!d.riesgoMulta,
+    riesgo_buzon: !!d.riesgoBuzon, risk_level: d.riskLevel || 'SEGURO',
+    recomendacion: d.recomendacion || ''
+  };
+  try { const { error } = await db.from('diagnostic_results').insert(payload); if (error) logSupabaseError('persistDiagnosticRemote', error, payload); }
+  catch (e) { console.warn('[Store] persistDiagnosticRemote:', e?.message || e); }
+}
   function reset() {
     state = clone(DEF); persist();
     try { if (rtChannel && db) db.removeChannel(rtChannel); } catch {}
