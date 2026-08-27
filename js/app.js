@@ -427,6 +427,47 @@ const App = (() => {
       renderCarpetaFiscal();
     });
   });
+   container.querySelectorAll('.carpeta-month-tab').forEach(btn => {
+    btn.addEventListener('click', () => {
+      window.__carpetaActiveMonth = Number(btn.getAttribute('data-month-idx'));
+      renderCarpetaFiscal();
+    });
+  });
+  
+  // ── FIX A.3: Bindeo de vista previa con URL firmada (60s) ─────────────
+  container.querySelectorAll('a[data-storage-path]').forEach(link => {
+    link.addEventListener('click', async (e) => {
+      e.preventDefault();
+      const path = link.getAttribute('data-storage-path');
+      if (!path) return;
+      
+      const supabase = window.APP_STATE?.supabase;
+      if (!supabase?.storage) {
+        alert('Supabase Storage no disponible. Recarga la página.');
+        return;
+      }
+      
+      try {
+        const { data, error } = await supabase.storage
+          .from('carpeta-fiscal')
+          .createSignedUrl(path, 60); // URL válida por 60 segundos
+        
+        if (error || !data?.signedUrl) {
+          console.error('[Carpeta] Error generando URL firmada:', error);
+          alert('No se pudo generar la vista previa. Verifica que el archivo exista en Storage.');
+          return;
+        }
+        
+        // Abrir en nueva pestaña
+        window.open(data.signedUrl, '_blank');
+        console.info('[Carpeta] URL firmada generada:', data.signedUrl.slice(0, 80) + '...');
+      } catch (err) {
+        console.error('[Carpeta] Excepción al generar URL firmada:', err);
+        alert('Error al abrir el archivo. Intenta de nuevo.');
+      }
+    });
+  });
+  
   console.info('[Carpeta] render OK — total docs:', s.total || 0);
 }
 
