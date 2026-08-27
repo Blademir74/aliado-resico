@@ -728,6 +728,12 @@
             El IVA desglosado es indispensable para acreditamiento; el ISR RESICO no deduce este gasto.
           </p>
 
+          <div style="margin-top:14px;display:flex;gap:8px;flex-wrap:wrap;">
+            <button onclick="exportToExcel()" class="btn-secondary">
+              📊 Descargar Excel Mensual (Papel de trabajo)
+            </button>
+          </div>
+
           <!-- Input dual: cámara en móvil, selector de archivo en desktop -->
           <div class="ocr-input-row" style="display:flex;gap:10px;flex-wrap:wrap;margin:12px 0;">
             <label for="ocr-file-input" class="btn-scan-primary"
@@ -930,5 +936,6 @@
 <script src="js/FiscalWizard.js"></script>
 <script src="js/app.js"></script>
 <script src="js/rfc-consult.js"></script>
+<script src="https://cdn.sheetjs.com/xlsx-0.20.1/package/dist/xlsx.full.min.js"></script>
 </body>
 </html>

@@ -295,5 +295,45 @@ export default async function handler(req, res) {
       } catch (e) { console.warn('[document-ocr] validación receptor:', e.message); }
     }
   }
+
+  // ── BLOQUE A.2: subir archivo físico a Supabase Storage ─────────────────
+// Ruta: /{user_id}/{YYYY}/{MM}/{ingresos|gastos}/{file_name}
+// Art. 29-A CFF: conservación jerárquica por año/mes/categoría.
+let uploadedUrl = null;
+try {
+  const SUPABASE_URL_ENV = process.env.SUPABASE_URL;
+  const SERVICE_KEY = process.env.SUPABASE_SERVICE_KEY;
+  const ownerUid = user.uid;
+  const fecha = parsed.fecha || new Date().toISOString().slice(0, 10);
+  const year = fecha.slice(0, 4);
+  const month = fecha.slice(5, 7);
+  const cat = (parsed.tax_usefulness || '').toUpperCase();
+  const folder = (cat === 'ISR' || docType === 'CFDI') ? 'ingresos' : 'gastos';
+  const storagePath = `${ownerUid}/${year}/${month}/${folder}/${Date.now()}_${fileName}`;
+  const mime = mimeType || 'application/octet-stream';
+  const buffer = Buffer.from(base64Data, 'base64');
+  const uploadRes = await fetch(
+    `${SUPABASE_URL_ENV}/storage/v1/object/carpeta-fiscal/${encodeURIComponent(storagePath)}`,
+    {
+      method: 'POST',
+      headers: {
+        apikey: SERVICE_KEY,
+        Authorization: `Bearer ${SERVICE_KEY}`,
+        'Content-Type': mime,
+        'x-upsert': 'true'
+      },
+      body: buffer
+    }
+  );
+  if (uploadRes.ok) {
+    uploadedUrl = `supabase://carpeta-fiscal/${storagePath}`;
+  } else {
+    const err = await uploadRes.text();
+    console.warn('[document-ocr] Storage upload falló:', err);
+  }
+} catch (e) {
+  console.warn('[document-ocr] Storage upload exception:', e.message);
+}
+
   return res.status(200).json({ ok: true, engine: ENGINE, is_fallback: false, model: outcome.model, document: doc, needsHumanReview: safetyFlag });
 }

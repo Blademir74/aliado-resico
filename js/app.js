@@ -391,12 +391,27 @@ const App = (() => {
   const activeIdx = window.__carpetaActiveMonth ?? currentMonthIdx;
   const activeFolder = carpeta.monthlyFolders[activeIdx];
 
-  // ── Bloques por categoría del mes activo ──────────────────────────────
+ // ── Bloques por categoría del mes activo ──────────────────────────────
   const categoryBlocks = Object.entries(CATEGORY_LABELS).map(([key, meta]) => {
     const docs = activeFolder?.categories?.[key] || [];
     const items = docs.length
-      ? docs.map(d => `<div style="display:flex;justify-content:space-between;align-items:center; padding:8px 10px;border-bottom:1px solid #1e293b;font-size:13px;"> <span>${esc(d.file_name)}</span> <span style="color:${d.needs_review ? '#f59e0b' : '#10b981'};font-size:11px;"> ${d.needs_review ? '⚠️ Revisar' : '✅ OK'} </span> </div>`).join('')
+      ? docs.map(d => {
+          // ── INICIO DE LA INTEGRACIÓN DE `file_url` ─────────────────────
+          // Lógica de vista previa: si file_url empieza con 'supabase://', 
+          // crea un enlace con el path limpiado. Si no, solo muestra el nombre.
+          const preview = d.file_url?.startsWith('supabase://')
+            ? `<a href="#" data-storage-path="${d.file_url.replace('supabase://carpeta-fiscal/', '')}"
+                   style="color:#10b981;text-decoration:underline;">${esc(d.file_name)}</a>`
+            : esc(d.file_name);
+          // ── FIN DE LA INTEGRACIÓN ──────────────────────────────────────────
+
+          return `<div style="display:flex;justify-content:space-between;align-items:center; padding:8px 10px;border-bottom:1px solid #1e293b;font-size:13px;">
+            <span>${preview}</span>
+            <span style="color:${d.needs_review ? '#f59e0b' : '#10b981'};font-size:11px;"> ${d.needs_review ? '⚠️ Revisar' : '✅ OK'} </span>
+          </div>`;
+        }).join('')
       : `<p style="color:#64748b;font-size:12px;padding:8px 10px;">Sin documentos este mes.</p>`;
+    
     return `
       <div style="border:1px solid #1e293b;border-radius:8px;margin-bottom:10px;overflow:hidden;">
         <div style="padding:8px 12px;background:rgba(255,255,255,0.03); border-left:3px solid ${meta.color};font-weight:600;font-size:13px;">
@@ -414,6 +429,52 @@ const App = (() => {
   });
   console.info('[Carpeta] render OK — total docs:', s.total || 0);
 }
+
+// ── BLOQUE B: Exportación a Excel (papel de trabajo del contador) ────────
+// Art. 29 CFF + RMF 2026 regla 2.7.1.9: conservación y presentación de CFDIs.
+function exportToExcel(yearMonth = null) {
+  if (typeof XLSX === 'undefined') {
+    alert('Librería Excel no disponible. Recarga la página.');
+    return;
+  }
+  const st = window.Store?.getState?.();
+  if (!st) return;
+  const carpeta = window.Store?.getCarpetaFiscal?.();
+  const allDocs = (carpeta?.monthlyFolders || []).flatMap(f =>
+    Object.values(f.categories || {}).flat()
+  );
+  const filtered = yearMonth
+    ? allDocs.filter(d => (d.fecha_fiscal || d.created_at || '').startsWith(yearMonth))
+    : allDocs;
+  const rows = filtered.map(d => ({
+    'Fecha': d.fecha_fiscal || (d.created_at || '').slice(0, 10),
+    'Tipo': d.document_type || 'OTRO',
+    'RFC Emisor': d.rfc_emisor || '',
+    'RFC Receptor': d.rfc_receptor || '',
+    'Folio': d.folio || '',
+    'Subtotal': Number(d.subtotal || 0),
+    'IVA 16%': Number(d.iva || 0),
+    'Total': Number(d.total || 0),
+    'Uso fiscal': d.tax_usefulness || '',
+    'Categoría': d.folder_category || '',
+    'Archivo': d.file_name || '',
+    'Estatus': d.validation_status || 'pendiente',
+    'Revisión': d.needs_review ? 'Humana requerida' : 'IA validado'
+  }));
+  const wb = XLSX.utils.book_new();
+  // Hoja 1: Papel de trabajo IVA (Art. 5 Ley del IVA)
+  const wsIva = XLSX.utils.json_to_sheet(rows.filter(r => r['Uso fiscal'] !== 'ISR'));
+  XLSX.utils.book_append_sheet(wb, wsIva, 'IVA Acreditable');
+  // Hoja 2: Ingresos (Art. 113-E LISR)
+  const wsIsr = XLSX.utils.json_to_sheet(rows.filter(r => r['Uso fiscal'] === 'ISR'));
+  XLSX.utils.book_append_sheet(wb, wsIsr, 'Ingresos RESICO');
+  // Hoja 3: Consolidado
+  const wsAll = XLSX.utils.json_to_sheet(rows);
+  XLSX.utils.book_append_sheet(wb, wsAll, 'Consolidado');
+  const stamp = new Date().toISOString().slice(0, 10);
+  XLSX.writeFile(wb, `AliadoRESICO_PapelTrabajo_${stamp}.xlsx`);
+}
+window.exportToExcel = exportToExcel;
 
   // ── Clasificador/Chat ──────────────────────────────────────
   function normalizeAssistantReply(reply) {
