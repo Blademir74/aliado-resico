@@ -420,14 +420,10 @@ const App = (() => {
       </div>`;
   }).join('');
 
-  container.innerHTML = `<div style="display:flex;gap:6px;overflow-x:auto;padding-bottom:8px;margin-bottom:14px;">${monthTabs}</div> <h4 style="margin:0 0 10px;color:#e2e8f0;"> ${activeFolder?.monthName || ''} ${carpeta.year} — ${activeFolder?.total || 0} documentos </h4> ${categoryBlocks}`;
+   container.innerHTML = `<div style="display:flex;gap:6px;overflow-x:auto;padding-bottom:8px;margin-bottom:14px;">${monthTabs}</div> <h4 style="margin:0 0 10px;color:#e2e8f0;"> ${activeFolder?.monthName || ''} ${carpeta.year} — ${activeFolder?.total || 0} documentos </h4> ${categoryBlocks}`;
+  
+  // Bindeo de tabs de meses (UNA SOLA VEZ)
   container.querySelectorAll('.carpeta-month-tab').forEach(btn => {
-    btn.addEventListener('click', () => {
-      window.__carpetaActiveMonth = Number(btn.getAttribute('data-month-idx'));
-      renderCarpetaFiscal();
-    });
-  });
-   container.querySelectorAll('.carpeta-month-tab').forEach(btn => {
     btn.addEventListener('click', () => {
       window.__carpetaActiveMonth = Number(btn.getAttribute('data-month-idx'));
       renderCarpetaFiscal();
@@ -450,7 +446,7 @@ const App = (() => {
       try {
         const { data, error } = await supabase.storage
           .from('carpeta-fiscal')
-          .createSignedUrl(path, 60); // URL válida por 60 segundos
+          .createSignedUrl(path, 60);
         
         if (error || !data?.signedUrl) {
           console.error('[Carpeta] Error generando URL firmada:', error);
@@ -458,7 +454,6 @@ const App = (() => {
           return;
         }
         
-        // Abrir en nueva pestaña
         window.open(data.signedUrl, '_blank');
         console.info('[Carpeta] URL firmada generada:', data.signedUrl.slice(0, 80) + '...');
       } catch (err) {
@@ -474,46 +469,30 @@ const App = (() => {
 // ── BLOQUE B: Exportación a Excel (papel de trabajo del contador) ────────
 // Art. 29 CFF + RMF 2026 regla 2.7.1.9: conservación y presentación de CFDIs.
 function exportToExcel(yearMonth = null) {
-  if (typeof XLSX === 'undefined') {
-    alert('Librería Excel no disponible. Recarga la página.');
-    return;
-  }
+  if (typeof XLSX === 'undefined') { alert('Librería Excel no disponible. Recarga la página.'); return; }
   const st = window.Store?.getState?.();
   if (!st) return;
-  const carpeta = window.Store?.getCarpetaFiscal?.();
-  const allDocs = (carpeta?.monthlyFolders || []).flatMap(f =>
-    Object.values(f.categories || {}).flat()
-  );
-  const filtered = yearMonth
-    ? allDocs.filter(d => (d.fecha_fiscal || d.created_at || '').startsWith(yearMonth))
-    : allDocs;
-  const rows = filtered.map(d => ({
-    'Fecha': d.fecha_fiscal || (d.created_at || '').slice(0, 10),
-    'Tipo': d.document_type || 'OTRO',
-    'RFC Emisor': d.rfc_emisor || '',
-    'RFC Receptor': d.rfc_receptor || '',
-    'Folio': d.folio || '',
-    'Subtotal': Number(d.subtotal || 0),
-    'IVA 16%': Number(d.iva || 0),
-    'Total': Number(d.total || 0),
-    'Uso fiscal': d.tax_usefulness || '',
-    'Categoría': d.folder_category || '',
-    'Archivo': d.file_name || '',
-    'Estatus': d.validation_status || 'pendiente',
-    'Revisión': d.needs_review ? 'Humana requerida' : 'IA validado'
-  }));
+  const docs = st.documents || []; // datos COMPLETOS (no slim)
+  const rows = docs.map(d => {
+    const e = d.extracted_data || {};
+    const fecha = e.fecha || (d.created_at || '').slice(0, 10);
+    return {
+      'Fecha': fecha, 'Tipo': d.document_type || 'OTRO',
+      'RFC Emisor': e.rfc_emisor || '', 'RFC Receptor': e.rfc_receptor || '',
+      'Folio': e.folio || '', 'Subtotal': Number(e.subtotal || 0),
+      'Descuento': Number(e.descuento || 0), 'IVA 16%': Number(e.iva || 0),
+      'Total': Number(e.total || 0), 'Uso fiscal': e.tax_usefulness || '',
+      'Categoría': d.folder_category || '', 'Archivo': d.file_name || '',
+      'Estatus': d.validation_status || 'pendiente',
+      'Revisión': d.needs_review ? 'Humana requerida' : 'IA validado'
+    };
+  }).filter(r => !yearMonth || String(r['Fecha']).startsWith(yearMonth));
+  if (!rows.length) { alert('No hay documentos para exportar en el periodo.'); return; }
   const wb = XLSX.utils.book_new();
-  // Hoja 1: Papel de trabajo IVA (Art. 5 Ley del IVA)
-  const wsIva = XLSX.utils.json_to_sheet(rows.filter(r => r['Uso fiscal'] !== 'ISR'));
-  XLSX.utils.book_append_sheet(wb, wsIva, 'IVA Acreditable');
-  // Hoja 2: Ingresos (Art. 113-E LISR)
-  const wsIsr = XLSX.utils.json_to_sheet(rows.filter(r => r['Uso fiscal'] === 'ISR'));
-  XLSX.utils.book_append_sheet(wb, wsIsr, 'Ingresos RESICO');
-  // Hoja 3: Consolidado
-  const wsAll = XLSX.utils.json_to_sheet(rows);
-  XLSX.utils.book_append_sheet(wb, wsAll, 'Consolidado');
-  const stamp = new Date().toISOString().slice(0, 10);
-  XLSX.writeFile(wb, `AliadoRESICO_PapelTrabajo_${stamp}.xlsx`);
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(rows.filter(r => r['Uso fiscal'] !== 'ISR')), 'IVA Acreditable');
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(rows.filter(r => r['Uso fiscal'] === 'ISR')), 'Ingresos RESICO');
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(rows), 'Consolidado');
+  XLSX.writeFile(wb, `AliadoRESICO_PapelTrabajo_${new Date().toISOString().slice(0, 10)}.xlsx`);
 }
 window.exportToExcel = exportToExcel;
 
