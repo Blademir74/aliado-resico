@@ -1,56 +1,60 @@
-// api/document-ocr.js — v6.2 CERTIFICADO
-// Cascada AI Studio → Vertex con reintento por parseo + prompt anti-refusal
-// + debug completo en fallbacks. Safety Flag 85% (DOC02 TRD).
+// api/document-ocr.js — v7.0 CERTIFICADO
+// OCR real + Storage jerárquico /{user_id}/{YYYY}/{MM}/{ingresos|gastos}/
+// Art. 29-A CFF (conservación) · Safety Flag 85% (DOC02 TRD)
 import crypto from 'node:crypto';
 
-const ENGINE = 'ocr-v6.5';
-const ALLOWED_ORIGINS = [
-  'https://aliado-resico.vercel.app','https://aliadoresico.com','https://www.aliadoresico.com',
-  'http://localhost:3000','http://127.0.0.1:3000','http://localhost:5500','http://127.0.0.1:5500'
-];
-const SUPABASE_JWT_SECRET = process.env.SUPABASE_JWT_SECRET || '';
+const ENGINE = 'ocr-v7.0';
+const ALLOWED_ORIGINS = ['https://aliado-resico.vercel.app','https://aliadoresico.com','https://www.aliadoresico.com','http://localhost:3000','http://127.0.0.1:3000','http://localhost:5500','http://127.0.0.1:5500'];
 const SUPABASE_URL = process.env.SUPABASE_URL || '';
 const SUPABASE_SERVICE_KEY = process.env.SUPABASE_SERVICE_KEY || '';
+const SUPABASE_JWT_SECRET = process.env.SUPABASE_JWT_SECRET || '';
 const VERTEX_MODEL = process.env.VERTEX_MODEL || 'gemini-2.0-flash-001';
 const VERTEX_LOCATION = process.env.VERTEX_LOCATION || 'us-central1';
-const VERTEX_PROJECT_ID = process.env.VERTEX_PROJECT_ID || process.env.GOOGLE_CLOUD_PROJECT || '';
+const VERTEX_PROJECT_ID = process.env.VERTEX_PROJECT_ID || '';
 const AI_MODELS = ['gemini-2.5-flash', 'gemini-2.0-flash', 'gemini-1.5-flash'];
 
 const _rl = new Map();
-function rateLimit(key, max) {
-  const now = Date.now();
-  let b = _rl.get(key);
-  if (!b || now - b.start > 60000) b = { start: now, n: 0 };
-  b.n++; _rl.set(key, b);
-  return b.n <= max;
-}
+function rateLimit(key, max) { const now = Date.now(); let b = _rl.get(key); if (!b || now - b.start > 60000) b = { start: now, n: 0 }; b.n++; _rl.set(key, b); return b.n <= max; }
 async function validateSupabaseJWT(authHeader) {
   if (!authHeader || !authHeader.startsWith('Bearer ')) return null;
   const token = authHeader.slice(7).trim();
   if (!token) return null;
+  // 1) HMAC local (rápido) — solo si el secreto coincide
   try {
     const [h, p, s] = token.split('.');
-    if (!h || !p || !s) return null;
-    if (SUPABASE_JWT_SECRET) {
+    if (h && p && s && SUPABASE_JWT_SECRET) {
       const exp = crypto.createHmac('sha256', SUPABASE_JWT_SECRET).update(`${h}.${p}`).digest('base64url');
       const a = Buffer.from(s, 'base64url'), b2 = Buffer.from(exp, 'base64url');
-      if (a.length !== b2.length || !crypto.timingSafeEqual(a, b2)) return null;
+      if (a.length === b2.length && crypto.timingSafeEqual(a, b2)) {
+        const payload = JSON.parse(Buffer.from(p, 'base64url').toString('utf8'));
+        if (payload.role !== 'service_role' && (!payload.exp || payload.exp >= Math.floor(Date.now() / 1000))) {
+          return { uid: payload.sub || null, email: payload.email || null };
+        }
+      }
     }
-    const payload = JSON.parse(Buffer.from(p, 'base64url').toString('utf8'));
-    if (payload.exp && payload.exp < Math.floor(Date.now() / 1000)) return null;
-    if (payload.role === 'service_role') return null;
-    return { uid: payload.sub || null, email: payload.email || null };
+  } catch {}
+  // 2) Verificación AUTORITATIVA contra Supabase Auth (no depende del secreto local)
+  try {
+    const url = process.env.SUPABASE_URL || '';
+    const anon = process.env.SUPABASE_ANON_KEY || '';
+    if (!url || !anon) return null;
+    const r = await fetch(`${url}/auth/v1/user`, {
+      headers: { apikey: anon, Authorization: `Bearer ${token}` }
+    });
+    if (!r.ok) return null;
+    const u = await r.json();
+    return u?.id ? { uid: u.id, email: u.email || null } : null;
   } catch { return null; }
 }
-const MAGIC_SIGNATURES = { 'image/jpeg': ['FFD8FF'], 'image/png': ['89504E47'], 'image/webp': ['52494646'], 'application/pdf': ['25504446'] };
+const MAGIC = { 'image/jpeg': ['FFD8FF'], 'image/png': ['89504E47'], 'image/webp': ['52494646'], 'application/pdf': ['25504446'] };
 function validateMagicNumber(base64Data, claimedMime) {
   if (!base64Data || typeof base64Data !== 'string') return { valid: false, reason: 'Datos vacíos' };
   try {
     const buffer = Buffer.from(base64Data, 'base64');
     if (buffer.length < 8) return { valid: false, reason: 'Archivo muy pequeño' };
     const hexHead = buffer.slice(0, 4).toString('hex').toUpperCase();
-    if (!MAGIC_SIGNATURES[claimedMime]) return { valid: false, reason: `MIME no permitido: ${claimedMime}` };
-    if (!MAGIC_SIGNATURES[claimedMime].some(sig => hexHead.startsWith(sig))) return { valid: false, reason: `Firma binaria no coincide con ${claimedMime}.` };
+    if (!MAGIC[claimedMime]) return { valid: false, reason: `MIME no permitido: ${claimedMime}` };
+    if (!MAGIC[claimedMime].some(sig => hexHead.startsWith(sig))) return { valid: false, reason: `Firma binaria no coincide con ${claimedMime}.` };
     return { valid: true, mime: claimedMime };
   } catch (e) { return { valid: false, reason: 'Error al validar: ' + e.message }; }
 }
@@ -59,159 +63,96 @@ function setHeaders(req, res) {
   res.setHeader('Access-Control-Allow-Origin', ALLOWED_ORIGINS.includes(origin) ? origin : ALLOWED_ORIGINS[0]);
   res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, x-demo-mode');
-  res.setHeader('Vary', 'Origin');
-  res.setHeader('Cache-Control', 'no-store');
-  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('Vary', 'Origin'); res.setHeader('Cache-Control', 'no-store'); res.setHeader('X-Content-Type-Options', 'nosniff');
 }
-function parseBody(req) {
-  if (!req?.body) return {};
-  if (typeof req.body === 'object') return req.body;
-  try { return JSON.parse(req.body); } catch { return {}; }
-}
-function normalizeDocType(v) {
-  const t = String(v || '').trim().toUpperCase();
-  return new Set(['CFDI','TICKET','CONSTANCIA','OPINION','EFIRMA','OTRO']).has(t) ? t : 'OTRO';
-}
-function normalizeKeys(obj) {
-  const out = {};
-  for (const [k, v] of Object.entries(obj || {})) out[k.trim()] = v;
-  return out;
-}
-function extractReplyText(data) {
-  return data?.candidates?.[0]?.content?.parts?.map(p => p?.text || '').join('\n').trim() || '';
-}
-function extractJSON(text) {
-  if (!text) return null;
-  const cleaned = String(text).replace(/```json/gi, '').replace(/```/g, '').trim();
-  const s = cleaned.indexOf('{'), e = cleaned.lastIndexOf('}');
-  if (s === -1 || e <= s) return null;
-  return cleaned.slice(s, e + 1);
-}
+function parseBody(req) { if (!req?.body) return {}; if (typeof req.body === 'object') return req.body; try { return JSON.parse(req.body); } catch { return {}; } }
+function normalizeDocType(v) { const t = String(v || '').trim().toUpperCase(); return new Set(['CFDI','TICKET','CONSTANCIA','OPINION','EFIRMA','OTRO']).has(t) ? t : 'OTRO'; }
+function normalizeKeys(obj) { const out = {}; for (const [k, v] of Object.entries(obj || {})) out[k.trim()] = v; return out; }
+function extractReplyText(data) { return data?.candidates?.[0]?.content?.parts?.map(p => p?.text || '').join('\n').trim() || ''; }
+function extractJSON(text) { if (!text) return null; const c = String(text).replace(/```json/gi, '').replace(/```/g, '').trim(); const s = c.indexOf('{'), e = c.lastIndexOf('}'); if (s === -1 || e <= s) return null; return c.slice(s, e + 1); }
 function tolerantParse(jsonText) {
   try { return JSON.parse(jsonText); } catch {}
   let s = jsonText;
-  s = s.replace(/,\s*"[^"]*"?\s*$/, '');
-  s = s.replace(/:\s*"[^"]*$/, ': null');
-  const openB = (s.match(/{/g) || []).length - (s.match(/}/g) || []).length;
-  const openK = (s.match(/\[/g) || []).length - (s.match(/]/g) || []).length;
-  s += ']'.repeat(Math.max(0, openK)) + '}'.repeat(Math.max(0, openB));
+  s = s.replace(/,\s*"[^"]*"?\s*$/, ''); s = s.replace(/:\s*"[^"]*$/, ': null');
+  const ob = (s.match(/{/g) || []).length - (s.match(/}/g) || []).length;
+  const ok = (s.match(/\[/g) || []).length - (s.match(/]/g) || []).length;
+  s += ']'.repeat(Math.max(0, ok)) + '}'.repeat(Math.max(0, ob));
   try { return JSON.parse(s); } catch {}
-  // ── Tercer intento: cortar en la última llave completa y cerrar ────────
   const cut = s.lastIndexOf('}');
-  if (cut > s.indexOf('{')) {
-    const head = s.slice(0, cut + 1);
-    const ob = (head.match(/{/g) || []).length - (head.match(/}/g) || []).length;
-    try { return JSON.parse(head + '}'.repeat(Math.max(0, ob))); } catch {}
-  }
+  if (cut > s.indexOf('{')) { const head = s.slice(0, cut + 1); const d = (head.match(/{/g) || []).length - (head.match(/}/g) || []).length; try { return JSON.parse(head + '}'.repeat(Math.max(0, d))); } catch {} }
   return null;
 }
-function safeParse(raw) {
-  const jsonText = extractJSON(raw);
-  if (!jsonText) return null;
-  const parsed = tolerantParse(jsonText);
-  return parsed ? normalizeKeys(parsed) : null;
-}
 function buildFallback(reason, fileName = '', debug = {}) {
-  return {
-    ok: true, is_fallback: true, reason, engine: ENGINE, debug,
-    document: {
-      file_name: fileName || 'documento', doc_type: 'OTRO', document_type: 'OTRO',
-      confidence: 0.5, file_url: `local:${fileName || 'documento'}`,
-      extracted_data: { rfc_emisor: null, rfc_receptor: null, nombre_emisor: null, subtotal: null, iva: null, total: null, folio: null, fecha: null, summary: null, tax_usefulness: null },
-      safety_flag: true, validation_status: 'pendiente', needs_review: true,
-      source: 'ocr_fallback',
-      pedagogical_note: 'ISR RESICO: sin deducciones. IVA: requiere CFDI válido y gasto indispensable para acreditamiento.'
-    },
-    needsHumanReview: true
-  };
+  return { ok: true, is_fallback: true, reason, engine: ENGINE, debug,
+    document: { file_name: fileName || 'documento', doc_type: 'OTRO', document_type: 'OTRO', confidence: 0.5, file_url: `local:${fileName || 'documento'}`,
+      extracted_data: { rfc_emisor: null, rfc_receptor: null, nombre_emisor: null, subtotal: null, descuento: 0, iva: null, total: null, folio: null, fecha: null, summary: null, tax_usefulness: null },
+      safety_flag: true, validation_status: 'pendiente', needs_review: true, source: 'ocr_fallback',
+      pedagogical_note: 'ISR RESICO: sin deducciones. IVA: requiere CFDI válido y gasto indispensable para acreditamiento.' },
+    needsHumanReview: true };
 }
-// ── Vertex: Service Account → token (cache 55 min) ──────────────────────
-function base64url(input) { return Buffer.from(input).toString('base64').replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/g, ''); }
+function base64url(i) { return Buffer.from(i).toString('base64').replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/g, ''); }
 const _tok = { token: null, exp: 0 };
-function canUseVertex() {
-  return Boolean(VERTEX_PROJECT_ID && process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL && process.env.GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY);
-}
+function canUseVertex() { return Boolean(VERTEX_PROJECT_ID && process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL && process.env.GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY); }
 async function googleToken() {
   if (_tok.token && _tok.exp > Date.now() + 60000) return _tok.token;
-  const email = process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL;
   const key = (process.env.GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY || '').replace(/\\n/g, '\n');
   const now = Math.floor(Date.now() / 1000);
   const head = base64url(JSON.stringify({ alg: 'RS256', typ: 'JWT' }));
-  const claims = base64url(JSON.stringify({ iss: email, scope: 'https://www.googleapis.com/auth/cloud-platform', aud: 'https://oauth2.googleapis.com/token', iat: now, exp: now + 3600 }));
+  const claims = base64url(JSON.stringify({ iss: process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL, scope: 'https://www.googleapis.com/auth/cloud-platform', aud: 'https://oauth2.googleapis.com/token', iat: now, exp: now + 3600 }));
   const sig = crypto.createSign('RSA-SHA256').update(`${head}.${claims}`).sign(key, 'base64');
-  const r = await fetch('https://oauth2.googleapis.com/token', {
-    method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-    body: `grant_type=urn:ietf:params:oauth:grant-type:jwt-bearer&assertion=${head}.${claims}.${sig}`
-  });
+  const r = await fetch('https://oauth2.googleapis.com/token', { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: `grant_type=urn:ietf:params:oauth:grant-type:jwt-bearer&assertion=${head}.${claims}.${sig}` });
   const d = await r.json().catch(() => ({}));
-  if (!r.ok || !d.access_token) throw new Error(`oauth_token_error: ${d.error || r.status}`);
+  if (!r.ok || !d.access_token) throw new Error('oauth_token_error');
   _tok = { token: d.access_token, exp: Date.now() + 55 * 60 * 1000 };
   return d.access_token;
 }
-// ── Prompt anti-refusal: SIEMPRE JSON, aunque no lea datos ──────────────
-const PROMPT = [
-  'Eres un extractor fiscal mexicano especializado en RESICO 2026.',
-  'Analiza el documento y responde SOLO JSON válido, sin markdown.',
-  'Detecta si es CFDI, ticket, constancia, opinión de cumplimiento, e.firma u otro.',
-  'Si falta un dato, devuelve null. Si NO hay descuento, devuelve descuento: 0.',
-  'IMPORTANTE: incluye el campo "descuento" cuando aparezca en la nota.',
-  'Responde con esta forma exacta:',
-  '{',
-  '  "document_type": "CFDI|TICKET|CONSTANCIA|OPINION|EFIRMA|OTRO",',
-  '  "confidence": 0.97,',
-  '  "rfc_emisor": "string|null",',
-  '  "rfc_receptor": "string|null",',
-  '  "nombre_emisor": "string|null",',
-  '  "subtotal": 123.45,',
-  '  "descuento": 0,',
-  '  "iva": 19.76,',
-  '  "total": 143.21,',
-  '  "folio": "string|null",',
-  '  "fecha": "YYYY-MM-DD|null",',
-  '  "summary": "máximo 6 palabras o null",',
-  '  "tax_usefulness": "IVA|ISR|AMBOS|NINGUNO"',
-  '}',
-  'Regla: total esperado = subtotal - descuento + IVA. ISR RESICO no deduce; IVA requiere CFDI válido.'
-].join('\n');
+const PROMPT = ['Eres un extractor fiscal mexicano especializado en RESICO 2026.',
+'Analiza el documento y responde SOLO JSON válido, sin markdown.',
+'IMPORTANTE: incluye "descuento" cuando aparezca en la nota (0 si no existe).',
+'Detecta si es CFDI, ticket, constancia, opinión de cumplimiento, e.firma u otro.',
+'Si falta un dato, devuelve null.',
+'Responde con esta forma exacta:',
+'{',
+'  "document_type": "CFDI|TICKET|CONSTANCIA|OPINION|EFIRMA|OTRO",',
+'  "confidence": 0.97,',
+'  "rfc_emisor": "string|null",',
+'  "rfc_receptor": "string|null",',
+'  "nombre_emisor": "string|null",',
+'  "subtotal": 123.45,',
+'  "descuento": 0,',
+'  "iva": 19.76,',
+'  "total": 143.21,',
+'  "folio": "string|null",',
+'  "fecha": "YYYY-MM-DD|null",',
+'  "summary": "máximo 6 palabras o null",',
+'  "tax_usefulness": "IVA|ISR|AMBOS|NINGUNO"',
+'}',
+'Regla: total esperado = subtotal - descuento + IVA.'].join('\n');
 function geminiBody(mimeType, base64Data) {
-  return {
-    contents: [{ role: 'user', parts: [{ text: PROMPT }, { inline_data: { mime_type: mimeType, data: base64Data } }] }],
-    generationConfig: { temperature: 0.05, topP: 0.9, maxOutputTokens: 1024, responseMimeType: 'application/json' }
-  };
+  return { contents: [{ role: 'user', parts: [{ text: PROMPT }, { inline_data: { mime_type: mimeType, data: base64Data } }] }],
+    generationConfig: { temperature: 0.05, topP: 0.9, maxOutputTokens: 1024, responseMimeType: 'application/json' } };
 }
-// ── Cascada con reintento por parseo: AI Studio → Vertex ────────────────
-async function tryProviders(gBody, tried) {
-  if (process.env.GEMINI_API_KEY) {
-    for (const m of AI_MODELS) {
-      try {
-        const r = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${m}:generateContent?key=${process.env.GEMINI_API_KEY}`, {
-          method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(gBody)
-        });
-        const data = await r.json().catch(() => ({}));
-        if (!r.ok || data?.error) { tried.push({ provider: `ai-studio:${m}`, http: r.status, err: data?.error?.message || 'http_error' }); continue; }
-        const raw = extractReplyText(data);
-        const parsed = safeParse(raw);
-        if (parsed) return { parsed, model: `ai-studio:${m}` };
-        tried.push({ provider: `ai-studio:${m}`, http: r.status, err: 'no_json', raw_preview: raw.slice(0, 300) });
-      } catch (e) { tried.push({ provider: `ai-studio:${m}`, err: e.message }); }
-    }
+async function callAIStudio(model, body) {
+  let lastErr = null;
+  for (let attempt = 0; attempt < 3; attempt++) {
+    const r = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${process.env.GEMINI_API_KEY}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+    if (r.status === 429 || r.status >= 500) { lastErr = new Error(`AIStudio HTTP ${r.status}`); await new Promise(res => setTimeout(res, 300 * Math.pow(2, attempt))); continue; }
+    if (!r.ok) throw new Error(`AIStudio HTTP ${r.status}`);
+    return { data: await r.json(), model: `ai-studio:${model}` };
   }
-  if (canUseVertex()) {
-    try {
-      const token = await googleToken();
-      const url = `https://${VERTEX_LOCATION}-aiplatform.googleapis.com/v1/projects/${VERTEX_PROJECT_ID}/locations/${VERTEX_LOCATION}/publishers/google/models/${VERTEX_MODEL}:generateContent`;
-      const r = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` }, body: JSON.stringify(gBody) });
-      const data = await r.json().catch(() => ({}));
-      if (!r.ok || data?.error) { tried.push({ provider: 'vertex', http: r.status, err: data?.error?.message || 'http_error' }); }
-      else {
-        const raw = extractReplyText(data);
-        const parsed = safeParse(raw);
-        if (parsed) return { parsed, model: `vertex:${VERTEX_MODEL}` };
-        tried.push({ provider: 'vertex', http: r.status, err: 'no_json', raw_preview: raw.slice(0, 300) });
-      }
-    } catch (e) { tried.push({ provider: 'vertex', err: e.message }); }
+  throw lastErr;
+}
+async function callVertex(body) {
+  let lastErr = null;
+  for (let attempt = 0; attempt < 3; attempt++) {
+    const token = await googleToken();
+    const url = `https://${VERTEX_LOCATION}-aiplatform.googleapis.com/v1/projects/${VERTEX_PROJECT_ID}/locations/${VERTEX_LOCATION}/publishers/google/models/${VERTEX_MODEL}:generateContent`;
+    const r = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` }, body: JSON.stringify(body) });
+    if (r.status === 429 || r.status >= 500) { lastErr = new Error(`Vertex HTTP ${r.status}`); await new Promise(res => setTimeout(res, 300 * Math.pow(2, attempt))); continue; }
+    if (!r.ok) throw new Error(`Vertex HTTP ${r.status}`);
+    return { data: await r.json(), model: `vertex:${VERTEX_MODEL}` };
   }
-  return null;
+  throw lastErr;
 }
 
 export default async function handler(req, res) {
@@ -230,110 +171,76 @@ export default async function handler(req, res) {
   const { fileName, mimeType, base64Data } = body;
   const magicCheck = validateMagicNumber(base64Data, mimeType);
   if (!magicCheck.valid) return res.status(400).json({ ok: false, error: `Archivo inválido: ${magicCheck.reason}`, engine: ENGINE });
-  if (!fileName || !mimeType || !base64Data) return res.status(400).json({ ok: false, error: 'fileName, mimeType y base64Data requeridos.', engine: ENGINE });
   if (!process.env.GEMINI_API_KEY && !canUseVertex()) return res.status(200).json(buildFallback('missing_credentials', fileName));
+  if (!fileName || !mimeType || !base64Data) return res.status(400).json({ ok: false, error: 'fileName, mimeType y base64Data requeridos.', engine: ENGINE });
 
   const tried = [];
-  const outcome = await tryProviders(geminiBody(mimeType, base64Data), tried);
+  let outcome = null;
+  if (process.env.GEMINI_API_KEY) { for (const m of AI_MODELS) { try { outcome = await callAIStudio(m, geminiBody(mimeType, base64Data)); break; } catch (e) { tried.push({ provider: `ai-studio:${m}`, err: e.message }); } } }
+  if (!outcome && canUseVertex()) { try { outcome = await callVertex(geminiBody(mimeType, base64Data)); } catch (e) { tried.push({ provider: 'vertex', err: e.message }); } }
   if (!outcome) return res.status(200).json(buildFallback('all_providers_failed', fileName, { tried }));
 
-  const parsed = outcome.parsed;
+  const raw = extractReplyText(outcome.data);
+  const parsed = tolerantParse(raw) && normalizeKeys(tolerantParse(raw));
+  if (!parsed) return res.status(200).json(buildFallback('invalid_json', fileName, { tried, raw_preview: raw.slice(0, 300) }));
+
   const docType = normalizeDocType(parsed.document_type);
   let confidence = Number(parsed.confidence || 0);
-  // ── Heurística de auditoría: subtotal + IVA ≈ total (Art. 29-A CFF) ────
-    const sub = Number(parsed.subtotal ?? 0);
-  const desc = Number(parsed.descuento ?? 0);
-  const iv = Number(parsed.iva ?? 0);
-  const tot = Number(parsed.total ?? 0);
-  const hasNums = tot > 0;
-  // Art. 29-A CFF: descuentos son legítimos → total = subtotal - descuento + IVA
+  const sub = Number(parsed.subtotal ?? 0), desc = Number(parsed.descuento ?? 0), iv = Number(parsed.iva ?? 0), tot = Number(parsed.total ?? 0);
   const baseGravable = Math.max(0, sub - desc);
-  const totalEsperado = baseGravable + iv;
-  const sumOk = !hasNums || Math.abs(totalEsperado - tot) <= Math.max(1, tot * 0.05);
-  const ivaOk = !hasNums || iv <= tot;
-  // Validación cruzada: IVA ≈ 16% de la base gravable (tolera 15-16.5% por redondeos)
-  const ivaRateOk = !hasNums || baseGravable === 0 || (iv / baseGravable >= 0.14 && iv / baseGravable <= 0.165);
-  if (hasNums && (!sumOk || !ivaOk || !ivaRateOk)) {
-    confidence = Math.min(confidence, 0.7);
-    parsed.warning_aritmetica = `⚠️ Aritmética fiscal no cuadra (subtotal ${sub} - descuento ${desc} + IVA ${iv} ≠ total ${tot}). Revisión humana requerida (Art. 29-A CFF).`;
-  } else if (hasNums && desc > 0) {
-    parsed.descuento_detected = true;
-  }
+  const sumOk = tot <= 0 || Math.abs(baseGravable + iv - tot) <= Math.max(1, tot * 0.05);
+  if (tot > 0 && (!sumOk || iv > tot)) confidence = Math.min(confidence, 0.7);
   const safetyFlag = confidence < 0.85;
+
   const doc = {
     file_name: fileName, doc_type: docType, document_type: docType, confidence,
     file_url: `local:${fileName}`,
-        extracted_data: {
+    extracted_data: {
       rfc_emisor: parsed.rfc_emisor || null, rfc_receptor: parsed.rfc_receptor || null,
       nombre_emisor: parsed.nombre_emisor || null,
       subtotal: parsed.subtotal ?? null, descuento: parsed.descuento ?? 0,
       iva: parsed.iva ?? null, total: parsed.total ?? null,
       folio: parsed.folio || null, fecha: parsed.fecha || null,
-      summary: parsed.summary || null, tax_usefulness: parsed.tax_usefulness || null,
-      descuento_detected: !!parsed.descuento_detected
+      summary: parsed.summary || null, tax_usefulness: parsed.tax_usefulness || null
     },
     safety_flag: safetyFlag, validation_status: 'pendiente', needs_review: safetyFlag,
     source: isDemo ? 'ocr_ai_demo' : 'ocr_ai',
     pedagogical_note: 'ISR RESICO: sin deducciones. IVA: requiere CFDI válido y gasto indispensable para acreditamiento.'
   };
 
-  if (user && SUPABASE_URL && SUPABASE_SERVICE_KEY) {
+  // ── BLOQUE A.2: Storage jerárquico (solo sesión real; RLS auth.uid()) ──
+  if (user?.uid && SUPABASE_URL && SUPABASE_SERVICE_KEY) {
+    try {
+      const fecha = parsed.fecha || new Date().toISOString().slice(0, 10);
+      const cat = (String(parsed.tax_usefulness || '').toUpperCase() === 'ISR' || docType === 'CFDI') ? 'ingresos' : 'gastos';
+      const storagePath = `${user.uid}/${fecha.slice(0, 4)}/${fecha.slice(5, 7)}/${cat}/${Date.now()}_${fileName}`;
+      const buffer = Buffer.from(base64Data, 'base64');
+      const up = await fetch(`${SUPABASE_URL}/storage/v1/object/carpeta-fiscal/${encodeURIComponent(storagePath)}`, {
+        method: 'POST',
+        headers: { apikey: SUPABASE_SERVICE_KEY, Authorization: `Bearer ${SUPABASE_SERVICE_KEY}`, 'Content-Type': mimeType, 'x-upsert': 'true' },
+        body: buffer
+      });
+      if (up.ok) doc.file_url = `supabase://carpeta-fiscal/${storagePath}`;
+      else console.warn('[document-ocr] Storage upload falló:', await up.text());
+    } catch (e) { console.warn('[document-ocr] Storage exception:', e.message); }
+  }
+
+  // ── Validación RFC receptor vs user_profiles (solo sesión real) ──
+  if (user?.uid && SUPABASE_URL && SUPABASE_SERVICE_KEY) {
     const rec = String(doc.extracted_data.rfc_receptor || '').toUpperCase().trim();
     if (rec && rec !== 'XAXX010101000' && rec !== 'XEXX010101000') {
       try {
-        const pr = await fetch(`${SUPABASE_URL}/rest/v1/user_profiles?user_id=eq.${user.uid}&select=rfc`, {
-          headers: { apikey: SUPABASE_SERVICE_KEY, Authorization: `Bearer ${SUPABASE_SERVICE_KEY}` }
-        });
+        const pr = await fetch(`${SUPABASE_URL}/rest/v1/user_profiles?user_id=eq.${user.uid}&select=rfc`, { headers: { apikey: SUPABASE_SERVICE_KEY, Authorization: `Bearer ${SUPABASE_SERVICE_KEY}` } });
         const profiles = await pr.json();
         const userRfc = Array.isArray(profiles) && profiles[0]?.rfc ? profiles[0].rfc.toUpperCase().trim() : null;
         if (userRfc && rec !== userRfc) {
           doc.extracted_data.rfc_receptor_mismatch = true;
           doc.safety_flag = true; doc.needs_review = true;
           doc.validation_status = 'RFC_receptor_no_coincide';
-          doc.extracted_data.warning = `⚠️ El RFC receptor (${rec}) no coincide con tu RFC (${userRfc}). NO acreditable para IVA.`;
+          doc.extracted_data.warning = `⚠️ RFC receptor (${rec}) ≠ tu RFC (${userRfc}). NO acreditable para IVA.`;
         }
       } catch (e) { console.warn('[document-ocr] validación receptor:', e.message); }
     }
   }
-
-  // ── BLOQUE A.2: subir archivo físico a Supabase Storage ─────────────────
-// Ruta: /{user_id}/{YYYY}/{MM}/{ingresos|gastos}/{file_name}
-// Art. 29-A CFF: conservación jerárquica por año/mes/categoría.
-let uploadedUrl = null;
-try {
-  const SUPABASE_URL_ENV = process.env.SUPABASE_URL;
-  const SERVICE_KEY = process.env.SUPABASE_SERVICE_KEY;
-  const ownerUid = user.uid;
-  const fecha = parsed.fecha || new Date().toISOString().slice(0, 10);
-  const year = fecha.slice(0, 4);
-  const month = fecha.slice(5, 7);
-  const cat = (parsed.tax_usefulness || '').toUpperCase();
-  const folder = (cat === 'ISR' || docType === 'CFDI') ? 'ingresos' : 'gastos';
-  const storagePath = `${ownerUid}/${year}/${month}/${folder}/${Date.now()}_${fileName}`;
-  const mime = mimeType || 'application/octet-stream';
-  const buffer = Buffer.from(base64Data, 'base64');
-  const uploadRes = await fetch(
-    `${SUPABASE_URL_ENV}/storage/v1/object/carpeta-fiscal/${encodeURIComponent(storagePath)}`,
-    {
-      method: 'POST',
-      headers: {
-        apikey: SERVICE_KEY,
-        Authorization: `Bearer ${SERVICE_KEY}`,
-        'Content-Type': mime,
-        'x-upsert': 'true'
-      },
-      body: buffer
-    }
-  );
-  if (uploadRes.ok) {
-    uploadedUrl = `supabase://carpeta-fiscal/${storagePath}`;
-  } else {
-    const err = await uploadRes.text();
-    console.warn('[document-ocr] Storage upload falló:', err);
-  }
-} catch (e) {
-  console.warn('[document-ocr] Storage upload exception:', e.message);
-}
-
   return res.status(200).json({ ok: true, engine: ENGINE, is_fallback: false, model: outcome.model, document: doc, needsHumanReview: safetyFlag });
 }

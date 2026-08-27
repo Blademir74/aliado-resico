@@ -13,20 +13,31 @@ function setHeaders(req, res) {
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, x-demo-mode');
   res.setHeader('Vary', 'Origin'); res.setHeader('Cache-Control', 'no-store');
 }
-function verifyJWT(auth) {
+async function verifyJWT(auth) {
   if (!auth || !auth.startsWith('Bearer ')) return null;
+  const token = auth.slice(7).trim();
+  if (!token) return null;
   try {
-    const [h, p, s] = auth.slice(7).split('.');
-    if (!h || !p || !s) return null;
-    if (JWT_SECRET) {
+    const [h, p, s] = token.split('.');
+    if (h && p && s && JWT_SECRET) {
       const exp = crypto.createHmac('sha256', JWT_SECRET).update(`${h}.${p}`).digest('base64url');
       const a = Buffer.from(s, 'base64url'), b2 = Buffer.from(exp, 'base64url');
-      if (a.length !== b2.length || !crypto.timingSafeEqual(a, b2)) return null;
+      if (a.length === b2.length && crypto.timingSafeEqual(a, b2)) {
+        const payload = JSON.parse(Buffer.from(p, 'base64url').toString('utf8'));
+        if (payload.role !== 'service_role' && (!payload.exp || payload.exp >= Math.floor(Date.now() / 1000))) {
+          return { uid: payload.sub || 'anon' };
+        }
+      }
     }
-    const payload = JSON.parse(Buffer.from(p, 'base64url').toString('utf8'));
-    if (payload.exp && payload.exp < Math.floor(Date.now() / 1000)) return null;
-    if (payload.role === 'service_role') return null;
-    return { uid: payload.sub || 'anon' };
+  } catch {}
+  try {
+    const url = process.env.SUPABASE_URL || '';
+    const anon = process.env.SUPABASE_ANON_KEY || '';
+    if (!url || !anon) return null;
+    const r = await fetch(`${url}/auth/v1/user`, { headers: { apikey: anon, Authorization: `Bearer ${token}` } });
+    if (!r.ok) return null;
+    const u = await r.json();
+    return u?.id ? { uid: u.id } : null;
   } catch { return null; }
 }
 function fiscalEngine(message) {
@@ -67,34 +78,35 @@ async function googleToken() {
   _g = { token: d.access_token, exp: Date.now() + (d.expires_in || 3600) * 1000 };
   return _g.token;
 }
-async function callVertex(prompt) {
-  const token = await googleToken();
-  const p = process.env.VERTEX_PROJECT_ID, l = process.env.VERTEX_LOCATION || 'us-central1', m = process.env.VERTEX_MODEL || 'gemini-2.0-flash';
-  const r = await fetch(`https://${l}-aiplatform.googleapis.com/v1/projects/${p}/locations/${l}/publishers/google/models/${m}:generateContent`, {
-    method: 'POST', headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify({ contents: [{ role: 'user', parts: [{ text: prompt }] }] })
-  });
-  if (!r.ok) throw new Error(`Vertex HTTP ${r.status}`);
-  return parseGemini(await r.json());
-}
-async function callGemini(model, message, context) {
-  const prompt = `Eres el asesor fiscal RESICO 2026 de Aliado RESICO (México). Contexto del usuario: ingreso acumulado $${context?.incomeYTD || 0} MXN de un límite de $3,500,000. Responde SOLO JSON válido con estas llaves exactas (sin espacios): {"respuestaFiscal": "string", "fundamentoLegal": "string", "diferenciacionIsrIva": "string", "accionConcreta": "string"} Pregunta del usuario: ${message}`;
+async function callAIStudio(model, body) {
   let lastErr = null;
   for (let attempt = 0; attempt < 3; attempt++) {
-    const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${GEMINI_KEY}`, {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] })
+    const r = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${process.env.GEMINI_API_KEY}`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body)
     });
-    if (res.status === 429 || res.status >= 500) {           // backoff exponencial
-      lastErr = new Error(`Gemini HTTP ${res.status}`);
-      await new Promise(r => setTimeout(r, 300 * Math.pow(2, attempt)));
+    if (r.status === 429 || r.status >= 500) {
+      lastErr = new Error(`AIStudio HTTP ${r.status}`);
+      await new Promise(res => setTimeout(res, 300 * Math.pow(2, attempt))); // backoff 300/600/1200ms
       continue;
     }
-    if (!res.ok) throw new Error(`Gemini HTTP ${res.status}`);
-    const data = await res.json();
-    const text = data?.candidates?.[0]?.content?.parts?.map(p => p.text || '').join('') || '';
-    const clean = text.replace(/```json|```/g, '').trim();
-    return JSON.parse(clean.startsWith('{') ? clean : clean.slice(clean.indexOf('{'), clean.lastIndexOf('}') + 1));
+    if (!r.ok) throw new Error(`AIStudio HTTP ${r.status}`);
+    return { data: await r.json(), model: `ai-studio:${model}` };
+  }
+  throw lastErr;
+}
+async function callVertex(body) {
+  let lastErr = null;
+  for (let attempt = 0; attempt < 3; attempt++) {
+    const token = await googleToken();
+    const url = `https://${VERTEX_LOCATION}-aiplatform.googleapis.com/v1/projects/${VERTEX_PROJECT_ID}/locations/${VERTEX_LOCATION}/publishers/google/models/${VERTEX_MODEL}:generateContent`;
+    const r = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` }, body: JSON.stringify(body) });
+    if (r.status === 429 || r.status >= 500) {
+      lastErr = new Error(`Vertex HTTP ${r.status}`);
+      await new Promise(res => setTimeout(res, 300 * Math.pow(2, attempt)));
+      continue;
+    }
+    if (!r.ok) throw new Error(`Vertex HTTP ${r.status}`);
+    return { data: await r.json(), model: `vertex:${VERTEX_MODEL}` };
   }
   throw lastErr;
 }
@@ -106,7 +118,7 @@ export default async function handler(req, res) {
     const body = typeof req.body === 'string' ? JSON.parse(req.body || '{}') : (req.body || {});
     const message = String(body.message || '').slice(0, 2000);
     const isDemo = req.headers['x-demo-mode'] === 'true';
-    const user = verifyJWT(req.headers.authorization);
+    const user = await verifyJWT(req.headers.authorization);
     if (!user && !isDemo) return res.status(401).json({ ok: false, error: 'No autorizado', engine: ENGINE });
     if (!rateLimit(user?.uid || 'demo')) return res.status(429).json({ ok: false, error: 'Límite alcanzado.', engine: ENGINE });
     const prompt = buildPrompt(message, body.context);

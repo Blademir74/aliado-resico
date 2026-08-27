@@ -168,8 +168,8 @@ function compressImage(file, maxDim = 1920, quality = 0.85) {
       const token = session?.data?.session?.access_token;
 
       const headers = { 'Content-Type': 'application/json' };
-      if (token) headers.Authorization = `Bearer ${token}`;
-      if (window.APP_STATE?.isDemo) headers['x-demo-mode'] = 'true'; // demo usa OCR REAL sin JWT
+          if (token) headers.Authorization = `Bearer ${token}`;
+          if (window.APP_STATE?.isDemo) headers['x-demo-mode'] = 'true'; // demo sin JWT (rate-limited)
 
       const response = await fetch('/api/document-ocr', {
         method: 'POST',
