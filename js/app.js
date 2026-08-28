@@ -509,6 +509,7 @@ function exportToExcel(yearMonth = null) {
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(rows.filter(r => r['Uso fiscal'] !== 'ISR')), 'IVA Acreditable');
   XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(rows.filter(r => r['Uso fiscal'] === 'ISR')), 'Ingresos RESICO');
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(polizas), 'Pólizas');
   XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(rows), 'Consolidado');
   XLSX.writeFile(wb, `AliadoRESICO_PapelTrabajo_${new Date().toISOString().slice(0, 10)}.xlsx`);
 }
@@ -583,16 +584,19 @@ window.exportToExcel = exportToExcel;
 
   // ── Wizard Fiscal (Art. 113-F LISR) ─────────────────────────
   function showWizardMessage(text, tone = 'error') {
-    let msg = byId('wizard-msg');
-    if (!msg) {
-      // FIX W-6: el contenedor no existe en el HTML → crearlo (nunca más silencio)
-      msg = document.createElement('div');
-      msg.id = 'wizard-msg';
-      msg.style.cssText = 'margin:10px 0;padding:10px 14px;border-radius:8px;font-size:13px;';
-      const anchor = byId('wizard-tab') || document.querySelector('.wizard-step')?.parentElement || document.body;
-      anchor.prepend(msg);
-    }
+  let msg = byId('wizard-msg');
+  if (!msg) {
+    msg = document.createElement('div');
+    msg.id = 'wizard-msg';
+    msg.style.cssText = 'margin:10px 0;padding:10px 14px;border-radius:8px;font-size:13px;';
+    const anchor = byId('wizard-tab') || document.querySelector('.wizard-step')?.parentElement || document.body;
+    anchor.prepend(msg);
   }
+  msg.style.display = 'block';
+  msg.style.background = tone === 'success' ? 'rgba(16,185,129,0.12)' : 'rgba(239,68,68,0.12)';
+  msg.style.color = tone === 'success' ? '#d1fae5' : '#fecaca';
+  msg.textContent = text;
+}
 
   function hideWizardMessage() {
     const msg = byId('wizard-msg');
@@ -981,7 +985,7 @@ function calcRetencionesFront(concepto, sub, iva) {
     window.__lastWhatsAppAlertPayload = payload;
 
     // FASE 6: Disparar webhook n8n (solo si está configurado)
-    const webhookUrl = process.env.N8N_WEBHOOK_URL || window.RESICO_CONFIG?.n8nWebhookUrl;
+    const webhookUrl = window.RESICO_CONFIG?.n8nWebhookUrl || ''; // process.env NO existe en navegador
     if (webhookUrl) {
       try {
         const response = await fetch(webhookUrl, {
