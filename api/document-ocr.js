@@ -11,7 +11,7 @@ const SUPABASE_JWT_SECRET = process.env.SUPABASE_JWT_SECRET || '';
 const VERTEX_MODEL = process.env.VERTEX_MODEL || 'gemini-2.0-flash-001';
 const VERTEX_LOCATION = process.env.VERTEX_LOCATION || 'us-central1';
 const VERTEX_PROJECT_ID = process.env.VERTEX_PROJECT_ID || '';
-const AI_MODELS = ['gemini-2.5-flash', 'gemini-2.0-flash', 'gemini-1.5-flash'];
+const AI_MODELS = ['gemini-2.0-flash', 'gemini-2.5-flash']; // 2.0-flash: más rápido para OCR
 
 const _rl = new Map();
 function rateLimit(key, max) { const now = Date.now(); let b = _rl.get(key); if (!b || now - b.start > 60000) b = { start: now, n: 0 }; b.n++; _rl.set(key, b); return b.n <= max; }
@@ -87,9 +87,12 @@ function buildFallback(reason, fileName = '', debug = {}) {
     document: { file_name: fileName || 'documento', doc_type: 'OTRO', document_type: 'OTRO', confidence: 0.5, file_url: `local:${fileName || 'documento'}`,
       extracted_data: { rfc_emisor: null, rfc_receptor: null, nombre_emisor: null, subtotal: null, descuento: 0, iva: null, total: null, folio: null, fecha: null, summary: null, tax_usefulness: null },
       safety_flag: true, validation_status: 'pendiente', needs_review: true, source: 'ocr_fallback',
-      pedagogical_note: 'ISR RESICO: sin deducciones. IVA: requiere CFDI válido y gasto indispensable para acreditamiento.' },
+      pedagogical_note: parsed?.pedagogical_note || 'ISR RESICO: sin deducciones. IVA: requiere CFDI válido y gasto indispensable para acreditamiento.',
+    },
     needsHumanReview: true };
 }
+
+
 function base64url(i) { return Buffer.from(i).toString('base64').replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/g, ''); }
 const _tok = { token: null, exp: 0 };
 function canUseVertex() { return Boolean(VERTEX_PROJECT_ID && process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL && process.env.GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY); }
@@ -106,31 +109,39 @@ async function googleToken() {
   _tok = { token: d.access_token, exp: Date.now() + 55 * 60 * 1000 };
   return d.access_token;
 }
-const PROMPT = ['Eres un extractor fiscal mexicano especializado en RESICO 2026.',
-'Analiza el documento y responde SOLO JSON válido, sin markdown.',
-'IMPORTANTE: incluye "descuento" cuando aparezca en la nota (0 si no existe).',
-'Detecta si es CFDI, ticket, constancia, opinión de cumplimiento, e.firma u otro.',
-'Si falta un dato, devuelve null.',
-'Responde con esta forma exacta:',
-'{',
-'  "document_type": "CFDI|TICKET|CONSTANCIA|OPINION|EFIRMA|OTRO",',
-'  "confidence": 0.97,',
-'  "rfc_emisor": "string|null",',
-'  "rfc_receptor": "string|null",',
-'  "nombre_emisor": "string|null",',
-'  "subtotal": 123.45,',
-'  "descuento": 0,',
-'  "iva": 19.76,',
-'  "total": 143.21,',
-'  "folio": "string|null",',
-'  "fecha": "YYYY-MM-DD|null",',
-'  "summary": "máximo 6 palabras o null",',
-'  "tax_usefulness": "IVA|ISR|AMBOS|NINGUNO"',
-'}',
-'Regla: total esperado = subtotal - descuento + IVA.'].join('\n');
+const PROMPT = [
+  'Eres un extractor fiscal mexicano especializado en RESICO 2026.',
+  'Analiza el documento y responde SOLO JSON válido, sin markdown.',
+  'Detecta si es CFDI, ticket, constancia, opinión de cumplimiento, e.firma u otro.',
+  'Si falta un dato, devuelve null.',
+  'IMPORTANTE: Si es un ticket de GASOLINA o COMBUSTIBLE (OXXO GAS, PEMEX, Shell, BP, Mobil, G500, etc.),',
+  'debes extraer el MÉTODO DE PAGO del ticket. Busca texto como "Forma de pago", "Método", "Pago con".',
+  'Si dice "Efectivo", "Cash", "01", o no especifica método electrónico, marca payment_method: "01".',
+  'Si dice "Tarjeta", "Crédito", "Débito", "Transferencia", "03", "04", "28", marca el código SAT correspondiente.',
+  'Responde con esta forma exacta:',
+  '{',
+  '  "document_type": "CFDI|TICKET|CONSTANCIA|OPINION|EFIRMA|OTRO",',
+  '  "confidence": 0.97,',
+  '  "rfc_emisor": "string|null",',
+  '  "rfc_receptor": "string|null",',
+  '  "nombre_emisor": "string|null",',
+  '  "subtotal": 123.45,',
+  '  "descuento": 0,',
+  '  "iva": 19.76,',
+  '  "total": 143.21,',
+  '  "folio": "string|null",',
+  '  "fecha": "YYYY-MM-DD|null",',
+  '  "payment_method": "01|03|04|28|99|null",',
+  '  "is_fuel": true|false,',
+  '  "summary": "máximo 6 palabras o null",',
+  '  "tax_usefulness": "IVA|ISR|AMBOS|NINGUNO"',
+  '}',
+  'Regla fiscal crítica (Art. 27 Fracc. III LISR): Gasolina pagada en EFECTIVO (método 01) NO es deducible ni acreditable.',
+  'Regla fiscal pedagógica: ISR RESICO no deduce gastos; IVA solo acreditable con CFDI válido y gasto indispensable.'
+].join('\n');
 function geminiBody(mimeType, base64Data) {
   return { contents: [{ role: 'user', parts: [{ text: PROMPT }, { inline_data: { mime_type: mimeType, data: base64Data } }] }],
-    generationConfig: { temperature: 0.05, topP: 0.9, maxOutputTokens: 1024, responseMimeType: 'application/json' } };
+    generationConfig: { temperature: 0.05, topP: 0.9, maxOutputTokens: 600, responseMimeType: 'application/json' } };
 }
 async function callAIStudio(model, body) {
   let lastErr = null;
@@ -192,6 +203,20 @@ export default async function handler(req, res) {
   if (tot > 0 && (!sumOk || iv > tot)) confidence = Math.min(confidence, 0.7);
   const safetyFlag = confidence < 0.85;
 
+    // ── FASE 1: Detección de Gasolina en Efectivo (Art. 27 Fracc. III LISR) ──
+  const isFuel = /GASOLIN|PEMEX|OXXO GAS|SHELL|BP\b|MOBIL|G500|GNP GAS|COMBUSTIBLE/i.test(
+    `${parsed.nombre_emisor || ''} ${parsed.rfc_emisor || ''} ${fileName}`
+  );
+  const paymentMethod = String(parsed.payment_method || '').trim();
+  const isCashPayment = paymentMethod === '01' || paymentMethod === '99' || 
+                        /EFECTIVO|CASH/i.test(paymentMethod);
+  
+  if (isFuel && isCashPayment) {
+    confidence = Math.min(confidence, 0.70); // Fuerza Verificación Humana
+    parsed.safety_flag_reason = 'gasolina_efectivo';
+    parsed.pedagogical_note = '⚠️ ALERTA FISCAL CRÍTICA (Art. 27 Fracc. III LISR): Gasolina pagada en EFECTIVO NO es deducible para ISR ni acreditable para IVA. El SAT invalida este gasto sin importar el monto. Debe pagarse con tarjeta, transferencia o monedero electrónico.';
+  }
+
   const doc = {
     file_name: fileName, doc_type: docType, document_type: docType, confidence,
     file_url: `local:${fileName}`,
@@ -203,27 +228,11 @@ export default async function handler(req, res) {
       folio: parsed.folio || null, fecha: parsed.fecha || null,
       summary: parsed.summary || null, tax_usefulness: parsed.tax_usefulness || null
     },
-    safety_flag: safetyFlag, validation_status: 'pendiente', needs_review: safetyFlag,
+    safety_flag: safetyFlag || (isFuel && isCashPayment), validation_status: 'pendiente', needs_review: safetyFlag,
     source: isDemo ? 'ocr_ai_demo' : 'ocr_ai',
     pedagogical_note: 'ISR RESICO: sin deducciones. IVA: requiere CFDI válido y gasto indispensable para acreditamiento.'
   };
 
-  // ── BLOQUE A.2: Storage jerárquico (solo sesión real; RLS auth.uid()) ──
-  if (user?.uid && SUPABASE_URL && SUPABASE_SERVICE_KEY) {
-    try {
-      const fecha = parsed.fecha || new Date().toISOString().slice(0, 10);
-      const cat = (String(parsed.tax_usefulness || '').toUpperCase() === 'ISR' || docType === 'CFDI') ? 'ingresos' : 'gastos';
-      const storagePath = `${user.uid}/${fecha.slice(0, 4)}/${fecha.slice(5, 7)}/${cat}/${Date.now()}_${fileName}`;
-      const buffer = Buffer.from(base64Data, 'base64');
-      const up = await fetch(`${SUPABASE_URL}/storage/v1/object/carpeta-fiscal/${encodeURIComponent(storagePath)}`, {
-        method: 'POST',
-        headers: { apikey: SUPABASE_SERVICE_KEY, Authorization: `Bearer ${SUPABASE_SERVICE_KEY}`, 'Content-Type': mimeType, 'x-upsert': 'true' },
-        body: buffer
-      });
-      if (up.ok) doc.file_url = `supabase://carpeta-fiscal/${storagePath}`;
-      else console.warn('[document-ocr] Storage upload falló:', await up.text());
-    } catch (e) { console.warn('[document-ocr] Storage exception:', e.message); }
-  }
 
   // ── Validación RFC receptor vs user_profiles (solo sesión real) ──
   if (user?.uid && SUPABASE_URL && SUPABASE_SERVICE_KEY) {

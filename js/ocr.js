@@ -14,7 +14,7 @@ const DocumentProcessor = (() => {
   // ── FIX 413: compresión client-side para fotos de cámara ────────────────
 // Vercel rechaza bodies > ~4.5MB (HTTP 413). Reducimos a máx. 1280px / JPEG 0.8
 // (~200–400 KB) sin perder legibilidad de RFC/montos para Gemini Vision.
-function compressImage(file, maxDim = 1920, quality = 0.85) {
+function compressImage(file, maxDim = 1600, quality = 0.8) {
   return new Promise((resolve) => {
     if (!file || !file.type?.startsWith('image/')) { resolve(file); return; }
     const url = URL.createObjectURL(file);
@@ -142,10 +142,20 @@ function compressImage(file, maxDim = 1920, quality = 0.85) {
           ${data.descuento ? `<tr><td style="padding:4px 0;color:#f59e0b;">Descuento:</td><td style="color:#f59e0b;">-$${Number(data.descuento || 0).toLocaleString('es-MX')}</td></tr>` : ''}
           <tr><td style="padding:4px 0;color:#94a3b8;font-weight:700;">Total:</td><td style="font-weight:700;">$${Number(data.total || 0).toLocaleString('es-MX')}</td></tr>
         </table>
-        ${noteBlock}
+        ${noteBlock}${fuelAlertBlock}
       </div>
     `;
   }
+
+   const fuelAlertBlock = (data.safety_flag_reason === 'gasolina_efectivo')
+   ? `<div style="margin-top:10px;padding:12px;background:rgba(239,68,68,0.15);border-left:4px solid #ef4444;border-radius:4px;font-size:13px;color:#fecaca;font-weight:600;">
+        🚨 ALERTA FISCAL: Gasolina pagada en EFECTIVO (Art. 27 Fracc. III LISR)<br>
+        <span style="font-weight:400;font-size:12px;color:#fca5a5;">
+          Este gasto NO es deducible para ISR ni acreditable para IVA. El SAT lo invalida automáticamente en auditorías.
+          Para que proceda, debe pagarse con tarjeta de crédito/débito, transferencia o monedero electrónico.
+        </span>
+      </div>`
+   : '';
 
   async function analyzeFile(file) {
     const output = document.getElementById('ocr-result-output');

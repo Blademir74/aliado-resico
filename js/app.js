@@ -343,12 +343,13 @@ const App = (() => {
   }
 
   const CATEGORY_LABELS = {
-    ingresos: { label: '💰 Ingresos', color: '#10b981' },
-    gastos_iva: { label: '🧾 Gastos (IVA)', color: '#3b82f6' },
-    efirma: { label: '🔐 e.firma SAT', color: '#8b5cf6' },
-    constancia: { label: '📄 Constancia Fiscal', color: '#f59e0b' },
-    opinion: { label: '✅ Opinión de Cumplimiento', color: '#06b6d4' }
-  };
+  ingresos:   { label: '💰 Ingresos (CFDI PUE/REP)', color: '#10b981' },
+  gastos_iva: { label: '🧾 Gastos (IVA Acreditable)', color: '#3b82f6' },
+  diario:     { label: '📋 Diario (CFDI PPD Pendiente)', color: '#8b5cf6' },
+  efirma:     { label: '🔐 e.firma SAT',              color: '#ec4899' },
+  constancia: { label: '📄 Constancia Fiscal',        color: '#f59e0b' },
+  opinion:    { label: '✅ Opinión de Cumplimiento',  color: '#06b6d4' }
+};
 
   function renderCarpetaFiscal() {
   // ── FIX C-1: contenedor defensivo (el HTML no tiene el id) ────────────

@@ -47,6 +47,50 @@ const VALID_USOS_CFDI_RESICO = [
   'CN01'  // Nómina
 ];
 
+// ── FASE 2: Matriz de Retenciones PM → PF RESICO (Art. 113-J LISR) ─────────
+function calculateRetentions(tipoServicio, subtotal, iva) {
+  const isrRetention = subtotal * 0.0125; // 1.25% fijo (Art. 113-J LISR)
+  let ivaRetention = 0;
+  
+  switch (String(tipoServicio || '').toUpperCase()) {
+    case 'HONORARIOS':
+    case 'ARRENDAMIENTO':
+      ivaRetention = iva * (2 / 3); // 2/3 del IVA (Art. 1-A LIVA)
+      break;
+    case 'FLETES':
+    case 'AUTOTRANSPORTE':
+      ivaRetention = subtotal * 0.04; // 4% de la contraprestación
+      break;
+    case 'COMISIONES':
+      ivaRetention = iva * (2 / 3) * (2 / 3); // 2/3 de 2/3 del IVA
+      break;
+    case 'DESPERDICIOS':
+    case 'CHATARRA':
+      ivaRetention = iva; // 100% del IVA
+      break;
+    case 'ACTIVIDADES_EMPRESARIALES':
+    case 'HOTELES':
+    case 'RESTAURANTES':
+      ivaRetention = 0; // No procede retención de IVA (Art. 1-A LIVA)
+      break;
+    default:
+      ivaRetention = iva * (2 / 3); // Default: 2/3 del IVA
+  }
+  
+  const totalRetentions = isrRetention + ivaRetention;
+  const netoAPagar = subtotal + iva - totalRetentions;
+  
+  return {
+    isr: retentions.isr_retention,
+    iva: retentions.iva_retention,
+    isr_retention: Math.round(isrRetention * 100) / 100,
+    iva_retention: Math.round(ivaRetention * 100) / 100,
+    total_retentions: Math.round(totalRetentions * 100) / 100,
+    neto_a_pagar: Math.round(netoAPagar * 100) / 100,
+    tipo_servicio: tipoServicio
+  };
+}
+
 function resolveOrigin(origin = '') {
   if (!origin) return ALLOWED_ORIGINS[0];
   return ALLOWED_ORIGINS.includes(origin) ? origin : ALLOWED_ORIGINS[0];
@@ -424,6 +468,16 @@ export default async function handler(req, res) {
   const errors = validateInvoiceInput(input);
   if (errors.length) return fail(res, 'Validación fallida.', 422, { details: errors });
 
+    // ── FASE 2: Calcular retenciones si receptor es PM y emisor es PF RESICO ──
+    const retentions = calculateRetentions(
+      input.tipoServicio || 'HONORARIOS',
+      Number(input.unitPrice || 0) * Number(input.quantity || 1),
+      Number(input.iva || 0)
+    );
+    console.info('[Alegra] Retenciones calculadas:', retentions);
+
+   
+
   // ── FIX FASE 2.2.B.2: Obtener ingreso anual ANTES de construir payload ──
   // La consulta va aquí (handler async), no en buildInvoicePayload (síncrono)
   let emisorAnnualIncome = 0;
@@ -448,15 +502,15 @@ export default async function handler(req, res) {
     console.warn('[alegra-proxy] No se pudo obtener income_ytd:', e.message);
   }
 
-  // Calcular retención progresiva con el ingreso anual
-  const retentionInfo = calculateProgressiveRetention(emisorAnnualIncome);
+        // Calcular retención progresiva con el ingreso anual
+        const retentionInfo = calculateProgressiveRetention(emisorAnnualIncome);
 
-  // Pasar retentionInfo a la función que construye el payload
-  const result = await createInvoice(input, retentionInfo);
-        // ── FIX FASE 2.3.A: Calcular alerta de plazo REP (RMF 2026) ──────────
-      const repRequired = String(input.metodoPago || '').toUpperCase() === 'PPD';
-      let repDeadlineAlert = null;
-      if (repRequired) {
+        // Pasar retentionInfo a la función que construye el payload
+        const result = await createInvoice(input, retentionInfo);
+              // ── FIX FASE 2.3.A: Calcular alerta de plazo REP (RMF 2026) ──────────
+        const repRequired = String(input.metodoPago || '').toUpperCase() === 'PPD';
+            let repDeadlineAlert = null;
+            if (repRequired) {
         const today = new Date();
         const nextMonth = new Date(today.getFullYear(), today.getMonth() + 1, 1);
         const deadline = new Date(nextMonth.getFullYear(), nextMonth.getMonth(), 5);

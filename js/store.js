@@ -214,6 +214,7 @@ const Store = (() => {
     }
     state.saludFiscal = { ...state.saludFiscal, eFirmaVigente: hasEFirma ? days > 0 : null, eFirmaExpiry: expiry, alertLevel, lastAuditDate: state.saludFiscal?.lastAuditDate || new Date().toISOString() };
   }
+
   function rebuildCarpetaFiscal() {
     const folders = buildMonthlyFolders(YEAR);
     const summary = { total: 0, ingresos: 0, gastos_iva: 0, efirma: 0, constancia: 0, opinion: 0 };
@@ -337,7 +338,58 @@ const Store = (() => {
   function getSettings() { return state.settings; }
   function getDocuments() { return state.documents; }
   function getSaludFiscal() { return state.saludFiscal; }
-  function getCarpetaFiscal() { return state.carpetaFiscal; }
+  function getCarpetaFiscal() {
+  const docs = state.documents || [];
+  const year = new Date().getFullYear();
+  const monthlyFolders = [];
+  
+  for (let month = 0; month < 12; month++) {
+    const monthDocs = docs.filter(d => {
+      const fecha = d.extracted_data?.fecha || d.created_at;
+      if (!fecha) return false;
+      const d2 = new Date(fecha);
+      return d2.getFullYear() === year && d2.getMonth() === month;
+    });
+    
+    const categories = {
+      ingresos: monthDocs.filter(d => 
+        d.document_type === 'CFDI' && 
+        d.extracted_data?.tax_usefulness === 'ISR'
+      ),
+      gastos_iva: monthDocs.filter(d => 
+        d.extracted_data?.tax_usefulness === 'IVA' || 
+        d.extracted_data?.tax_usefulness === 'AMBOS'
+      ),
+      diario: monthDocs.filter(d => 
+        d.extracted_data?.metodo_pago === 'PPD' ||
+        d.folder_category === 'diario'
+      ),
+      efirma: monthDocs.filter(d => d.folder_category === 'efirma'),
+      constancia: monthDocs.filter(d => d.folder_category === 'constancia'),
+      opinion: monthDocs.filter(d => d.folder_category === 'opinion')
+    };
+    
+    monthlyFolders.push({
+      monthName: ['Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre'][month],
+      categories,
+      total: monthDocs.length
+    });
+  }
+  
+  return {
+    year,
+    monthlyFolders,
+    summary: {
+      ingresos: docs.filter(d => d.extracted_data?.tax_usefulness === 'ISR').length,
+      gastos_iva: docs.filter(d => d.extracted_data?.tax_usefulness === 'IVA').length,
+      diario: docs.filter(d => d.extracted_data?.metodo_pago === 'PPD').length,
+      efirma: docs.filter(d => d.folder_category === 'efirma').length,
+      constancia: docs.filter(d => d.folder_category === 'constancia').length,
+      opinion: docs.filter(d => d.folder_category === 'opinion').length,
+      total: docs.length
+    }
+  };
+}
   function getDiagnostic() { return state.diagnostic; }
   function getInvoiceProfiles() { return state.invoiceProfiles; }
   function setState(partial = {}) {
