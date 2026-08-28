@@ -47,49 +47,76 @@ const VALID_USOS_CFDI_RESICO = [
   'CN01'  // Nómina
 ];
 
-// ── FASE 2: Matriz de Retenciones PM → PF RESICO (Art. 113-J LISR) ─────────
-function calculateRetentions(tipoServicio, subtotal, iva) {
-  const isrRetention = subtotal * 0.0125; // 1.25% fijo (Art. 113-J LISR)
-  let ivaRetention = 0;
-  
-  switch (String(tipoServicio || '').toUpperCase()) {
-    case 'HONORARIOS':
-    case 'ARRENDAMIENTO':
-      ivaRetention = iva * (2 / 3); // 2/3 del IVA (Art. 1-A LIVA)
-      break;
-    case 'FLETES':
-    case 'AUTOTRANSPORTE':
-      ivaRetention = subtotal * 0.04; // 4% de la contraprestación
-      break;
-    case 'COMISIONES':
-      ivaRetention = iva * (2 / 3) * (2 / 3); // 2/3 de 2/3 del IVA
-      break;
-    case 'DESPERDICIOS':
-    case 'CHATARRA':
-      ivaRetention = iva; // 100% del IVA
-      break;
-    case 'ACTIVIDADES_EMPRESARIALES':
-    case 'HOTELES':
-    case 'RESTAURANTES':
-      ivaRetention = 0; // No procede retención de IVA (Art. 1-A LIVA)
-      break;
-    default:
-      ivaRetention = iva * (2 / 3); // Default: 2/3 del IVA
+
+function calcularRetencionesRESICO(tipo, subtotal, ivaTrasladado, ingresosAnualesAcumulados = 0, opciones = {}) {
+  // 1. Cálculo de retención de ISR (Art. 113-J LISR)
+  let isrRetenido = subtotal * 0.0125; // Tasa general del 1.25%
+
+  // Regla especial de Exención para AGAPES (Regla 3.13.26 RMF 2026)
+  if (tipo === 'AGAPES') {
+    if (ingresosAnualesAcumulados <= 900000) {
+      isrRetenido = 0;  // Exención total
+    }
+    // Si > 900k, mantiene isrRetenido = subtotal * 0.0125 (pierde exención)
   }
+
+  // 2. Cálculo de retención de IVA (Art. 1-A LIVA y Art. 3 RIVA)
+  let ivaRetenido = 0;
   
-  const totalRetentions = isrRetention + ivaRetention;
-  const netoAPagar = subtotal + iva - totalRetentions;
-  
+  switch(tipo) {
+    case 'HONORARIOS':
+      ivaRetenido = ivaTrasladado * (2/3);
+      break;
+      
+    case 'ARRENDAMIENTO':
+      if (opciones.casaHabitacionSinAmueblar) {
+        ivaRetenido = 0;  // Art. 20 LIVA: IVA exento
+      } else {
+        ivaRetenido = ivaTrasladado * (2/3);
+      }
+      break;
+      
+    case 'COMISIONES':
+      ivaRetenido = ivaTrasladado * (2/3) * (2/3);  // ✅ CORREGIDO: 2/3 de 2/3 = 4/9
+      break;
+      
+    case 'FLETES':
+      ivaRetenido = subtotal * 0.04; // 4% sobre la contraprestación (Subtotal)
+      break;
+      
+    case 'DESPERDICIOS':
+      ivaRetenido = ivaTrasladado; // Retención total del 100% del IVA
+      break;
+      
+    case 'HOTELES':
+    case 'AGAPES':
+    default:
+      ivaRetenido = 0; // No aplica retención de IVA conforme a la ley
+      break;
+  }
+
+  const totalRetenciones = isrRetenido + ivaRetenido;
+  const netoAPagar = subtotal + ivaTrasladado - totalRetenciones;
+
+  // Redondeo preciso a dos decimales centaveros
+  const round = (num) => Math.round(num * 100) / 100;
+
   return {
-    isr: retentions.isr_retention,
-    iva: retentions.iva_retention,
-    isr_retention: Math.round(isrRetention * 100) / 100,
-    iva_retention: Math.round(ivaRetention * 100) / 100,
-    total_retentions: Math.round(totalRetentions * 100) / 100,
-    neto_a_pagar: Math.round(netoAPagar * 100) / 100,
-    tipo_servicio: tipoServicio
+    isr_retencion: round(isrRetenido),
+    iva_retencion: round(ivaRetenido),
+    total_retenciones: round(totalRetenciones),
+    neto: round(netoAPagar)
   };
 }
+
+// Pruebas de certificación finales
+console.log('HONORARIOS (10k sub, 1.6k IVA):', calcularRetencionesRESICO('HONORARIOS', 10000, 1600));
+console.log('COMISIONES CORREGIDO (10k sub, 1.6k IVA):', calcularRetencionesRESICO('COMISIONES', 10000, 1600));
+console.log('ARRENDAMIENTO Normal (10k sub, 1.6k IVA):', calcularRetencionesRESICO('ARRENDAMIENTO', 10000, 1600));
+console.log('ARRENDAMIENTO Casa Habitación (10k sub, 0 IVA):', calcularRetencionesRESICO('ARRENDAMIENTO', 10000, 0, 0, {casaHabitacionSinAmueblar: true}));
+console.log('FLETES (10k sub, 1.6k IVA):', calcularRetencionesRESICO('FLETES', 10000, 1600));
+console.log('AGAPES Exento <900k (10k sub, 1.6k IVA):', calcularRetencionesRESICO('AGAPES', 10000, 1600, 450000));
+console.log('AGAPES NO Exento >900k (10k sub, 1.6k IVA):', calcularRetencionesRESICO('AGAPES', 10000, 1600, 950000));
 
 function resolveOrigin(origin = '') {
   if (!origin) return ALLOWED_ORIGINS[0];
@@ -469,6 +496,7 @@ export default async function handler(req, res) {
   if (errors.length) return fail(res, 'Validación fallida.', 422, { details: errors });
 
     // ── FASE 2: Calcular retenciones si receptor es PM y emisor es PF RESICO ──
+        // ── Calcular retenciones (receptor PM + emisor PF RESICO) ────────────
     const retentions = calculateRetentions(
       input.tipoServicio || 'HONORARIOS',
       Number(input.unitPrice || 0) * Number(input.quantity || 1),
@@ -476,11 +504,17 @@ export default async function handler(req, res) {
     );
     console.info('[Alegra] Retenciones calculadas:', retentions);
 
-   
+      input.retentions = {
+      isr: retentions.isr_retention,   // Alias para Alegra
+      iva: retentions.iva_retention    // Alias para Alegra
+    };
+      input.total_retentions = retentions.total_retentions;
+      input.neto_a_pagar = retentions.neto_a_pagar;
 
-  // ── FIX FASE 2.2.B.2: Obtener ingreso anual ANTES de construir payload ──
-  // La consulta va aquí (handler async), no en buildInvoicePayload (síncrono)
-  let emisorAnnualIncome = 0;
+    
+      let emisorAnnualIncome = 0;
+
+
   try {
     const { SUPABASE_URL, SUPABASE_SERVICE_KEY } = process.env;
     if (SUPABASE_URL && SUPABASE_SERVICE_KEY && req.aliadoUser?.uid) {
