@@ -488,6 +488,23 @@ function exportToExcel(yearMonth = null) {
       'Revisión': d.needs_review ? 'Humana requerida' : 'IA validado'
     };
   }).filter(r => !yearMonth || String(r['Fecha']).startsWith(yearMonth));
+    const polizas = docs.map(d => {
+    const e = d.extracted_data || {};
+    const p = classifyPoliza(d);
+    return {
+      'Fecha': e.fecha || (d.created_at || '').slice(0, 10),
+      'Póliza': p.tipo, 'Detalle': p.detalle,
+      'Tipo Servicio': e.tipo_servicio || '',
+      'RFC contraparte': e.rfc_receptor || e.rfc_emisor || '',
+      'Folio': e.folio || '', 'Subtotal': Number(e.subtotal || 0),
+      'IVA': Number(e.iva || 0), 'Total': Number(e.total || 0),
+      'Ret ISR 1.25%': p.retenciones ? p.retenciones.isr_retencion : '',
+      'Ret IVA': p.retenciones ? p.retenciones.iva_retention : '',
+      'Total Retenciones': p.retenciones ? p.retenciones.total_retenciones : '',
+      'Neto a Pagar': p.retenciones ? p.retenciones.neto_a_pagar : '',
+      'Archivo': d.file_name || ''
+    };
+  }).filter(r => !yearMonth || String(r['Fecha']).startsWith(yearMonth));
   if (!rows.length) { alert('No hay documentos para exportar en el periodo.'); return; }
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(rows.filter(r => r['Uso fiscal'] !== 'ISR')), 'IVA Acreditable');
@@ -922,33 +939,80 @@ function bindWizardControls() {
   console.info('[Wizard] controles vinculados (FIX W-2)');
 }
 
+// ── FASE 4: Pólizas contables + retenciones en papel de trabajo ─────────
+function classifyPoliza(d) {
+  const e = d.extracted_data || {};
+  const tipo = String(d.document_type || '').toUpperCase();
+  const metodo = String(e.metodo_pago || e.payment_method || '').toUpperCase();
+  const cashFuel = e.safety_flag_reason === 'gasolina_efectivo';
+  if (tipo === 'CFDI' && String(e.tax_usefulness || '').toUpperCase() === 'ISR') {
+    if (metodo === 'PPD') return { tipo: 'DIARIO', detalle: 'CFDI PPD — provisión (cuentas por cobrar)' };
+    if (metodo === 'REP') return { tipo: 'INGRESOS', detalle: 'Complemento de pago REP — flujo cobrado' };
+    return { tipo: 'INGRESOS', detalle: 'CFDI PUE — ingreso efectivamente cobrado' };
+  }
+  if (tipo === 'CFDI' && metodo === 'PPD') return { tipo: 'DIARIO', detalle: 'CFDI PPD pendiente de pago' };
+  if (tipo === 'TICKET' || ['IVA','AMBOS'].includes(String(e.tax_usefulness || '').toUpperCase())) {
+    return { tipo: 'EGRESOS', detalle: cashFuel
+      ? 'Egreso NO acreditable (gasolina en efectivo, Art. 27 Fracc. III LISR)'
+      : 'Egreso efectivamente pagado — acreditable IVA' };
+  }
+  return { tipo: 'DIARIO', detalle: 'Documento de control (e.firma/constancia/opinión)' };
+}
+function calcRetencionesFront(concepto, sub, iva) {
+  const isr = sub * 0.0125;
+  let v = 0;
+  const c = String(concepto || '').toUpperCase();
+  if (['HONORARIOS','ARRENDAMIENTO'].includes(c)) v = iva * (2 / 3);
+  else if (['FLETES','AUTOTRANSPORTE'].includes(c)) v = sub * 0.04;
+  else if (c === 'COMISIONES') v = iva * (2 / 3) * (2 / 3);
+  else if (['DESPERDICIOS','CHATARRA'].includes(c)) v = iva;
+  return { isr: Math.round(isr * 100) / 100, iva: Math.round(v * 100) / 100, total: Math.round((isr + v) * 100) / 100, neto: Math.round((sub + iva - isr - v) * 100) / 100 };
+}
+
   function syncAndRender() {
     renderKPIs(); renderIncomeWithCssClasses(); renderHealth();
     renderHealthExtended(); renderFeed(); renderCarpetaFiscal();
     window.DocumentsManager?.renderDocuments?.();
   }
 
-  function initRiskAlertListener() {
-  let lastSent = 0;
+ function initRiskAlertListener() {
   window.Store?.on?.('riskThresholdCrossed', async (payload) => {
-    console.info('[App] Umbral cruzado — nivel:', payload.new_level);
+    console.info('[App] Umbral cruzado — payload listo para n8n:', payload);
     window.__lastWhatsAppAlertPayload = payload;
-    const now = Date.now();
-    if (now - lastSent < 60000) return; // debounce 60s (anti-ráfaga)
-    lastSent = now;
-    try {
-      const session = await window.APP_STATE?.supabase?.auth?.getSession?.();
-      const token = session?.data?.session?.access_token || '';
-      const headers = { 'Content-Type': 'application/json' };
-      if (token) headers.Authorization = `Bearer ${token}`;
-      if (window.APP_STATE?.isDemo) headers['x-demo-mode'] = 'true';
-      const res = await fetch('/api/n8n-notify-proxy', { method: 'POST', headers, body: JSON.stringify(payload) });
-      const data = await res.json().catch(() => ({}));
-      console.info('[App] Alerta WhatsApp:', data?.forwarded ? '✅ enviada a n8n' : `⏸ diferida (${data?.reason || res.status})`);
-    } catch (e) {
-      console.warn('[App] Alerta WhatsApp no enviada:', e?.message || e);
+
+    // FASE 6: Disparar webhook n8n (solo si está configurado)
+    const webhookUrl = process.env.N8N_WEBHOOK_URL || window.RESICO_CONFIG?.n8nWebhookUrl;
+    if (webhookUrl) {
+      try {
+        const response = await fetch(webhookUrl, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            event: 'risk_threshold_crossed',
+            riskLevel: payload.riskLevel,
+            incomeYTD: payload.incomeYTD,
+            userId: payload.userId,
+            userEmail: payload.userEmail,
+            timestamp: new Date().toISOString(),
+            message: buildWhatsAppMessage(payload)
+          })
+        });
+        console.info('[n8n] Webhook enviado:', response.status);
+      } catch (e) {
+        console.warn('[n8n] Error al enviar webhook:', e.message);
+      }
     }
   });
+}
+
+function buildWhatsAppMessage(payload) {
+  const pct = ((payload.incomeYTD / 3500000) * 100).toFixed(1);
+  const alertas = {
+    'PREVENTIVO': `⚠️ Alerta preventiva: Tus ingresos acumulados son $${payload.incomeYTD.toLocaleString('es-MX')} MXN (${pct}% del límite RESICO).`,
+    'RIESGO_ALTO': `🚨 Alerta crítica: Tus ingresos alcanzan ${pct}% del límite. Riesgo alto de expulsión del régimen.`,
+    'EXPULSION': `🔴 EXPULSIÓN CRÍTICA: Tus ingresos superan el 94% del límite. Acción inmediata requerida.`
+  };
+  return alertas[payload.riskLevel] || `Alerta fiscal: ${payload.riskLevel}`;
 }
 
   async function initCore() {
