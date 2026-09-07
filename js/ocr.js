@@ -154,16 +154,14 @@ const DocumentProcessor = (() => {
          </div>`
       : '';
 
-    // ALERTA DE GASOLINA EN EFECTIVO (Art. 27 Fracc. III LISR)
     const fuelAlertBlock = (data.safety_flag_reason === 'gasolina_efectivo')
-      ? `<div style="margin-top:10px;padding:12px;background:rgba(239,68,68,0.15);border-left:4px solid #ef4444;border-radius:4px;font-size:13px;color:#fecaca;font-weight:600;">
-           🚨 ALERTA FISCAL CRÍTICA: Gasolina pagada en EFECTIVO (Art. 27 Fracc. III LISR)<br>
-           <span style="font-weight:400;font-size:12px;color:#fca5a5;">
-             Este gasto NO es deducible para ISR ni acreditable para IVA. El SAT lo invalida automáticamente en auditorías.
-             Para que proceda, debe pagarse con tarjeta de crédito/débito, transferencia o monedero electrónico.
-           </span>
-         </div>`
-      : '';
+    ? `<div style="margin-top:10px;padding:12px;background:rgba(239,68,68,0.15);border-left:4px solid #ef4444;border-radius:4px;font-size:13px;color:#fecaca;font-weight:600;">
+         🚨 ALERTA FISCAL: Gasolina pagada en EFECTIVO (Art. 27 Fracc. III LISR)<br>
+         <span style="font-weight:400;font-size:12px;color:#fca5a5;">
+           Este gasto NO es deducible para ISR ni acreditable para IVA. El SAT lo invalida automáticamente en auditorías. Debe pagarse con tarjeta, transferencia o monedero electrónico.
+         </span>
+       </div>`
+    : '';
 
     return `
       <div style="border:1px solid #334155;border-radius:8px;padding:16px;">
