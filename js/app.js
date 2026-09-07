@@ -977,60 +977,6 @@ function calcRetencionesFront(concepto, sub, iva) {
   return { isr: Math.round(isr * 100) / 100, iva: Math.round(v * 100) / 100, total: Math.round((isr + v) * 100) / 100, neto: Math.round((sub + iva - isr - v) * 100) / 100 };
 }
 
-// ── ONBOARDING TRIAGE PF/PM (3 pasos con exclusiones legales) ──────────
-const OnboardingTriage = (() => {
-  let step = 1; let ctx = { tipo: null, rfc: '' };
-  const RFC_PF = /^[A-ZÑ&]{4}\d{6}[A-Z0-9]{3}$/;
-  const RFC_PM = /^[A-ZÑ&]{3}\d{6}[A-Z0-9]{3}$/;
-  function go(n) {
-    step = n;
-    document.querySelectorAll('#onboarding-tab .wizard-step').forEach(s => {
-      const k = Number(s.dataset.obstep);
-      s.classList.toggle('active', k === step); s.hidden = k !== step; s.style.display = k === step ? 'block' : 'none';
-    });
-    const ind = byId('ob-step-indicator'); if (ind) ind.textContent = `Paso ${step} de 3`;
-  }
-  function msg(t, tone) {
-    const m = byId('ob-msg'); if (!m) return;
-    m.style.display = 'block';
-    m.style.background = tone === 'error' ? 'rgba(239,68,68,.12)' : tone === 'warn' ? 'rgba(245,158,11,.14)' : 'rgba(16,185,129,.12)';
-    m.style.color = tone === 'error' ? '#fecaca' : tone === 'warn' ? '#fde68a' : '#d1fae5';
-    m.innerHTML = t;
-  }
-  function block(html) { const r = byId('ob-result'); if (r) { r.style.display = 'block'; r.innerHTML = html; } }
-  function next() {
-    if (step === 1) {
-      const tipo = document.querySelector('input[name="ob-tipo"]:checked')?.value;
-      const rfc = (byId('ob-rfc')?.value || '').trim().toUpperCase();
-      if (!tipo) return msg('Selecciona tu tipo de persona.', 'error');
-      if (!(tipo === 'PF' ? RFC_PF : RFC_PM).test(rfc)) return msg(`⛔ RFC inválido para ${tipo === 'PF' ? 'Persona Física (régimen 626)' : 'Persona Moral'}: requiere ${tipo === 'PF' ? 13 : 12} caracteres con homoclave (Art. 29-A CFF).`, 'error');
-      ctx = { tipo, rfc }; byId('ob-result').style.display = 'none'; go(2);
-    } else if (step === 2) {
-      const sociosPM = byId('ob-socios-pm')?.checked, sociosNoPF = byId('ob-socios-nopf')?.checked, partesRel = byId('ob-partes-rel')?.checked;
-      if (ctx.tipo === 'PF' && sociosPM) return block(`<div style="border:1px solid #ef4444;background:rgba(239,68,68,.12);padding:14px;border-radius:10px;color:#fecaca;">⛔ <strong>EXCLUSIÓN RESICO (Art. 113-E LISR):</strong> una persona física socia de una Persona Moral no puede tributar en RESICO por ingresos empresariales. El alta en régimen 626 queda bloqueada; requiere régimen de Actividad Empresarial.</div>`);
-      if (ctx.tipo === 'PM' && (sociosNoPF || partesRel)) return block(`<div style="border:1px solid #ef4444;background:rgba(239,68,68,.12);padding:14px;border-radius:10px;color:#fecaca;">⛔ <strong>REQUISITOS SOCIETARIOS PM:</strong> socios que no son personas físicas o preponderancia con partes relacionadas rompen el supuesto simplificado (Art. 113-E LISR último párrafo / Art. 76 LISR). Se requiere dictamen de elegibilidad.</div>`);
-      ctx.exclusiones = { sociosPM: !!sociosPM, sociosNoPF: !!sociosNoPF, partesRel: !!partesRel };
-      byId('ob-result').style.display = 'none'; go(3);
-    } else {
-      const efirma = byId('ob-efirma')?.value, buzon = byId('ob-buzon')?.value;
-      if (!efirma || !buzon) return msg('Indica el estatus de tu e.firma y Buzón Tributario.', 'error');
-      if (buzon === 'inactivo') msg(`⚠️ <strong>BUZÓN INACTIVO (Arts. 17-K y 86-C CFF):</strong> multa de $3,420 a $10,260 MXN con duplicidad por reincidencia. Actívalo en sat.gob.mx → Mi Portal. Puedes continuar con alerta permanente.`, 'warn');
-      ctx.salud = { efirma_vigente: efirma === 'vigente', buzon_activo: buzon === 'activo' };
-      window.Store?.setPerfilFiscal?.({ ...ctx, ...ctx.exclusiones, ...ctx.salud, completedAt: new Date().toISOString() });
-      window.Store?.updateSaludFiscal?.({ buzonTributarioActivo: ctx.salud.buzon_activo, eFirmaVigente: ctx.salud.efirma_vigente, lastAuditDate: new Date().toISOString() });
-      navigateTo('dashboard'); runPreventiveAlarms();
-    }
-  }
-  function init() {
-    const nxt = byId('ob-next'), back = byId('ob-back');
-    if (nxt && !nxt.dataset.boundOb) { nxt.dataset.boundOb = '1'; nxt.addEventListener('click', e => { e.preventDefault(); next(); }); }
-    if (back && !back.dataset.boundOb) { back.dataset.boundOb = '1'; back.addEventListener('click', e => { e.preventDefault(); if (step > 1) go(step - 1); }); }
-    go(1);
-  }
-  return { init, next, go };
-})();
-window.OnboardingTriage = OnboardingTriage;
-
 // ── MOTOR DE ALARMAS PREVENTIVAS (e.firma · REP · CFDI Global) ─────────
 function runPreventiveAlarms() {
   const alarms = []; const now = new Date();
@@ -1051,6 +997,231 @@ function runPreventiveAlarms() {
   c.hidden = alarms.length === 0;
   c.innerHTML = alarms.map(a => `<div style="margin:6px 0;padding:10px 14px;border-radius:8px;border:1px solid ${a.level === 'expired' || a.level === 'critical' ? '#dc2626' : '#f59e0b'};background:${a.level === 'expired' || a.level === 'critical' ? 'rgba(220,38,38,.16)' : 'rgba(245,158,11,.12)'};color:${a.level === 'expired' || a.level === 'critical' ? '#fecaca' : '#fde68a'};font-size:13px;">${esc(a.text)}</div>`).join('');
 }
+
+// ════════════════════════════════════════════════════════════
+// ONBOARDING TRIAGE PF/PM (3 pasos con exclusiones legales)
+// ════════════════════════════════════════════════════════════
+const OnboardingTriage = (() => {
+  let step = 1;
+  let ctx = { tipo: null, rfc: '' };
+  
+  const RFC_PF = /^[A-ZÑ&]{4}\d{6}[A-Z0-9]{3}$/; // 13 chars + homoclave
+  const RFC_PM = /^[A-ZÑ&]{3}\d{6}[A-Z0-9]{3}$/; // 12 chars + homoclave
+  
+  function go(n) {
+    step = n;
+    document.querySelectorAll('#onboarding-tab .wizard-step').forEach(s => {
+      const k = Number(s.dataset.obstep);
+      s.classList.toggle('active', k === step);
+      s.hidden = k !== step;
+      s.style.display = k === step ? 'block' : 'none';
+    });
+    const ind = byId('ob-step-indicator');
+    if (ind) ind.textContent = `Paso ${step} de 3`;
+  }
+  
+  function msg(t, tone) {
+    const m = byId('ob-msg');
+    if (!m) return;
+    m.style.display = 'block';
+    m.style.background = tone === 'error' ? 'rgba(239,68,68,.12)' : tone === 'warn' ? 'rgba(245,158,11,.14)' : 'rgba(16,185,129,.12)';
+    m.style.color = tone === 'error' ? '#fecaca' : tone === 'warn' ? '#fde68a' : '#d1fae5';
+    m.innerHTML = t;
+  }
+  
+  function block(html) {
+    const r = byId('ob-result');
+    if (r) {
+      r.style.display = 'block';
+      r.innerHTML = html;
+    }
+  }
+  
+  function next() {
+    // PASO 1: Validación de tipo y RFC
+    if (step === 1) {
+      const tipo = document.querySelector('input[name="ob-tipo"]:checked')?.value;
+      const rfc = (byId('ob-rfc')?.value || '').trim().toUpperCase();
+      
+      if (!tipo) return msg('Selecciona tu tipo de persona.', 'error');
+      
+      // Validación regex de RFC con homoclave
+      const regex = tipo === 'PF' ? RFC_PF : RFC_PM;
+      if (!regex.test(rfc)) {
+        return msg(`⛔ RFC inválido para ${tipo === 'PF' ? 'Persona Física (régimen 626)' : 'Persona Moral'}: requiere ${tipo === 'PF' ? 13 : 12} caracteres con homoclave obligatoria (Art. 29-A CFF).`, 'error');
+      }
+      
+      ctx = { tipo, rfc };
+      byId('ob-result').style.display = 'none';
+      
+      // Mostrar preguntas específicas según tipo
+      const pfQ = byId('ob-pf-questions');
+      const pmQ = byId('ob-pm-questions');
+      if (pfQ) pfQ.hidden = tipo !== 'PF';
+      if (pmQ) pmQ.hidden = tipo !== 'PM';
+      
+      go(2);
+    
+    // PASO 2: Triggers de exclusión
+    } else if (step === 2) {
+      const sociosPM = byId('ob-socios-pm')?.checked;
+      const asimilados = byId('ob-asimilados')?.checked;
+      const sociosNoPF = byId('ob-socios-nopf')?.checked;
+      const partesRel = byId('ob-partes-rel')?.checked;
+      const fideicomiso = byId('ob-fideicomiso')?.checked;
+      
+      // EXCLUSIÓN PF: Socio de PM (Art. 113-E LISR)
+      if (ctx.tipo === 'PF' && sociosPM) {
+        return block(`<div style="border:2px solid #ef4444;background:rgba(239,68,68,.12);padding:16px;border-radius:12px;color:#fecaca;">
+          <h3 style="margin-top:0;">⛔ EXCLUSIÓN RESICO (Art. 113-E LISR)</h3>
+          <p>Una persona física <strong>socia de una Persona Moral</strong> no puede tributar en RESICO por ingresos empresariales.</p>
+          <p><strong>Solución:</strong> Debes tributar en el régimen de Actividad Empresarial y Profesional.</p>
+        </div>`);
+      }
+      
+      // EXCLUSIÓN PF: Asimilados de parte relacionada
+      if (ctx.tipo === 'PF' && asimilados) {
+        return block(`<div style="border:2px solid #ef4444;background:rgba(239,68,68,.12);padding:16px;border-radius:12px;color:#fecaca;">
+          <h3 style="margin-top:0;">⛔ EXCLUSIÓN RESICO</h3>
+          <p>Los ingresos por asimilados a salarios de <strong>parte relacionada</strong> te excluyen del RESICO.</p>
+        </div>`);
+      }
+      
+      // EXCLUSIÓN PM: Socios no-PF
+      if (ctx.tipo === 'PM' && sociosNoPF) {
+        return block(`<div style="border:2px solid #ef4444;background:rgba(239,68,68,.12);padding:16px;border-radius:12px;color:#fecaca;">
+          <h3 style="margin-top:0;">⛔ REQUISITOS SOCIETARIOS PM</h3>
+          <p>Todos los socios deben ser <strong>personas físicas</strong>. Si un solo socio es persona moral, la sociedad queda excluida del RESICO PM.</p>
+        </div>`);
+      }
+      
+      // EXCLUSIÓN PM: Partes relacionadas o fideicomiso
+      if (ctx.tipo === 'PM' && (partesRel || fideicomiso)) {
+        return block(`<div style="border:2px solid #ef4444;background:rgba(239,68,68,.12);padding:16px;border-radius:12px;color:#fecaca;">
+          <h3 style="margin-top:0;">⛔ ESTRUCTURAS EXCLUIDAS</h3>
+          <p>Operar a través de fideicomisos, asociaciones en participación o con preponderancia de partes relacionadas te excluye del RESICO PM.</p>
+        </div>`);
+      }
+      
+      ctx.exclusiones = { sociosPM, asimilados, sociosNoPF, partesRel, fideicomiso };
+      byId('ob-result').style.display = 'none';
+      go(3);
+    
+    // PASO 3: Salud digital
+    } else {
+      const efirma = byId('ob-efirma')?.value;
+      const buzon = byId('ob-buzon')?.value;
+      
+      if (!efirma || !buzon) {
+        return msg('Indica el estatus de tu e.firma y Buzón Tributario.', 'error');
+      }
+      
+      // Advertencia de buzón inactivo (Art. 86-C CFF)
+      if (buzon === 'inactivo') {
+        msg(`⚠️ <strong>BUZÓN INACTIVO (Arts. 17-K y 86-C CFF):</strong> Multa de $3,420 a $10,260 MXN con duplicidad por reincidencia. Actívalo en sat.gob.mx → Mi Portal. Puedes continuar con alerta permanente.`, 'warn');
+      }
+      
+      ctx.salud = {
+        efirma_vigente: efirma === 'vigente' || efirma === 'por_vencer',
+        buzon_activo: buzon === 'activo'
+      };
+      
+      // Guardar perfil fiscal
+      window.Store?.setPerfilFiscal?.({
+        ...ctx,
+        ...ctx.exclusiones,
+        ...ctx.salud,
+        completedAt: new Date().toISOString()
+      });
+      
+      // Actualizar salud fiscal
+      window.Store?.updateSaludFiscal?.({
+        buzonTributarioActivo: ctx.salud.buzon_activo,
+        eFirmaVigente: ctx.salud.efirma_vigente,
+        lastAuditDate: new Date().toISOString()
+      });
+      
+      // Mostrar resultado final
+      block(`<div style="border:2px solid #10b981;background:rgba(16,185,129,.12);padding:16px;border-radius:12px;color:#d1fae5;">
+        <h3 style="margin-top:0;">✅ Perfil Fiscal Registrado</h3>
+        <p><strong>Tipo:</strong> ${ctx.tipo === 'PF' ? 'Persona Física (RESICO 626)' : 'Persona Moral (RESICO PM)'}</p>
+        <p><strong>RFC:</strong> ${ctx.rfc}</p>
+        <p><strong>Buzón:</strong> ${ctx.salud.buzon_activo ? '✅ Activo' : '⚠️ Inactivo (alerta permanente)'}</p>
+        <p><strong>e.firma:</strong> ${ctx.salud.efirma_vigente ? '✅ Vigente' : '⚠️ Requiere atención'}</p>
+        <button onclick="window.App?.navigateTo?.('dashboard')" class="btn-primary" style="margin-top:12px;">Ir al Dashboard →</button>
+      </div>`);
+    }
+  }
+  
+  function init() {
+    const nxt = byId('ob-next');
+    const back = byId('ob-back');
+    
+    if (nxt && !nxt.dataset.boundOb) {
+      nxt.dataset.boundOb = '1';
+      nxt.addEventListener('click', (e) => { e.preventDefault(); next(); });
+    }
+    if (back && !back.dataset.boundOb) {
+      back.dataset.boundOb = '1';
+      back.addEventListener('click', (e) => { e.preventDefault(); if (step > 1) go(step - 1); });
+    }
+    go(1);
+  }
+  
+  return { init, next, go };
+})();
+
+window.OnboardingTriage = OnboardingTriage;
+
+// ════════════════════════════════════════════════════════════
+// MOTOR DE ALARMAS PREVENTIVAS (render en Dashboard)
+// ════════════════════════════════════════════════════════════
+function renderPreventiveAlarms() {
+  const alarms = window.Store?.runPreventiveAlarms?.() || [];
+  const c = byId('preventive-alarms');
+  if (!c) return;
+  
+  c.hidden = alarms.length === 0;
+  c.innerHTML = alarms.map(a => {
+    const color = a.level === 'expired' || a.level === 'critical' ? '#dc2626' : '#f59e0b';
+    const bg = a.level === 'expired' || a.level === 'critical' ? 'rgba(220,38,38,.16)' : 'rgba(245,158,11,.12)';
+    return `<div style="margin:6px 0;padding:12px;border-radius:8px;border:1px solid ${color};background:${bg};color:${a.level === 'expired' || a.level === 'critical' ? '#fecaca' : '#fde68a'};font-size:13px;">
+      ${esc(a.text)}
+    </div>`;
+  }).join('');
+}
+
+// Actualizar syncAndRender para incluir alarmas
+function syncAndRender() {
+  renderKPIs();
+  renderIncomeWithCssClasses();
+  renderHealth();
+  renderHealthExtended();
+  renderFeed();
+  renderCarpetaFiscal();
+  renderPreventiveAlarms(); // ← NUEVO
+  window.DocumentsManager?.renderDocuments?.();
+}
+
+// Auto-mostrar onboarding si no hay perfil completado
+function init() {
+  if (booted) return;
+  booted = true;
+  
+  // ... inicialización existente ...
+  
+  window.OnboardingTriage?.init?.();
+  
+  // Auto-redirigir a onboarding si no hay perfil
+  setTimeout(() => {
+    const p = window.Store?.getPerfilFiscal?.();
+    if (!window.APP_STATE.isDemo && window.APP_STATE.currentUser && !p?.completedAt) {
+      navigateTo('onboarding');
+    }
+  }, 900);
+}
+
+
 
   function syncAndRender() {
   renderKPIs(); renderIncomeWithCssClasses(); renderHealth();

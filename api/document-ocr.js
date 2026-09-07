@@ -69,14 +69,22 @@ function detectGasolinaEfectivo(parsed, fileName) {
   const emisor = String(parsed?.nombre_emisor || '').toUpperCase();
   const rfcEmisor = String(parsed?.rfc_emisor || '').toUpperCase();
   const nombreArchivo = String(fileName || '').toUpperCase();
-  const isFuel = /GASOLIN|PEMEX|OXXO GAS|SHELL|BP\b|MOBIL|G500|GNP GAS|COMBUSTIBLE|ESTACION DE SERVICIO/i.test(
-    `${emisor} ${rfcEmisor} ${nombreArchivo}`
+  
+  const isFuel = /GASOLIN|PEMEX|OXXO GAS|SHELL|BP\b|MOBIL|G500|COMBUSTIBLE|DIESEL|MAGNA|PREMIUM/i.test(
+    `${parsed.nombre_emisor || ''} ${parsed.rfc_emisor || ''} ${parsed.concepto || ''} ${fileName}`
   );
-  const paymentMethod = String(parsed?.payment_method || parsed?.metodo_pago || '').trim();
-  const isCashPayment = paymentMethod === '01' || paymentMethod === '99' ||
-    /EFECTIVO|CASH/i.test(paymentMethod) || !paymentMethod;
-  return { isFuel, isCashPayment, isFuelCash: isFuel && isCashPayment };
-}
+  const paymentMethod = String(parsed.forma_pago || '').trim();
+  const isCashPayment = paymentMethod === '01' || /EFECTIVO/i.test(paymentMethod);
+
+  if (isFuel && isCashPayment) {
+    confidence = Math.min(confidence, 0.70); // Fuerza Verificación Humana
+    doc.safety_flag_reason = 'gasolina_efectivo';
+    doc.pedagogical_note = '⚠️ ALERTA FISCAL CRÍTICA (Art. 27 Fracc. III LISR): Gasolina pagada en EFECTIVO NO es deducible para ISR ni acreditable para IVA. El SAT invalida este gasto sin importar el monto. Debe pagarse con tarjeta, transferencia o monedero electrónico.';
+    doc.safety_flag = true;
+    doc.needs_review = true;
+  }
+    return { isFuel, isCashPayment, isFuelCash: isFuel && isCashPayment };
+  }
 
 // ── Rate limit y JWT (idéntico a v7.0) ──────────────────────────────────
 const _rl = new Map();
@@ -170,12 +178,44 @@ async function googleToken() {
 const PROMPT = [
   'Eres un extractor fiscal mexicano especializado en RESICO 2026 y CFDI 4.0.',
   'Analiza el documento y responde SOLO JSON válido, sin markdown.',
-  'Extrae: document_type, confidence, rfc_emisor, rfc_receptor, razon_social_receptor, cp_receptor, uso_cfdi, metodo_pago, forma_pago, concepto, nombre_emisor, subtotal, descuento, iva, total, folio, fecha, tax_usefulness.',
-  'REGLAS CFDI 4.0: reporta razon_social_receptor TAL CUAL aparece; reporta cp_receptor y uso_cfdi exactamente como vengan.',
-  'metodo_pago: "PUE"|"PPD". forma_pago: "01"=Efectivo,"03"=Transferencia,"04"=Tarjeta crédito,"28"=Tarjeta débito.',
-  'Si es combustible (gasolina/diésel) indica concepto="COMBUSTIBLE".',
-  'Si falta un dato, devuelve null. confidence entre 0 y 1.',
-  'Regla fiscal: gasolina en efectivo (forma_pago 01) NO es deducible ni acreditable (Art. 27 Fracc. III LISR).'
+  '',
+  'REGLAS CFDI 4.0 CRÍTICAS:',
+  '1. razon_social_receptor: TAL CUAL aparece, SIN régimen societario (ej. "EMPRESA PATITO" no "EMPRESA PATITO SA DE CV")',
+  '2. cp_receptor: código postal exacto del domicilio fiscal',
+  '3. uso_cfdi: código de uso (G01, G02, G03, D01-D10, S01, etc.)',
+  '4. metodo_pago: "PUE" (Pago en una sola exhibición) | "PPD" (Pago en parcialidades o diferido)',
+  '5. forma_pago: "01"=Efectivo, "03"=Transferencia, "04"=Tarjeta crédito, "28"=Tarjeta débito, "99"=Por definir',
+  '',
+  'Si es combustible (gasolina, diésel, magna, premium) indica concepto="COMBUSTIBLE".',
+  '',
+  'Regla fiscal crítica (Art. 27 Fracc. III LISR):',
+  'Gasolina pagada en EFECTIVO (forma_pago "01") NO es deducible para ISR ni acreditable para IVA.',
+  '',
+  'Responde con esta forma exacta:',
+  '{',
+  '  "document_type": "CFDI|TICKET|CONSTANCIA|OPINION|EFIRMA|OTRO",',
+  '  "confidence": 0.97,',
+  '  "rfc_emisor": "string|null",',
+  '  "rfc_receptor": "string|null",',
+  '  "razon_social_receptor": "string|null",',
+  '  "cp_receptor": "string|null",',
+  '  "uso_cfdi": "string|null",',
+  '  "metodo_pago": "PUE|PPD|null",',
+  '  "forma_pago": "01|03|04|28|99|null",',
+  '  "concepto": "string|null",',
+  '  "nombre_emisor": "string|null",',
+  '  "subtotal": 123.45,',
+  '  "descuento": 0,',
+  '  "iva": 19.76,',
+  '  "total": 143.21,',
+  '  "folio": "string|null",',
+  '  "fecha": "YYYY-MM-DD|null",',
+  '  "summary": "máximo 6 palabras o null",',
+  '  "tax_usefulness": "IVA|ISR|AMBOS|NINGUNO",',
+  '  "tipo_servicio": "HONORARIOS|ARRENDAMIENTO|FLETES|COMISIONES|DESPERDICIOS|HOTELES|AGAPES|ACTIVIDADES_EMPRESARIALES|OTRO|null"',
+  '}',
+  '',
+  'Si falta un dato, devuelve null. confidence entre 0 y 1.'
 ].join('\n');
 function geminiBody(mimeType, base64Data) {
   return { contents: [{ role: 'user', parts: [{ text: PROMPT }, { inline_data: { mime_type: mimeType, data: base64Data } }] }],

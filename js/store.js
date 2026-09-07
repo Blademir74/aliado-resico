@@ -33,7 +33,6 @@ const Store = (() => {
     invoiceProfiles: [],
     saludFiscal: { buzonTributarioActivo: null, eFirmaVigente: null, eFirmaExpiry: null, lastAuditDate: null, alertLevel: 'safe' },
     carpetaFiscal: { year: YEAR, monthlyFolders: buildMonthlyFolders(YEAR), summary: { total: 0, ingresos: 0, gastos_iva: 0, efirma: 0, constancia: 0, opinion: 0 }, efirmaExpiry: null, constanciaStatus: 'pendiente', opinionStatus: 'pendiente', lastUpdated: null },
-    perfilFiscal: { tipo_persona: null, rfc: '', cp: '', razon_social: '', ventas_publico_general: false, completedAt: null },
     polizas: [],
     diagnostic: { income: 0, mixtos: false, socioPM: false, salarios: 0, intereses: 0, cfdiGlobal: false, buzonActivo: true, anualObligatoria: false, riesgoMulta: false, riesgoBuzon: false, riskLevel: 'SEGURO', recomendacion: '', completedAt: null }
   };
@@ -218,8 +217,6 @@ const Store = (() => {
   }
 
   function rebuildCarpetaFiscal() {
-    rebuildPolizas();
-    const folders = buildMonthlyFolders(YEAR);
     const summary = { total: 0, ingresos: 0, gastos_iva: 0, efirma: 0, constancia: 0, opinion: 0 };
     let latestEFirma = null, latestConstancia = null, latestOpinion = null;
     (state.documents || []).forEach(doc => {
@@ -524,60 +521,271 @@ async function persistDiagnosticRemote(d) {
     rtChannel = null;
     emit('storeReset', null); emitAll(); rebuildCarpetaFiscal();
   }
-  // ── PERFIL FISCAL PF/PM + GASTOS + PÓLIZAS (Inyección 2026) ────────────
-function getPerfilFiscal() { return state.perfilFiscal || {}; }
+
+// ════════════════════════════════════════════════════════════
+// INYECCIÓN PF/PM 2026 — Perfil Fiscal + Gastos + Pólizas + Alarmas
+// ════════════════════════════════════════════════════════════
+
+// ── PERFIL FISCAL PF/PM ─────────────────────────────────────────────────
+const PERFIL_DEF = {
+  tipo_persona: null, // 'PF' | 'PM'
+  rfc: '',
+  cp: '',
+  razon_social: '',
+  ventas_publico_general: false,
+  completedAt: null
+};
+
+function getPerfilFiscal() {
+  return state.perfilFiscal || PERFIL_DEF;
+}
+
 function setPerfilFiscal(data) {
-  state.perfilFiscal = { ...(state.perfilFiscal || {}), ...data };
-  persist(); emit('perfilUpdated', state.perfilFiscal); emitAll();
+  state.perfilFiscal = { ...(state.perfilFiscal || PERFIL_DEF), ...data };
+  persist();
+  emit('perfilUpdated', state.perfilFiscal);
+  emitAll();
   persistPerfilRemote(state.perfilFiscal);
 }
+
 async function persistPerfilRemote(p) {
   if (!db || !usr?.id) return;
-  const payload = { user_id: usr.id, rfc: p.rfc || null, tipo_persona: p.tipo_persona || null };
-  try { const { error } = await db.from('user_profiles').upsert(payload, { onConflict: 'user_id' }); if (error) logSupabaseError('persistPerfilRemote', error, payload); }
-  catch (e) { console.warn('[Store] persistPerfilRemote:', e?.message || e); }
+  const payload = {
+    user_id: usr.id,
+    rfc: p.rfc || null,
+    tipo_persona: p.tipo_persona || null,
+    cp: p.cp || null,
+    razon_social: p.razon_social || null
+  };
+  try {
+    const { error } = await db.from('user_profiles').upsert(payload, { onConflict: 'user_id' });
+    if (error) logSupabaseError('persistPerfilRemote', error, payload);
+  } catch (e) {
+    console.warn('[Store] persistPerfilRemote:', e?.message || e);
+  }
 }
+
+// ── TRATAMIENTO DE GASTOS PF vs PM ──────────────────────────────────────
 // PF: egresos solo para IVA acreditable (ISR sobre brutos, Art. 113-E LISR)
-// PM: egresos deducibles ISR (tasa 30% utilidad fiscal, Art. 9 LISR) + IVA
+// PM: egresos deducibles ISR (30% utilidad fiscal) + IVA acreditable
 function computeGastoTreatment(doc) {
   const e = doc?.extracted_data || {};
   const isPM = (state.perfilFiscal?.tipo_persona || 'PF') === 'PM';
-  const fuel = /GASOLIN|PEMEX|OXXO GAS|SHELL|BP\b|MOBIL|G500|COMBUSTIBLE|DIESEL|MAGNA|PREMIUM/i.test(`${e.nombre_emisor || ''} ${e.rfc_emisor || ''} ${e.concepto || ''} ${doc?.file_name || ''}`);
+  
+  // Detección de combustible
+  const fuel = /GASOLIN|PEMEX|OXXO GAS|SHELL|BP\b|MOBIL|G500|COMBUSTIBLE|DIESEL|MAGNA|PREMIUM/i.test(
+    `${e.nombre_emisor || ''} ${e.rfc_emisor || ''} ${e.concepto || ''} ${doc?.file_name || ''}`
+  );
   const cash = String(e.metodo_pago || e.forma_pago || '') === '01' || /EFECTIVO/i.test(String(e.metodo_pago || ''));
-  if (fuel && cash) return { gasto_acreditable: false, isr_deducible: false, fuel_cash: true, legal: 'Art. 27 Fracc. III LISR', microcopy: '🚨 Gasolina pagada en EFECTIVO: NO deducible (ISR) ni acreditable (IVA) en ningún caso. Regulariza a tarjeta, transferencia o monedero electrónico.' };
-  if (isPM) return { gasto_acreditable: true, isr_deducible: true, fuel_cash: false, legal: 'Arts. 27-31 y 9 LISR · Art. 5 Ley IVA', microcopy: '✅ PM: egreso deducible para ISR (30% sobre utilidad fiscal) y acreditable para IVA con CFDI válido.' };
-  return { gasto_acreditable: true, isr_deducible: false, fuel_cash: false, legal: 'Art. 113-E LISR · Art. 5 Ley IVA', microcopy: '✅ PF RESICO: el egreso NO deduce ISR (ingresos brutos sin deducciones) pero SÍ acredita IVA con CFDI válido y gasto indispensable.' };
+  
+  // VALIDACIÓN CRÍTICA: Gasolina en efectivo (Art. 27 Fracc. III LISR)
+  if (fuel && cash) {
+    return {
+      gasto_acreditable: false,
+      isr_deducible: false,
+      fuel_cash: true,
+      legal: 'Art. 27 Fracc. III LISR',
+      microcopy: '🚨 Gasolina pagada en EFECTIVO: NO deducible (ISR) ni acreditable (IVA) en ningún caso. Regulariza a tarjeta, transferencia o monedero electrónico.'
+    };
+  }
+  
+  // PM: egresos deducibles ISR + IVA acreditable
+  if (isPM) {
+    return {
+      gasto_acreditable: true,
+      isr_deducible: true,
+      fuel_cash: false,
+      legal: 'Arts. 27-31 y 9 LISR · Art. 5 Ley IVA',
+      microcopy: '✅ PM: egreso deducible para ISR (30% sobre utilidad fiscal) y acreditable para IVA con CFDI válido.'
+    };
+  }
+  
+  // PF: egresos solo IVA acreditable (ISR sobre brutos sin deducciones)
+  return {
+    gasto_acreditable: true,
+    isr_deducible: false,
+    fuel_cash: false,
+    legal: 'Art. 113-E LISR · Art. 5 Ley IVA',
+    microcopy: '✅ PF RESICO: el egreso NO deduce ISR (ingresos brutos sin deducciones) pero SÍ acredita IVA con CFDI válido y gasto indispensable.'
+  };
 }
-// Pólizas: PUE→Ingresos · REP→Ingresos(cobro) · PPD→Diario(provisión) · gasto→Egresos
+
+// ── GENERACIÓN AUTOMÁTICA DE PÓLIZAS (Event-Driven) ────────────────────
+// PUE → INGRESOS · REP → INGRESOS(cobro) · PPD → DIARIO(provisión) · gasto → EGRESOS
 function generatePoliza(doc) {
   const e = doc?.extracted_data || {};
   const tipo = String(doc.document_type || '').toUpperCase();
   const metodo = String(e.metodo_pago || '').toUpperCase();
   const sub = Number(e.subtotal || 0), iva = Number(e.iva || 0), tot = Number(e.total || 0);
   const fecha = e.fecha || String(doc.created_at || '').slice(0, 10);
+  
   let p = null;
+  
+  // Pólizas de INGRESOS (CFDI emitidos)
   if (tipo === 'CFDI' && String(e.tax_usefulness || '').toUpperCase() === 'ISR') {
-    if (metodo === 'PPD') p = { tipo: 'DIARIO', concepto: 'CFDI PPD — provisión de ingreso', pendiente_rep: true, partidas: [{ c: '1101 Clientes', d: tot, h: 0 }, { c: '4101 Ingresos', d: 0, h: sub }, { c: '2205 IVA trasladado', d: 0, h: iva }] };
-    else if (metodo === 'REP') p = { tipo: 'INGRESOS', concepto: 'REP — complemento de pago cobrado', pendiente_rep: false, partidas: [{ c: '1101 Bancos', d: tot, h: 0 }, { c: '1101 Clientes', d: 0, h: tot }] };
-    else p = { tipo: 'INGRESOS', concepto: 'CFDI PUE — ingreso cobrado', pendiente_rep: false, partidas: [{ c: '1101 Bancos', d: tot, h: 0 }, { c: '4101 Ingresos', d: 0, h: sub }, { c: '2205 IVA trasladado', d: 0, h: iva }] };
-  } else if (tipo === 'TICKET' || ['IVA', 'AMBOS'].includes(String(e.tax_usefulness || '').toUpperCase())) {
-    const t = computeGastoTreatment(doc);
-    p = { tipo: 'EGRESOS', concepto: t.fuel_cash ? 'Egreso NO acreditable (gasolina efectivo)' : 'Egreso pagado', riesgo: t.fuel_cash, pendiente_rep: false, partidas: [{ c: '5101 Gastos', d: sub, h: 0 }, ...(t.gasto_acreditable ? [{ c: '1150 IVA acreditable', d: iva, h: 0 }] : []), { c: '1101 Bancos', d: 0, h: tot }] };
+    if (metodo === 'PPD') {
+      p = {
+        tipo: 'DIARIO',
+        concepto: 'CFDI PPD — provisión de ingreso (cuentas por cobrar)',
+        pendiente_rep: true,
+        partidas: [
+          { cuenta: '1101 Clientes', debe: tot, haber: 0 },
+          { cuenta: '4101 Ingresos', debe: 0, haber: sub },
+          { cuenta: '2205 IVA trasladado', debe: 0, haber: iva }
+        ]
+      };
+    } else if (metodo === 'REP') {
+      p = {
+        tipo: 'INGRESOS',
+        concepto: 'Complemento de pago REP — flujo cobrado',
+        pendiente_rep: false,
+        partidas: [
+          { cuenta: '1101 Bancos', debe: tot, haber: 0 },
+          { cuenta: '1101 Clientes', debe: 0, haber: tot }
+        ]
+      };
+    } else {
+      p = {
+        tipo: 'INGRESOS',
+        concepto: 'CFDI PUE — ingreso efectivamente cobrado',
+        pendiente_rep: false,
+        partidas: [
+          { cuenta: '1101 Bancos', debe: tot, haber: 0 },
+          { cuenta: '4101 Ingresos', debe: 0, haber: sub },
+          { cuenta: '2205 IVA trasladado', debe: 0, haber: iva }
+        ]
+      };
+    }
   }
+  
+  // Pólizas de EGRESOS (gastos/tickets)
+  else if (tipo === 'TICKET' || ['IVA', 'AMBOS'].includes(String(e.tax_usefulness || '').toUpperCase())) {
+    const t = computeGastoTreatment(doc);
+    const partidas = [
+      { cuenta: '5101 Gastos', debe: sub, haber: 0 }
+    ];
+    if (t.gasto_acreditable) {
+      partidas.push({ cuenta: '1150 IVA acreditable', debe: iva, haber: 0 });
+    }
+    partidas.push({ cuenta: '1101 Bancos', debe: 0, haber: tot });
+    
+    p = {
+      tipo: 'EGRESOS',
+      concepto: t.fuel_cash ? 'Egreso NO acreditable (gasolina efectivo)' : 'Egreso pagado',
+      riesgo: t.fuel_cash,
+      pendiente_rep: false,
+      partidas
+    };
+  }
+  
   if (!p) return null;
-  return { id: safeUUID(), doc_id: doc.id, folio: e.folio || doc.file_name, fecha, ...p, created_at: new Date().toISOString() };
+  
+  return {
+    id: safeUUID(),
+    doc_id: doc.id,
+    folio: e.folio || doc.file_name,
+    fecha,
+    ...p,
+    created_at: new Date().toISOString()
+  };
 }
-function getPolizas() { return state.polizas || []; }
-function rebuildPolizas() { state.polizas = (state.documents || []).map(generatePoliza).filter(Boolean); }
-  rebuildCarpetaFiscal();
+
+function getPolizas() {
+  return state.polizas || [];
+}
+
+function rebuildPolizas() {
+  state.polizas = (state.documents || []).map(generatePoliza).filter(Boolean);
+}
+
+// ── MOTOR DE ALARMAS PREVENTIVAS ────────────────────────────────────────
+// e.firma 4 años (Art. 17-D CFF) · REP día 5 (Art. 29-A CFF) · CFDI Global
+function runPreventiveAlarms() {
+  const alarms = [];
+  const now = new Date();
+  const perfil = getPerfilFiscal();
+  
+  // 1. ALERTA e.firma (4 años vigencia, Art. 17-D CFF)
+  const expiry = state.saludFiscal?.eFirmaExpiry;
+  if (expiry && expiry !== 'pendiente') {
+    const days = computeDaysRemaining(expiry);
+    if (days !== null) {
+      if (days <= 0) {
+        alarms.push({
+          level: 'critical',
+          text: `🔴 e.firma VENCIDA: Renueva inmediatamente en el portal SAT. Sin e.firma no puedes timbrar CFDI ni presentar declaraciones (Art. 17-D CFF).`
+        });
+      } else if (days <= 15) {
+        alarms.push({
+          level: 'critical',
+          text: `⚠️ ¡CRÍTICO! Tu e.firma vence en ${days} día(s). Agenda cita SAT hoy mismo (Art. 17-D CFF).`
+        });
+      } else if (days <= 30) {
+        alarms.push({
+          level: 'warning',
+          text: `⏰ Tu e.firma vence en ${days} día(s). Programa tu cita en el SAT (Art. 17-D CFF).`
+        });
+      } else if (days <= 90) {
+        alarms.push({
+          level: 'info',
+          text: `🔐 e.firma vigente hasta ${new Date(expiry).toLocaleDateString('es-MX')} (${days} días restantes).`
+        });
+      }
+    }
+  }
+  
+  // 2. ALERTA REP (Complemento de Pago, Art. 29-A CFF)
+  // Si hay CFDI PPD sin REP, debe emitirse antes del día 5 del mes siguiente
+  const docs = state.documents || [];
+  docs.forEach(d => {
+    const metodo = String(d.extracted_data?.metodo_pago || '').toUpperCase();
+    const repEmitido = d.extracted_data?.rep_emitido;
+    if (metodo === 'PPD' && !repEmitido) {
+      const fechaDoc = new Date(d.extracted_data?.fecha || d.created_at);
+      const deadline = new Date(fechaDoc.getFullYear(), fechaDoc.getMonth() + 1, 5); // día 5 del mes siguiente
+      const daysToDeadline = Math.ceil((deadline - now) / 86400000);
+      
+      if (daysToDeadline < 0) {
+        alarms.push({
+          level: 'expired',
+          text: `🚨 REP VENCIDO: CFDI PPD ${d.extracted_data?.folio || d.file_name} sin complemento de pago. Venció el ${deadline.toLocaleDateString('es-MX')}. Emite el REP inmediatamente (Art. 29-A CFF).`
+        });
+      } else if (daysToDeadline <= 5) {
+        alarms.push({
+          level: 'critical',
+          text: `⏰ REP URGENTE: Emite el complemento de pago del CFDI PPD ${d.extracted_data?.folio || d.file_name} antes del ${deadline.toLocaleDateString('es-MX')} (faltan ${daysToDeadline} días). Art. 29-A CFF.`
+        });
+      }
+    }
+  });
+  
+  // 3. ALERTA CFDI Global (público en general, 24h post-cierre mensual)
+  if (perfil.ventas_publico_general && now.getDate() === 1 && now.getHours() < 24) {
+    alarms.push({
+      level: 'critical',
+      text: '🌐 CFDI GLOBAL: Tienes 24 horas tras el cierre mensual para emitir el CFDI global de público en general (RFC genérico XAXX010101000). Art. 29-A CFF / regla 2.7.1.8 RMF 2026.'
+    });
+  }
+  
+  return alarms;
+}
+
+// ── Exponer nuevas funciones en el return final ─────────────────────────
+// Añade estas líneas al objeto return antes del cierre del IIFE:
+// getPerfilFiscal, setPerfilFiscal, computeGastoTreatment, 
+// getPolizas, rebuildPolizas, runPreventiveAlarms
+
+
+
   return {
     on, initSupabase, getState, getMetrics, getConversations, getSettings,
     getDocuments, getSaludFiscal, getCarpetaFiscal, getDiagnostic,
     getInvoiceProfiles, setInvoiceProfiles, setState, addConversation,
     updateIncome, updateAnnualLimit, updateSaludFiscal, saveDocument,
     saveInvoiceDocument, updateCarpetaFiscal, updateDiagnostic, reset,
-    buildWhatsAppAlertPayload, evaluateRiskLevelChange,
-    getPerfilFiscal, setPerfilFiscal, computeGastoTreatment, getPolizas, rebuildPolizas
+    getPerfilFiscal, setPerfilFiscal, computeGastoTreatment,
+    getPolizas, rebuildPolizas, runPreventiveAlarms,
+    
   };
 })();
 
