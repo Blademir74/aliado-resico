@@ -63,6 +63,20 @@ function compressImage(file, maxDim = 1600, quality = 0.8) {
     return { isTicket, isGasStation, isOxxo };
   }
 
+  // ── CFDI 4.0: razón social sin régimen · CP exacto · uso compatible ────
+const REGIMEN_TOKENS = /\b(S\.?\s?A\.?(\s?DE\s?C\.?\s?V\.?)?|S\.?\s?DE\s?R\.?\s?L\.?|S\.?\s?C\.?|S\.?\s?N\.?\s?C\.?|A\.?\s?C\.?|UNIDAD\s?DE\s?INVERSIÓN|UNIDAD\s?INVERSION)\b/i;
+const RESICO_USOS_OK = ['G01','G02','G03','D01','D02','D03','D04','D05','D06','D07','D08','D09','D10','S01','CP01','CN01'];
+function validateCFDI40(data, perfil) {
+  const warnings = []; let hardFail = false;
+  const razon = String(data.razon_social_receptor || data.nombre_receptor || '').toUpperCase();
+  if (razon && REGIMEN_TOKENS.test(razon)) { warnings.push(`CFDI 4.0: la Razón Social del receptor no debe incluir régimen societario ("${razon}"); debe coincidir con tu Constancia (ej. sin "SA DE CV").`); hardFail = true; }
+  const cp = String(data.cp_receptor || '').trim();
+  if (perfil?.cp && cp && cp !== String(perfil.cp).trim()) { warnings.push(`CFDI 4.0: el CP del receptor (${cp}) no coincide con tu domicilio fiscal registrado (${perfil.cp}).`); hardFail = true; }
+  const uso = String(data.uso_cfdi || '').toUpperCase();
+  if (uso && !RESICO_USOS_OK.includes(uso)) { warnings.push(`CFDI 4.0: Uso "${uso}" incompatible con régimen RESICO (626).`); hardFail = true; }
+  return { ok: !hardFail, warnings };
+}
+
   // ── Nota pedagógica RESICO: ISR no deducible, IVA sí acreditable ─────────
   function buildFiscalNote(extractedData, fileName) {
     const { isTicket, isGasStation, isOxxo } = detectTicketType(extractedData, fileName);
@@ -230,6 +244,18 @@ function compressImage(file, maxDim = 1600, quality = 0.8) {
       // Enriquecer el documento antes de guardarlo
       const extractedData = payload.document.extracted_data || {};
       const fiscalNote = buildFiscalNote(extractedData, file.name);
+      const perfil = window.Store?.getPerfilFiscal?.() || {};
+      const cfdiCheck = validateCFDI40(extractedData, perfil);
+      const treatment = window.Store?.computeGastoTreatment?.(payload.document);
+      if (treatment) { extractedData.gasto_acreditable = treatment.gasto_acreditable; extractedData.isr_deducible = treatment.isr_deducible; }
+      if (!cfdiCheck.ok) { safety.needs_review = true; safety.safety_flag = true; }
+      if (output && cfdiCheck.warnings.length) {
+        output.innerHTML += `<div style="margin-top:8px;padding:10px;background:rgba(239,68,68,0.12);border-left:3px solid #ef4444;border-radius:4px;font-size:13px;color:#fecaca;">${cfdiCheck.warnings.map(w => esc(w)).join('<br>')}</div>`;
+      }
+      if (output && treatment) {
+        output.innerHTML += `<div style="margin-top:8px;padding:10px;background:${treatment.gasto_acreditable ? 'rgba(16,185,129,0.10)' : 'rgba(239,68,68,0.12)'};border-left:3px solid ${treatment.gasto_acreditable ? '#10b981' : '#ef4444'};border-radius:4px;font-size:13px;color:${treatment.gasto_acreditable ? '#d1fae5' : '#fecaca'};">${esc(treatment.microcopy)} <span style="opacity:.7;">(${treatment.legal})</span></div>`;
+      }
+
 
       await window.Store?.saveDocument?.({
         ...payload.document,

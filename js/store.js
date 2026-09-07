@@ -33,6 +33,8 @@ const Store = (() => {
     invoiceProfiles: [],
     saludFiscal: { buzonTributarioActivo: null, eFirmaVigente: null, eFirmaExpiry: null, lastAuditDate: null, alertLevel: 'safe' },
     carpetaFiscal: { year: YEAR, monthlyFolders: buildMonthlyFolders(YEAR), summary: { total: 0, ingresos: 0, gastos_iva: 0, efirma: 0, constancia: 0, opinion: 0 }, efirmaExpiry: null, constanciaStatus: 'pendiente', opinionStatus: 'pendiente', lastUpdated: null },
+    perfilFiscal: { tipo_persona: null, rfc: '', cp: '', razon_social: '', ventas_publico_general: false, completedAt: null },
+    polizas: [],
     diagnostic: { income: 0, mixtos: false, socioPM: false, salarios: 0, intereses: 0, cfdiGlobal: false, buzonActivo: true, anualObligatoria: false, riesgoMulta: false, riesgoBuzon: false, riskLevel: 'SEGURO', recomendacion: '', completedAt: null }
   };
   function clone(v) { return JSON.parse(JSON.stringify(v)); }
@@ -216,6 +218,7 @@ const Store = (() => {
   }
 
   function rebuildCarpetaFiscal() {
+    rebuildPolizas();
     const folders = buildMonthlyFolders(YEAR);
     const summary = { total: 0, ingresos: 0, gastos_iva: 0, efirma: 0, constancia: 0, opinion: 0 };
     let latestEFirma = null, latestConstancia = null, latestOpinion = null;
@@ -521,6 +524,51 @@ async function persistDiagnosticRemote(d) {
     rtChannel = null;
     emit('storeReset', null); emitAll(); rebuildCarpetaFiscal();
   }
+  // ── PERFIL FISCAL PF/PM + GASTOS + PÓLIZAS (Inyección 2026) ────────────
+function getPerfilFiscal() { return state.perfilFiscal || {}; }
+function setPerfilFiscal(data) {
+  state.perfilFiscal = { ...(state.perfilFiscal || {}), ...data };
+  persist(); emit('perfilUpdated', state.perfilFiscal); emitAll();
+  persistPerfilRemote(state.perfilFiscal);
+}
+async function persistPerfilRemote(p) {
+  if (!db || !usr?.id) return;
+  const payload = { user_id: usr.id, rfc: p.rfc || null, tipo_persona: p.tipo_persona || null };
+  try { const { error } = await db.from('user_profiles').upsert(payload, { onConflict: 'user_id' }); if (error) logSupabaseError('persistPerfilRemote', error, payload); }
+  catch (e) { console.warn('[Store] persistPerfilRemote:', e?.message || e); }
+}
+// PF: egresos solo para IVA acreditable (ISR sobre brutos, Art. 113-E LISR)
+// PM: egresos deducibles ISR (tasa 30% utilidad fiscal, Art. 9 LISR) + IVA
+function computeGastoTreatment(doc) {
+  const e = doc?.extracted_data || {};
+  const isPM = (state.perfilFiscal?.tipo_persona || 'PF') === 'PM';
+  const fuel = /GASOLIN|PEMEX|OXXO GAS|SHELL|BP\b|MOBIL|G500|COMBUSTIBLE|DIESEL|MAGNA|PREMIUM/i.test(`${e.nombre_emisor || ''} ${e.rfc_emisor || ''} ${e.concepto || ''} ${doc?.file_name || ''}`);
+  const cash = String(e.metodo_pago || e.forma_pago || '') === '01' || /EFECTIVO/i.test(String(e.metodo_pago || ''));
+  if (fuel && cash) return { gasto_acreditable: false, isr_deducible: false, fuel_cash: true, legal: 'Art. 27 Fracc. III LISR', microcopy: '🚨 Gasolina pagada en EFECTIVO: NO deducible (ISR) ni acreditable (IVA) en ningún caso. Regulariza a tarjeta, transferencia o monedero electrónico.' };
+  if (isPM) return { gasto_acreditable: true, isr_deducible: true, fuel_cash: false, legal: 'Arts. 27-31 y 9 LISR · Art. 5 Ley IVA', microcopy: '✅ PM: egreso deducible para ISR (30% sobre utilidad fiscal) y acreditable para IVA con CFDI válido.' };
+  return { gasto_acreditable: true, isr_deducible: false, fuel_cash: false, legal: 'Art. 113-E LISR · Art. 5 Ley IVA', microcopy: '✅ PF RESICO: el egreso NO deduce ISR (ingresos brutos sin deducciones) pero SÍ acredita IVA con CFDI válido y gasto indispensable.' };
+}
+// Pólizas: PUE→Ingresos · REP→Ingresos(cobro) · PPD→Diario(provisión) · gasto→Egresos
+function generatePoliza(doc) {
+  const e = doc?.extracted_data || {};
+  const tipo = String(doc.document_type || '').toUpperCase();
+  const metodo = String(e.metodo_pago || '').toUpperCase();
+  const sub = Number(e.subtotal || 0), iva = Number(e.iva || 0), tot = Number(e.total || 0);
+  const fecha = e.fecha || String(doc.created_at || '').slice(0, 10);
+  let p = null;
+  if (tipo === 'CFDI' && String(e.tax_usefulness || '').toUpperCase() === 'ISR') {
+    if (metodo === 'PPD') p = { tipo: 'DIARIO', concepto: 'CFDI PPD — provisión de ingreso', pendiente_rep: true, partidas: [{ c: '1101 Clientes', d: tot, h: 0 }, { c: '4101 Ingresos', d: 0, h: sub }, { c: '2205 IVA trasladado', d: 0, h: iva }] };
+    else if (metodo === 'REP') p = { tipo: 'INGRESOS', concepto: 'REP — complemento de pago cobrado', pendiente_rep: false, partidas: [{ c: '1101 Bancos', d: tot, h: 0 }, { c: '1101 Clientes', d: 0, h: tot }] };
+    else p = { tipo: 'INGRESOS', concepto: 'CFDI PUE — ingreso cobrado', pendiente_rep: false, partidas: [{ c: '1101 Bancos', d: tot, h: 0 }, { c: '4101 Ingresos', d: 0, h: sub }, { c: '2205 IVA trasladado', d: 0, h: iva }] };
+  } else if (tipo === 'TICKET' || ['IVA', 'AMBOS'].includes(String(e.tax_usefulness || '').toUpperCase())) {
+    const t = computeGastoTreatment(doc);
+    p = { tipo: 'EGRESOS', concepto: t.fuel_cash ? 'Egreso NO acreditable (gasolina efectivo)' : 'Egreso pagado', riesgo: t.fuel_cash, pendiente_rep: false, partidas: [{ c: '5101 Gastos', d: sub, h: 0 }, ...(t.gasto_acreditable ? [{ c: '1150 IVA acreditable', d: iva, h: 0 }] : []), { c: '1101 Bancos', d: 0, h: tot }] };
+  }
+  if (!p) return null;
+  return { id: safeUUID(), doc_id: doc.id, folio: e.folio || doc.file_name, fecha, ...p, created_at: new Date().toISOString() };
+}
+function getPolizas() { return state.polizas || []; }
+function rebuildPolizas() { state.polizas = (state.documents || []).map(generatePoliza).filter(Boolean); }
   rebuildCarpetaFiscal();
   return {
     on, initSupabase, getState, getMetrics, getConversations, getSettings,
@@ -528,7 +576,8 @@ async function persistDiagnosticRemote(d) {
     getInvoiceProfiles, setInvoiceProfiles, setState, addConversation,
     updateIncome, updateAnnualLimit, updateSaludFiscal, saveDocument,
     saveInvoiceDocument, updateCarpetaFiscal, updateDiagnostic, reset,
-    buildWhatsAppAlertPayload, evaluateRiskLevelChange
+    buildWhatsAppAlertPayload, evaluateRiskLevelChange,
+    getPerfilFiscal, setPerfilFiscal, computeGastoTreatment, getPolizas, rebuildPolizas
   };
 })();
 

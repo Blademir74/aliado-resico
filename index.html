@@ -563,6 +563,7 @@
         </article>
 
         <article class="glass card" style="margin-bottom:16px;">
+          <div id="preventive-alarms" hidden style="margin:10px 0;"></div>
           <h3 style="margin-top:0;">Salud Fiscal</h3>
           <div class="health-grid">
             <div class="health-item">
@@ -713,6 +714,40 @@
               <button class="nav-btn quick-ask" data-prompt="Cobré 50000 este mes" style="display:block;width:100%;text-align:left;margin-bottom:8px;">Registrar ingreso</button>
               <button class="nav-btn quick-ask" data-prompt="Mi buzón tributario está inactivo" style="display:block;width:100%;text-align:left;">Buzón Tributario</button>
             </article>
+          </div>
+        </div>
+      </section>
+
+      <section id="onboarding-tab" class="tab-view" role="tabpanel" hidden>
+        <div class="card">
+          <h2>🧭 Triage de Onboarding Fiscal 2026</h2>
+          <p class="text-muted" id="ob-step-indicator">Paso 1 de 3</p>
+          <div id="ob-msg" style="display:none;margin:10px 0;padding:10px 14px;border-radius:8px;font-size:13px;"></div>
+          <div class="wizard-step active" data-obstep="1">
+            <h3>Paso 1 · Tipo de persona y RFC (homoclave obligatoria)</h3>
+            <label style="display:block;margin:6px 0;"><input type="radio" name="ob-tipo" value="PF"> Persona Física — RESICO (régimen 626)</label>
+            <label style="display:block;margin:6px 0;"><input type="radio" name="ob-tipo" value="PM"> Persona Moral</label>
+            <input id="ob-rfc" maxlength="13" placeholder="RFC con homoclave (ej. CUCB740423MSA)" style="width:100%;margin-top:8px;padding:10px;border-radius:8px;border:1px solid #334155;background:#0f172a;color:#e2e8f0;">
+          </div>
+          <div class="wizard-step" data-obstep="2" hidden>
+            <h3>Paso 2 · Elegibilidad y triggers de exclusión</h3>
+            <label style="display:block;margin:6px 0;"><input type="checkbox" id="ob-socios-pm"> (PF) Soy socia/o de una Persona Moral</label>
+            <label style="display:block;margin:6px 0;"><input type="checkbox" id="ob-socios-nopf"> (PM) Tengo socios que NO son personas físicas</label>
+            <label style="display:block;margin:6px 0;"><input type="checkbox" id="ob-partes-rel"> (PM) Opero preponderantemente con partes relacionadas</label>
+          </div>
+          <div class="wizard-step" data-obstep="3" hidden>
+            <h3>Paso 3 · Salud Digital (CFF)</h3>
+            <label style="display:block;margin:6px 0;">e.firma (Art. 17-D CFF):
+              <select id="ob-efirma" style="padding:8px;border-radius:8px;border:1px solid #334155;background:#0f172a;color:#e2e8f0;"><option value="">—</option><option value="vigente">Vigente</option><option value="vencida">Vencida</option></select>
+            </label>
+            <label style="display:block;margin:6px 0;">Buzón Tributario (Art. 17-K CFF):
+              <select id="ob-buzon" style="padding:8px;border-radius:8px;border:1px solid #334155;background:#0f172a;color:#e2e8f0;"><option value="">—</option><option value="activo">Activo</option><option value="inactivo">Inactivo</option></select>
+            </label>
+          </div>
+          <div id="ob-result" style="display:none;margin-top:12px;"></div>
+          <div style="display:flex;gap:8px;margin-top:14px;">
+            <button id="ob-back" class="btn-secondary">← Atrás</button>
+            <button id="ob-next" class="btn-primary">Siguiente →</button>
           </div>
         </div>
       </section>

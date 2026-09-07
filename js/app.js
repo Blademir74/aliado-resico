@@ -4,7 +4,7 @@ Arquitectura: IIFE encapsulado, cero dependencias huérfanas.
 Cumplimiento: Art. 113-E, 113-F LISR · Art. 17-K, 17-D CFF.
 ════════════════════════════════════════════════════════════ */
 const App = (() => {
-  const VIEWS = ['dashboard', 'wizard', 'classifier', 'documents', 'rfc-consult', 'invoicing', 'carpeta'];
+  const VIEWS = ['dashboard','onboarding', 'wizard', 'classifier', 'documents', 'rfc-consult', 'invoicing', 'carpeta'];
   const RESICO_LIMIT = 3500000;
   const ALERT_80 = 2800000;
   const ALERT_90 = 3150000;
@@ -421,8 +421,12 @@ const App = (() => {
       </div>`;
   }).join('');
 
-   container.innerHTML = `<div style="display:flex;gap:6px;overflow-x:auto;padding-bottom:8px;margin-bottom:14px;">${monthTabs}</div> <h4 style="margin:0 0 10px;color:#e2e8f0;"> ${activeFolder?.monthName || ''} ${carpeta.year} — ${activeFolder?.total || 0} documentos </h4> ${categoryBlocks}`;
-  
+      const monthPolizas = (window.Store?.getPolizas?.() || []).filter(p => { const d = new Date(p.fecha); return d.getFullYear() === carpeta.year && d.getMonth() === activeIdx; });
+      const polizasBlock = `<div style="border:1px solid #1e293b;border-radius:8px;margin-bottom:10px;overflow:hidden;"><div style="padding:8px 12px;background:rgba(255,255,255,0.03);border-left:3px solid #22c55e;font-weight:600;font-size:13px;">📒 Pólizas del mes (${monthPolizas.length})</div>${monthPolizas.length ? monthPolizas.map(p => `<div style="display:flex;justify-content:space-between;padding:8px 10px;border-bottom:1px solid #1e293b;font-size:13px;${p.riesgo ? 'background:rgba(245,158,11,0.10);' : ''}"><span>${p.tipo} · ${esc(p.concepto)} · ${esc(p.folio || '')}</span><span style="color:${p.riesgo ? '#f59e0b' : '#94a3b8'};font-size:11px;">${p.riesgo ? '⚠️ Riesgo' : p.pendiente_rep ? '⏰ REP pendiente' : '✅'}</span></div>`).join('') : '<p style="color:#64748b;font-size:12px;padding:8px 10px;">Sin pólizas este mes.</p>'}</div>`;
+      const expDocs = (window.Store?.getDocuments?.() || []).filter(d => ['EFIRMA', 'CONSTANCIA', 'OPINION'].includes(String(d.document_type || '').toUpperCase()));
+      const expedienteBlock = `<div style="border:1px solid #1e293b;border-radius:8px;margin-bottom:10px;overflow:hidden;"><div style="padding:8px 12px;background:rgba(255,255,255,0.03);border-left:3px solid #06b6d4;font-weight:600;font-size:13px;">🗂️ Expediente Permanente (${expDocs.length})</div>${expDocs.length ? expDocs.map(d => `<div style="display:flex;justify-content:space-between;padding:8px 10px;border-bottom:1px solid #1e293b;font-size:13px;"><span>${esc(d.file_name)}</span><span style="color:#94a3b8;font-size:11px;">${d.document_type}</span></div>`).join('') : '<p style="color:#64748b;font-size:12px;padding:8px 10px;">Sin documentos permanentes.</p>'}</div>`;
+      container.innerHTML = `<div style="display:flex;gap:6px;overflow-x:auto;padding-bottom:8px;margin-bottom:14px;">${monthTabs}</div> <h4 style="margin:0 0 10px;color:#e2e8f0;"> ${activeFolder?.monthName || ''} ${carpeta.year} — ${activeFolder?.total || 0} documentos </h4> ${categoryBlocks} ${polizasBlock} ${expedienteBlock}`;
+      
   // Bindeo de tabs de meses (UNA SOLA VEZ)
   container.querySelectorAll('.carpeta-month-tab').forEach(btn => {
     btn.addEventListener('click', () => {
@@ -973,11 +977,87 @@ function calcRetencionesFront(concepto, sub, iva) {
   return { isr: Math.round(isr * 100) / 100, iva: Math.round(v * 100) / 100, total: Math.round((isr + v) * 100) / 100, neto: Math.round((sub + iva - isr - v) * 100) / 100 };
 }
 
-  function syncAndRender() {
-    renderKPIs(); renderIncomeWithCssClasses(); renderHealth();
-    renderHealthExtended(); renderFeed(); renderCarpetaFiscal();
-    window.DocumentsManager?.renderDocuments?.();
+// ── ONBOARDING TRIAGE PF/PM (3 pasos con exclusiones legales) ──────────
+const OnboardingTriage = (() => {
+  let step = 1; let ctx = { tipo: null, rfc: '' };
+  const RFC_PF = /^[A-ZÑ&]{4}\d{6}[A-Z0-9]{3}$/;
+  const RFC_PM = /^[A-ZÑ&]{3}\d{6}[A-Z0-9]{3}$/;
+  function go(n) {
+    step = n;
+    document.querySelectorAll('#onboarding-tab .wizard-step').forEach(s => {
+      const k = Number(s.dataset.obstep);
+      s.classList.toggle('active', k === step); s.hidden = k !== step; s.style.display = k === step ? 'block' : 'none';
+    });
+    const ind = byId('ob-step-indicator'); if (ind) ind.textContent = `Paso ${step} de 3`;
   }
+  function msg(t, tone) {
+    const m = byId('ob-msg'); if (!m) return;
+    m.style.display = 'block';
+    m.style.background = tone === 'error' ? 'rgba(239,68,68,.12)' : tone === 'warn' ? 'rgba(245,158,11,.14)' : 'rgba(16,185,129,.12)';
+    m.style.color = tone === 'error' ? '#fecaca' : tone === 'warn' ? '#fde68a' : '#d1fae5';
+    m.innerHTML = t;
+  }
+  function block(html) { const r = byId('ob-result'); if (r) { r.style.display = 'block'; r.innerHTML = html; } }
+  function next() {
+    if (step === 1) {
+      const tipo = document.querySelector('input[name="ob-tipo"]:checked')?.value;
+      const rfc = (byId('ob-rfc')?.value || '').trim().toUpperCase();
+      if (!tipo) return msg('Selecciona tu tipo de persona.', 'error');
+      if (!(tipo === 'PF' ? RFC_PF : RFC_PM).test(rfc)) return msg(`⛔ RFC inválido para ${tipo === 'PF' ? 'Persona Física (régimen 626)' : 'Persona Moral'}: requiere ${tipo === 'PF' ? 13 : 12} caracteres con homoclave (Art. 29-A CFF).`, 'error');
+      ctx = { tipo, rfc }; byId('ob-result').style.display = 'none'; go(2);
+    } else if (step === 2) {
+      const sociosPM = byId('ob-socios-pm')?.checked, sociosNoPF = byId('ob-socios-nopf')?.checked, partesRel = byId('ob-partes-rel')?.checked;
+      if (ctx.tipo === 'PF' && sociosPM) return block(`<div style="border:1px solid #ef4444;background:rgba(239,68,68,.12);padding:14px;border-radius:10px;color:#fecaca;">⛔ <strong>EXCLUSIÓN RESICO (Art. 113-E LISR):</strong> una persona física socia de una Persona Moral no puede tributar en RESICO por ingresos empresariales. El alta en régimen 626 queda bloqueada; requiere régimen de Actividad Empresarial.</div>`);
+      if (ctx.tipo === 'PM' && (sociosNoPF || partesRel)) return block(`<div style="border:1px solid #ef4444;background:rgba(239,68,68,.12);padding:14px;border-radius:10px;color:#fecaca;">⛔ <strong>REQUISITOS SOCIETARIOS PM:</strong> socios que no son personas físicas o preponderancia con partes relacionadas rompen el supuesto simplificado (Art. 113-E LISR último párrafo / Art. 76 LISR). Se requiere dictamen de elegibilidad.</div>`);
+      ctx.exclusiones = { sociosPM: !!sociosPM, sociosNoPF: !!sociosNoPF, partesRel: !!partesRel };
+      byId('ob-result').style.display = 'none'; go(3);
+    } else {
+      const efirma = byId('ob-efirma')?.value, buzon = byId('ob-buzon')?.value;
+      if (!efirma || !buzon) return msg('Indica el estatus de tu e.firma y Buzón Tributario.', 'error');
+      if (buzon === 'inactivo') msg(`⚠️ <strong>BUZÓN INACTIVO (Arts. 17-K y 86-C CFF):</strong> multa de $3,420 a $10,260 MXN con duplicidad por reincidencia. Actívalo en sat.gob.mx → Mi Portal. Puedes continuar con alerta permanente.`, 'warn');
+      ctx.salud = { efirma_vigente: efirma === 'vigente', buzon_activo: buzon === 'activo' };
+      window.Store?.setPerfilFiscal?.({ ...ctx, ...ctx.exclusiones, ...ctx.salud, completedAt: new Date().toISOString() });
+      window.Store?.updateSaludFiscal?.({ buzonTributarioActivo: ctx.salud.buzon_activo, eFirmaVigente: ctx.salud.efirma_vigente, lastAuditDate: new Date().toISOString() });
+      navigateTo('dashboard'); runPreventiveAlarms();
+    }
+  }
+  function init() {
+    const nxt = byId('ob-next'), back = byId('ob-back');
+    if (nxt && !nxt.dataset.boundOb) { nxt.dataset.boundOb = '1'; nxt.addEventListener('click', e => { e.preventDefault(); next(); }); }
+    if (back && !back.dataset.boundOb) { back.dataset.boundOb = '1'; back.addEventListener('click', e => { e.preventDefault(); if (step > 1) go(step - 1); }); }
+    go(1);
+  }
+  return { init, next, go };
+})();
+window.OnboardingTriage = OnboardingTriage;
+
+// ── MOTOR DE ALARMAS PREVENTIVAS (e.firma · REP · CFDI Global) ─────────
+function runPreventiveAlarms() {
+  const alarms = []; const now = new Date();
+  const carpeta = window.Store?.getCarpetaFiscal?.() || {};
+  const expiry = window.Store?.getSaludFiscal?.()?.eFirmaExpiry || carpeta.efirmaExpiry;
+  const ef = computeEFirmaExpiryAlert(expiry && expiry !== 'pendiente' ? addYears(new Date(expiry), -EFIRMA_YEARS).toISOString() : null);
+  if (ef.hasData && ef.level !== 'safe') alarms.push({ level: ef.level, text: `🔐 e.firma: ${ef.message}` });
+  (window.Store?.getDocuments?.() || []).forEach(d => {
+    if (String(d.extracted_data?.metodo_pago || '').toUpperCase() !== 'PPD' || d.extracted_data?.rep_emitido) return;
+    const f = new Date(d.extracted_data?.fecha || d.created_at);
+    const deadline = new Date(f.getFullYear(), f.getMonth() + 1, 5); // día 5 natural del mes siguiente
+    const days = Math.ceil((deadline - now) / 86400000);
+    alarms.push({ level: days < 0 ? 'expired' : 'warning', text: days < 0 ? `🚨 REP VENCIDO: CFDI PPD ${d.extracted_data?.folio || d.file_name} sin complemento de pago (venció ${deadline.toLocaleDateString('es-MX')}). Art. 29-A CFF.` : `⏰ REP: emite el complemento de pago del PPD ${d.extracted_data?.folio || d.file_name} antes del ${deadline.toLocaleDateString('es-MX')} (${days} día(s)). Art. 29-A CFF.` });
+  });
+  const perfil = window.Store?.getPerfilFiscal?.() || {};
+  if (now.getDate() === 1 && perfil.ventas_publico_general) alarms.push({ level: 'critical', text: '🌐 CFDI GLOBAL: tienes 24 h tras el cierre mensual para emitir el CFDI global de público en general (XAXX010101000). Art. 29-A CFF / regla 2.7.1.8 RMF 2026.' });
+  const c = byId('preventive-alarms'); if (!c) return;
+  c.hidden = alarms.length === 0;
+  c.innerHTML = alarms.map(a => `<div style="margin:6px 0;padding:10px 14px;border-radius:8px;border:1px solid ${a.level === 'expired' || a.level === 'critical' ? '#dc2626' : '#f59e0b'};background:${a.level === 'expired' || a.level === 'critical' ? 'rgba(220,38,38,.16)' : 'rgba(245,158,11,.12)'};color:${a.level === 'expired' || a.level === 'critical' ? '#fecaca' : '#fde68a'};font-size:13px;">${esc(a.text)}</div>`).join('');
+}
+
+  function syncAndRender() {
+  renderKPIs(); renderIncomeWithCssClasses(); renderHealth();
+  renderHealthExtended(); renderFeed(); renderCarpetaFiscal();
+  runPreventiveAlarms();
+  window.DocumentsManager?.renderDocuments?.();
+}
 
  function initRiskAlertListener() {
   window.Store?.on?.('riskThresholdCrossed', async (payload) => {
@@ -1062,6 +1142,11 @@ function buildWhatsAppMessage(payload) {
     try { window.AuthManager?.init?.(); } catch (err) { console.error('[App] ⚠️ AuthManager.init() falló:', err?.message || err); }
   }
 
+    window.OnboardingTriage?.init?.();
+      setTimeout(() => {
+        const p = window.Store?.getPerfilFiscal?.();
+        if (!window.APP_STATE.isDemo && window.APP_STATE.currentUser && !p?.completedAt) navigateTo('onboarding');
+    }, 900);
   return {
     init, navigateTo, syncAndRender,
     wizardNext, resetWizard, completeWizard, saveDiagnostic,
