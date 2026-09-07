@@ -95,27 +95,35 @@ const DocumentProcessor = (() => {
     const noteBlock = fiscalNote.applies
       ? `<div style="margin-top:10px;padding:10px;background:rgba(16,185,129,0.1);border-left:3px solid #10b981;border-radius:4px;font-size:13px;">${esc(fiscalNote.mensaje)}</div>`
       : '';
-    // ✅ DENTRO de renderResult: `data` existe aquí (FIX ReferenceError)
-    const fuelAlertBlock = (data.safety_flag_reason === 'gasolina_efectivo')
-      ? `<div style="margin-top:10px;padding:12px;background:rgba(239,68,68,0.15);border-left:4px solid #ef4444;border-radius:4px;font-size:13px;color:#fecaca;font-weight:600;">🚨 ALERTA FISCAL: Gasolina pagada en EFECTIVO (Art. 27 Fracc. III LISR)<br><span style="font-weight:400;font-size:12px;color:#fca5a5;">Este gasto NO es deducible para ISR ni acreditable para IVA. El SAT lo invalida automáticamente en auditorías. Debe pagarse con tarjeta, transferencia o monedero electrónico.</span></div>`
-      : '';
-    return `
-      <div style="border:1px solid #334155;border-radius:8px;padding:16px;">
-        <div style="margin-bottom:10px;">${reviewBadge}</div>
-        <table style="width:100%;font-size:13px;border-collapse:collapse;">
-          <tr><td style="padding:4px 0;color:#94a3b8;">RFC Emisor:</td><td>${esc(data.rfc_emisor || '—')}</td></tr>
-          <tr><td style="padding:4px 0;color:#94a3b8;">RFC Receptor:</td><td>${esc(data.rfc_receptor || '—')}</td></tr>
-          <tr><td style="padding:4px 0;color:#94a3b8;">Fecha:</td><td>${esc(data.fecha || '—')}</td></tr>
-          <tr><td style="padding:4px 0;color:#94a3b8;">Folio:</td><td>${esc(data.folio || '—')}</td></tr>
-          <tr><td style="padding:4px 0;color:#94a3b8;">Subtotal:</td><td>$${Number(data.subtotal || 0).toLocaleString('es-MX')}</td></tr>
-          ${data.descuento ? `<tr><td style="padding:4px 0;color:#f59e0b;">Descuento:</td><td style="color:#f59e0b;">-$${Number(data.descuento || 0).toLocaleString('es-MX')}</td></tr>` : ''}
-          <tr><td style="padding:4px 0;color:#94a3b8;">IVA:</td><td>$${Number(data.iva || 0).toLocaleString('es-MX')}</td></tr>
-          <tr><td style="padding:4px 0;color:#94a3b8;font-weight:700;">Total:</td><td style="font-weight:700;">$${Number(data.total || 0).toLocaleString('es-MX')}</td></tr>
-        </table>
-        ${noteBlock}
-        ${fuelAlertBlock}
-      </div>`;
-  }
+  // ✅ DENTRO de renderResult: `data` existe aquí
+  const fuelAlertBlock = (data.safety_flag_reason === 'gasolina_efectivo')
+    ? `<div style="margin-top:10px;padding:12px;background:rgba(239,68,68,0.15);border-left:4px solid #ef4444;border-radius:4px;font-size:13px;color:#fecaca;font-weight:600;">
+         🚨 ALERTA FISCAL: Gasolina pagada en EFECTIVO (Art. 27 Fracc. III LISR)<br>
+         <span style="font-weight:400;font-size:12px;color:#fca5a5;">
+           Este gasto NO es deducible para ISR ni acreditable para IVA. El SAT lo invalida automáticamente en auditorías. Debe pagarse con tarjeta, transferencia o monedero electrónico.
+         </span>
+       </div>`
+    : '';
+  
+  return `
+    <div style="border:1px solid #334155;border-radius:8px;padding:16px;">
+      <div style="margin-bottom:10px;">${reviewBadge}</div>
+      <table style="width:100%;font-size:13px;border-collapse:collapse;">
+        <tr><td style="padding:4px 0;color:#94a3b8;">RFC Emisor:</td><td>${esc(data.rfc_emisor || '—')}</td></tr>
+        <tr><td style="padding:4px 0;color:#94a3b8;">RFC Receptor:</td><td>${esc(data.rfc_receptor || '—')}</td></tr>
+        <tr><td style="padding:4px 0;color:#94a3b8;">Fecha:</td><td>${esc(data.fecha || '—')}</td></tr>
+        <tr><td style="padding:4px 0;color:#94a3b8;">Folio:</td><td>${esc(data.folio || '—')}</td></tr>
+        <tr><td style="padding:4px 0;color:#94a3b8;">Subtotal:</td><td>$${Number(data.subtotal || 0).toLocaleString('es-MX')}</td></tr>
+        ${data.descuento ? `<tr><td style="padding:4px 0;color:#f59e0b;">Descuento:</td><td style="color:#f59e0b;">-$${Number(data.descuento || 0).toLocaleString('es-MX')}</td></tr>` : ''}
+        <tr><td style="padding:4px 0;color:#94a3b8;">IVA:</td><td>$${Number(data.iva || 0).toLocaleString('es-MX')}</td></tr>
+        <tr><td style="padding:4px 0;color:#94a3b8;font-weight:700;">Total:</td><td style="font-weight:700;">$${Number(data.total || 0).toLocaleString('es-MX')}</td></tr>
+      </table>
+      ${noteBlock}
+      ${fuelAlertBlock}
+    </div>
+  `;
+} // ← cierre de renderResult()
+
   async function analyzeFile(file) {
     const output = document.getElementById('ocr-result-output');
     if (!file) { if (output) output.innerHTML = '<p class="text-muted">Selecciona un archivo antes de analizar.</p>'; return; }
