@@ -217,49 +217,167 @@ const Store = (() => {
   }
 
   function rebuildCarpetaFiscal() {
-    const summary = { total: 0, ingresos: 0, gastos_iva: 0, efirma: 0, constancia: 0, opinion: 0 };
-    let latestEFirma = null, latestConstancia = null, latestOpinion = null;
-    (state.documents || []).forEach(doc => {
+  // FIX: Validación defensiva de buildMonthlyFolders
+  let folders;
+  try {
+    folders = buildMonthlyFolders(YEAR);
+    if (!Array.isArray(folders) || folders.length !== 12) {
+      console.warn('[Store] buildMonthlyFolders devolvió estructura inválida, recreando...');
+      folders = MONTHS.map((monthName, idx) => ({
+        year: YEAR,
+        monthNumber: idx + 1,
+        monthKey: `${YEAR}-${String(idx + 1).padStart(2, '0')}`,
+        monthName,
+        total: 0,
+        categories: { ingresos: [], gastos_iva: [], efirma: [], constancia: [], opinion: [] }
+      }));
+    }
+  } catch (e) {
+    console.error('[Store] buildMonthlyFolders falló:', e);
+    folders = MONTHS.map((monthName, idx) => ({
+      year: YEAR,
+      monthNumber: idx + 1,
+      monthKey: `${YEAR}-${String(idx + 1).padStart(2, '0')}`,
+      monthName,
+      total: 0,
+      categories: { ingresos: [], gastos_iva: [], efirma: [], constancia: [], opinion: [] }
+    }));
+  }
+
+  const summary = { total: 0, ingresos: 0, gastos_iva: 0, efirma: 0, constancia: 0, opinion: 0 };
+  let latestEFirma = null, latestConstancia = null, latestOpinion = null;
+  
+  (state.documents || []).forEach(doc => {
+    try {
       const d = deriveDocumentDate(doc);
       if (d.getFullYear() !== YEAR) return;
       const monthIdx = d.getMonth();
       const category = detectFolderCategory(doc);
       const folder = folders[monthIdx];
+      
       if (!folder || !folder.categories[category]) return;
+      
       const slim = slimFolderDoc(doc);
-      folder.categories[category].push(slim); folder.total += 1;
-      summary.total += 1; summary[category] += 1;
-      if (category === 'efirma') { if (!latestEFirma || new Date(doc.created_at) > new Date(latestEFirma.created_at)) latestEFirma = doc; }
-      if (category === 'constancia') { if (!latestConstancia || new Date(doc.created_at) > new Date(latestConstancia.created_at)) latestConstancia = doc; }
-      if (category === 'opinion') { if (!latestOpinion || new Date(doc.created_at) > new Date(latestOpinion.created_at)) latestOpinion = doc; }
-    });
-    state.carpetaFiscal = {
-      ...state.carpetaFiscal, year: YEAR, monthlyFolders: folders, summary,
-      efirmaExpiry: latestEFirma?.extracted_data?.fecha_vencimiento || latestEFirma?.extracted_data?.fecha || state.carpetaFiscal?.efirmaExpiry || 'pendiente',
-      constanciaStatus: latestConstancia ? 'actualizada' : 'pendiente',
-      opinionStatus: latestOpinion ? 'cargada' : 'pendiente',
-      lastUpdated: new Date().toISOString()
-    };
-    refreshSaludFiscalFromCarpeta();
-    emit('carpetaUpdated', state.carpetaFiscal);
-  }
-  async function syncDown() {
-    if (!db || !usr?.id) return;
+      folder.categories[category].push(slim);
+      folder.total += 1;
+      summary.total += 1;
+      summary[category] += 1;
+      
+      if (category === 'efirma') {
+        if (!latestEFirma || new Date(doc.created_at) > new Date(latestEFirma.created_at)) {
+          latestEFirma = doc;
+        }
+      }
+      if (category === 'constancia') {
+        if (!latestConstancia || new Date(doc.created_at) > new Date(latestConstancia.created_at)) {
+          latestConstancia = doc;
+        }
+      }
+      if (category === 'opinion') {
+        if (!latestOpinion || new Date(doc.created_at) > new Date(latestOpinion.created_at)) {
+          latestOpinion = doc;
+        }
+      }
+    } catch (e) {
+      console.warn('[Store] Error procesando documento en rebuildCarpetaFiscal:', e, doc);
+    }
+  });
+
+  state.carpetaFiscal = {
+    ...state.carpetaFiscal,
+    year: YEAR,
+    monthlyFolders: folders,
+    summary,
+    efirmaExpiry: latestEFirma?.extracted_data?.fecha_vencimiento || 
+                  latestEFirma?.extracted_data?.fecha || 
+                  state.carpetaFiscal?.efirmaExpiry || 
+                  'pendiente',
+    constanciaStatus: latestConstancia ? 'actualizada' : 'pendiente',
+    opinionStatus: latestOpinion ? 'cargada' : 'pendiente',
+    lastUpdated: new Date().toISOString()
+  };
+  
+  refreshSaludFiscalFromCarpeta();
+  emit('carpetaUpdated', state.carpetaFiscal);
+}
+ async function syncDown() {
+  if (!db || !usr?.id) return;
+  
+  try {
+    const [convRes, metricRes, docRes] = await Promise.all([
+      db.from('conversations')
+        .select('id,user_id,message_text,intent,confidence,is_fiscal_audit_completed,created_at')
+        .eq('user_id', usr.id)
+        .order('created_at', { ascending: false })
+        .limit(MAX_CONVERSATIONS),
+      db.from('fiscal_metrics')
+        .select('user_id,income_ytd,total_processed,avg_confidence,updated_at')
+        .eq('user_id', usr.id)
+        .maybeSingle(),
+      db.from('documents')
+        .select('id,user_id,file_name,doc_type,document_type,file_url,folder_category,extracted_data,confidence,safety_flag,validation_status,needs_review,source,created_at,updated_at')
+        .eq('user_id', usr.id)
+        .order('created_at', { ascending: false })
+        .limit(MAX_DOCUMENTS)
+    ]);
+
+    // Procesar conversaciones
+    if (!convRes.error && Array.isArray(convRes.data)) {
+      state.conversations = convRes.data.map(mapConversation);
+    } else if (convRes.error) {
+      logSupabaseError('conversations sync error', convRes.error);
+    }
+
+    // Procesar métricas
+    if (!metricRes.error && metricRes.data) {
+      applyMetricRow(metricRes.data);
+    } else if (metricRes.error) {
+      logSupabaseError('fiscal_metrics sync error', metricRes.error);
+    }
+
+    // Procesar documentos
+    if (!docRes.error && Array.isArray(docRes.data)) {
+      state.documents = docRes.data.map(mapDocument);
+    } else if (docRes.error) {
+      logSupabaseError('documents sync error', docRes.error);
+    }
+
+    // Recalcular métricas y reconstruir carpeta
     try {
-      const [convRes, metricRes, docRes] = await Promise.all([
-        db.from('conversations').select('id,user_id,message_text,intent,confidence,is_fiscal_audit_completed,created_at').eq('user_id', usr.id).order('created_at', { ascending: false }).limit(MAX_CONVERSATIONS),
-        db.from('fiscal_metrics').select('user_id,income_ytd,total_processed,avg_confidence,updated_at').eq('user_id', usr.id).maybeSingle(),
-        db.from('documents').select('id,user_id,file_name,doc_type,document_type,file_url,folder_category,extracted_data,confidence,safety_flag,validation_status,needs_review,source,created_at,updated_at').eq('user_id', usr.id).order('created_at', { ascending: false }).limit(MAX_DOCUMENTS)
-      ]);
-      if (!convRes.error && Array.isArray(convRes.data)) state.conversations = convRes.data.map(mapConversation);
-      else logSupabaseError('conversations sync error', convRes.error);
-      if (!metricRes.error && metricRes.data) applyMetricRow(metricRes.data);
-      else if (metricRes.error) logSupabaseError('fiscal_metrics sync error', metricRes.error);
-      if (!docRes.error && Array.isArray(docRes.data)) state.documents = docRes.data.map(mapDocument);
-      else logSupabaseError('documents sync error', docRes.error);
-      recalc(); rebuildCarpetaFiscal(); persist(); emitAll();
-    } catch (e) { console.warn('[Store] syncDown exception:', e?.message || e); }
+      recalc();
+    } catch (e) {
+      console.warn('[Store] recalc() falló:', e);
+    }
+
+    try {
+      rebuildCarpetaFiscal();
+    } catch (e) {
+      console.error('[Store] rebuildCarpetaFiscal() falló:', e);
+      // Crear estructura mínima para evitar cascada de errores
+      state.carpetaFiscal = {
+        year: YEAR,
+        monthlyFolders: MONTHS.map((monthName, idx) => ({
+          year: YEAR,
+          monthNumber: idx + 1,
+          monthKey: `${YEAR}-${String(idx + 1).padStart(2, '0')}`,
+          monthName,
+          total: 0,
+          categories: { ingresos: [], gastos_iva: [], efirma: [], constancia: [], opinion: [] }
+        })),
+        summary: { total: 0, ingresos: 0, gastos_iva: 0, efirma: 0, constancia: 0, opinion: 0 },
+        efirmaExpiry: 'pendiente',
+        constanciaStatus: 'pendiente',
+        opinionStatus: 'pendiente',
+        lastUpdated: new Date().toISOString()
+      };
+    }
+
+    persist();
+    emitAll();
+  } catch (e) {
+    console.warn('[Store] syncDown exception:', e?.message || e);
   }
+}
   async function upsertConversation(c) {
     if (!db || !usr?.id) return;
     const payload = { id: c.id || safeUUID(), user_id: usr.id, message_text: String(c.message_text || c.text || '').slice(0, 10000), intent: c.intent || 'OTROS', confidence: Number(c.confidence || 0), is_fiscal_audit_completed: !!c.is_fiscal_audit_completed };
