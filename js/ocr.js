@@ -1,6 +1,7 @@
 // ════════════════════════════════════════════════════════════
-// js/ocr.js — OCR Multimodal v9.1 CERTIFICADO (producción piloto)
-// CFDI 4.0 + Art. 27 Fracc. III LISR + PF/PM + Safety Flag 85%
+// js/ocr.js — OCR Multimodal v9.2 CERTIFICADO (piloto 5 contadores)
+// FIX: fallback con diagnóstico visible · cero-estado explicado ·
+//      bindeo robusto cámara/galería · log de payload para forense
 // ════════════════════════════════════════════════════════════
 const DocumentProcessor = (() => {
   let booted = false;
@@ -44,7 +45,7 @@ const DocumentProcessor = (() => {
       reader.readAsDataURL(file);
     });
   }
-  // ── CFDI 4.0 (Art. 29-A CFF): razón social sin régimen, CP exacto, uso compatible
+  // ── CFDI 4.0 (Art. 29-A CFF) ─────────────────────────────────────────
   const REGIMEN_TOKENS = /\b(S\.?\s?A\.?(\s?DE\s?C\.?\s?V\.?)?|S\.?\s?DE\s?R\.?\s?L\.?|S\.?\s?C\.?|S\.?\s?N\.?\s?C\.?|A\.?\s?C\.?|UNIDAD\s?DE\s?INVERSIÓN)\b/i;
   const RESICO_USOS_OK = ['G01','G02','G03','D01','D02','D03','D04','D05','D06','D07','D08','D09','D10','S01','CP01','CN01'];
   function validateCFDI40(data, perfil) {
@@ -95,35 +96,36 @@ const DocumentProcessor = (() => {
     const noteBlock = fiscalNote.applies
       ? `<div style="margin-top:10px;padding:10px;background:rgba(16,185,129,0.1);border-left:3px solid #10b981;border-radius:4px;font-size:13px;">${esc(fiscalNote.mensaje)}</div>`
       : '';
-  // ✅ DENTRO de renderResult: `data` existe aquí
-  const fuelAlertBlock = (data.safety_flag_reason === 'gasolina_efectivo')
-    ? `<div style="margin-top:10px;padding:12px;background:rgba(239,68,68,0.15);border-left:4px solid #ef4444;border-radius:4px;font-size:13px;color:#fecaca;font-weight:600;">
-         🚨 ALERTA FISCAL: Gasolina pagada en EFECTIVO (Art. 27 Fracc. III LISR)<br>
-         <span style="font-weight:400;font-size:12px;color:#fca5a5;">
-           Este gasto NO es deducible para ISR ni acreditable para IVA. El SAT lo invalida automáticamente en auditorías. Debe pagarse con tarjeta, transferencia o monedero electrónico.
-         </span>
-       </div>`
-    : '';
-  
-  return `
-    <div style="border:1px solid #334155;border-radius:8px;padding:16px;">
-      <div style="margin-bottom:10px;">${reviewBadge}</div>
-      <table style="width:100%;font-size:13px;border-collapse:collapse;">
-        <tr><td style="padding:4px 0;color:#94a3b8;">RFC Emisor:</td><td>${esc(data.rfc_emisor || '—')}</td></tr>
-        <tr><td style="padding:4px 0;color:#94a3b8;">RFC Receptor:</td><td>${esc(data.rfc_receptor || '—')}</td></tr>
-        <tr><td style="padding:4px 0;color:#94a3b8;">Fecha:</td><td>${esc(data.fecha || '—')}</td></tr>
-        <tr><td style="padding:4px 0;color:#94a3b8;">Folio:</td><td>${esc(data.folio || '—')}</td></tr>
-        <tr><td style="padding:4px 0;color:#94a3b8;">Subtotal:</td><td>$${Number(data.subtotal || 0).toLocaleString('es-MX')}</td></tr>
-        ${data.descuento ? `<tr><td style="padding:4px 0;color:#f59e0b;">Descuento:</td><td style="color:#f59e0b;">-$${Number(data.descuento || 0).toLocaleString('es-MX')}</td></tr>` : ''}
-        <tr><td style="padding:4px 0;color:#94a3b8;">IVA:</td><td>$${Number(data.iva || 0).toLocaleString('es-MX')}</td></tr>
-        <tr><td style="padding:4px 0;color:#94a3b8;font-weight:700;">Total:</td><td style="font-weight:700;">$${Number(data.total || 0).toLocaleString('es-MX')}</td></tr>
-      </table>
-      ${noteBlock}
-      ${fuelAlertBlock}
-    </div>
-  `;
-} // ← cierre de renderResult()
-
+    // ✅ DENTRO de renderResult: `data` existe aquí (FIX ReferenceError)
+    const fuelAlertBlock = (data.safety_flag_reason === 'gasolina_efectivo')
+      ? `<div style="margin-top:10px;padding:12px;background:rgba(239,68,68,0.15);border-left:4px solid #ef4444;border-radius:4px;font-size:13px;color:#fecaca;font-weight:600;">🚨 ALERTA FISCAL: Gasolina pagada en EFECTIVO (Art. 27 Fracc. III LISR)<br><span style="font-weight:400;font-size:12px;color:#fca5a5;">Este gasto NO es deducible para ISR ni acreditable para IVA. El SAT lo invalida automáticamente en auditorías. Debe pagarse con tarjeta, transferencia o monedero electrónico.</span></div>`
+      : '';
+    return `
+      <div style="border:1px solid #334155;border-radius:8px;padding:16px;">
+        <div style="margin-bottom:10px;">${reviewBadge}</div>
+        <table style="width:100%;font-size:13px;border-collapse:collapse;">
+          <tr><td style="padding:4px 0;color:#94a3b8;">RFC Emisor:</td><td>${esc(data.rfc_emisor || '—')}</td></tr>
+          <tr><td style="padding:4px 0;color:#94a3b8;">RFC Receptor:</td><td>${esc(data.rfc_receptor || '—')}</td></tr>
+          <tr><td style="padding:4px 0;color:#94a3b8;">Fecha:</td><td>${esc(data.fecha || '—')}</td></tr>
+          <tr><td style="padding:4px 0;color:#94a3b8;">Folio:</td><td>${esc(data.folio || '—')}</td></tr>
+          <tr><td style="padding:4px 0;color:#94a3b8;">Subtotal:</td><td>$${Number(data.subtotal || 0).toLocaleString('es-MX')}</td></tr>
+          ${data.descuento ? `<tr><td style="padding:4px 0;color:#f59e0b;">Descuento:</td><td style="color:#f59e0b;">-$${Number(data.descuento || 0).toLocaleString('es-MX')}</td></tr>` : ''}
+          <tr><td style="padding:4px 0;color:#94a3b8;">IVA:</td><td>$${Number(data.iva || 0).toLocaleString('es-MX')}</td></tr>
+          <tr><td style="padding:4px 0;color:#94a3b8;font-weight:700;">Total:</td><td style="font-weight:700;">$${Number(data.total || 0).toLocaleString('es-MX')}</td></tr>
+        </table>
+        ${noteBlock}
+        ${fuelAlertBlock}
+      </div>`;
+  }
+  // ── FIX v9.2: el fallback YA NO queda mudo ────────────────────────────
+  function renderFallbackDiag(payload) {
+    const tried = payload?.debug?.tried || payload?.debug?.providers || [];
+    const first = Array.isArray(tried) ? tried[0] : null;
+    const preview = first?.raw_preview ? ` · Gemini dijo: "${esc(String(first.raw_preview).slice(0, 120))}…"` : '';
+    return `<div style="margin-top:8px;padding:10px;background:rgba(245,158,11,0.12);border-left:3px solid #f59e0b;border-radius:4px;font-size:12px;color:#fde68a;">
+      🔎 La IA no pudo extraer datos: ${esc(payload?.reason || 'sin datos')} · engine ${esc(payload?.engine || '-')} · proveedores fallidos: ${esc(String(Array.isArray(tried) ? tried.length : 0))}${preview}
+    </div>`;
+  }
   async function analyzeFile(file) {
     const output = document.getElementById('ocr-result-output');
     if (!file) { if (output) output.innerHTML = '<p class="text-muted">Selecciona un archivo antes de analizar.</p>'; return; }
@@ -158,6 +160,7 @@ const DocumentProcessor = (() => {
         })
       });
       const payload = await response.json().catch(() => ({}));
+      console.info('[OCR] payload recibido:', payload); // forense piloto
       if (!response.ok || !payload?.document) throw new Error(payload?.error || `OCR HTTP ${response.status}`);
       showProcessingIndicator(false);
       const perfil = window.Store?.getPerfilFiscal?.() || {};
@@ -167,6 +170,11 @@ const DocumentProcessor = (() => {
       const treatment = window.Store?.computeGastoTreatment?.(payload.document);
       if (treatment) { extractedData.gasto_acreditable = treatment.gasto_acreditable; extractedData.isr_deducible = treatment.isr_deducible; }
       if (output) output.innerHTML = renderResult(payload);
+      if (output && payload.is_fallback) output.innerHTML += renderFallbackDiag(payload);
+      const allNull = !extractedData.rfc_emisor && !extractedData.total && !extractedData.subtotal && !extractedData.iva;
+      if (output && allNull && !payload.is_fallback) {
+        output.innerHTML += `<div style="margin-top:8px;padding:10px;background:rgba(59,130,246,0.12);border-left:3px solid #3b82f6;border-radius:4px;font-size:12px;color:#bfdbfe;">📷 No se detectaron datos legibles. Toma la foto con buena luz, encuadra TODO el ticket y evita reflejos o sombras.</div>`;
+      }
       if (output && cfdiCheck.warnings.length) {
         output.innerHTML += `<div style="margin-top:8px;padding:10px;background:rgba(239,68,68,0.12);border-left:3px solid #ef4444;border-radius:4px;font-size:13px;color:#fecaca;">${cfdiCheck.warnings.map(w => esc(w)).join('<br>')}</div>`;
       }
@@ -194,7 +202,9 @@ const DocumentProcessor = (() => {
   }
   function bindInputPreview(inputId) {
     const input = document.getElementById(inputId);
-    input?.addEventListener('change', () => {
+    if (!input || input.dataset.boundOcrPreview) return;
+    input.dataset.boundOcrPreview = '1';
+    input.addEventListener('change', () => {
       const file = input.files?.[0];
       const preview = document.getElementById('ocr-file-preview');
       const nameEl = document.getElementById('ocr-file-name');
@@ -202,13 +212,18 @@ const DocumentProcessor = (() => {
       window.__ocrSelectedFile = file || null;
     });
   }
+  // ── FIX v9.2: bindea CUALQUIER input de archivo del módulo OCR ────────
+  function bindAllInputs() {
+    document.querySelectorAll('input[type="file"]').forEach(inp => {
+      if ((inp.id || '').startsWith('ocr-file')) bindInputPreview(inp.id);
+    });
+  }
   function boot() {
     if (booted) return;
     booted = true;
-    bindInputPreview('ocr-file-input');
-    bindInputPreview('ocr-file-input-gallery');
+    bindAllInputs();
     document.getElementById('ocr-analyze-btn')?.addEventListener('click', () => { analyzeFile(window.__ocrSelectedFile); });
-    console.info('[OCR] DocumentProcessor v9.1 activo');
+    console.info('[OCR] DocumentProcessor v9.2 activo');
   }
   return { boot, analyzeFile, computeSafetyFlag, buildFiscalNote, validateCFDI40 };
 })();
