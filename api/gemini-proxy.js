@@ -1,4 +1,5 @@
-// api/gemini-proxy.js — v7.0 CERTIFICADO (Vertex → AI Studio → motor fiscal)
+// api/gemini-proxy.js — v7.1 CERTIFICADO (Vertex → AI Studio → motor fiscal)
+// FIX: normalización real de clave Vertex + headers de observabilidad + quota detection
 import crypto from 'node:crypto';
 const ALLOWED_ORIGINS = ['https://aliado-resico.vercel.app','https://aliadoresico.com','https://www.aliadoresico.com','http://localhost:3000','http://127.0.0.1:3000','http://localhost:5500','http://127.0.0.1:5500'];
 const JWT_SECRET = process.env.SUPABASE_JWT_SECRET || '';
@@ -6,7 +7,7 @@ const GEMINI_KEY = process.env.GEMINI_API_KEY || '';
 const VERTEX_MODEL = process.env.VERTEX_MODEL || 'gemini-2.0-flash-001';
 const VERTEX_LOCATION = process.env.VERTEX_LOCATION || 'us-central1';
 const VERTEX_PROJECT_ID = process.env.VERTEX_PROJECT_ID || '';
-const AI_MODELS = ['gemini-2.0-flash', 'gemini-2.5-flash', 'gemini-1.5-flash'];
+const AI_MODELS = ['gemini-2.5-flash', 'gemini-2.0-flash'];
 const buckets = new Map();
 function rateLimit(key) { const now = Date.now(); let b = buckets.get(key); if (!b || now - b.start > 60000) b = { start: now, n: 0 }; b.n++; buckets.set(key, b); return b.n <= 60; }
 function setHeaders(req, res) {
@@ -14,6 +15,7 @@ function setHeaders(req, res) {
   res.setHeader('Access-Control-Allow-Origin', ALLOWED_ORIGINS.includes(origin) ? origin : ALLOWED_ORIGINS[0]);
   res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, x-demo-mode');
+  res.setHeader('Access-Control-Expose-Headers', 'x-aliado-ai-status, x-aliado-fallback-reason, x-aliado-provider');
   res.setHeader('Vary', 'Origin'); res.setHeader('Cache-Control', 'no-store');
 }
 function verifyJWT(auth) {
@@ -58,14 +60,15 @@ const _tok = { token: null, exp: 0 };
 function canUseVertex() { return Boolean(VERTEX_PROJECT_ID && process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL && process.env.GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY); }
 async function googleToken() {
   if (_tok.token && _tok.exp > Date.now() + 60000) return _tok.token;
-  const key = (process.env.GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY || '').replace(/\\n/g, '\n');
+  // ✅ FIX v7.1: convierte \n LITERALES en saltos reales (Vercel los guarda escapados)
+  const key = String(process.env.GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY || '').replace(/\\n/g, '\n').trim();
   const now = Math.floor(Date.now() / 1000);
   const head = base64url(JSON.stringify({ alg: 'RS256', typ: 'JWT' }));
   const claims = base64url(JSON.stringify({ iss: process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL, scope: 'https://www.googleapis.com/auth/cloud-platform', aud: 'https://oauth2.googleapis.com/token', iat: now, exp: now + 3600 }));
   const sig = crypto.createSign('RSA-SHA256').update(`${head}.${claims}`).sign(key, 'base64');
   const r = await fetch('https://oauth2.googleapis.com/token', { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: `grant_type=urn:ietf:params:oauth:grant-type:jwt-bearer&assertion=${head}.${claims}.${sig}` });
   const d = await r.json().catch(() => ({}));
-  if (!r.ok || !d.access_token) throw new Error('oauth_token_error');
+  if (!r.ok || !d.access_token) throw new Error(`oauth_token_error ${r.status}`);
   _tok = { token: d.access_token, exp: Date.now() + 55 * 60 * 1000 };
   return d.access_token;
 }
@@ -100,18 +103,28 @@ export default async function handler(req, res) {
     const prompt = buildPrompt(message, body.context);
     const errors = [];
     if (canUseVertex()) {
-      try { const st = await callVertex(prompt); return res.status(200).json({ ok: true, source: 'vertex', provider: VERTEX_MODEL, reply: st.respuestaFiscal, structured: st }); }
-      catch (e) { errors.push('vertex: ' + e.message); }
+      try {
+        const st = await callVertex(prompt);
+        res.setHeader('x-aliado-ai-status', 'ok'); res.setHeader('x-aliado-provider', `vertex:${VERTEX_MODEL}`);
+        return res.status(200).json({ ok: true, source: 'vertex', provider: VERTEX_MODEL, reply: st.respuestaFiscal, structured: st });
+      } catch (e) { errors.push('vertex: ' + e.message); }
     }
     if (GEMINI_KEY) {
       for (const m of AI_MODELS) {
-        try { const st = await callAIStudio(m, prompt); return res.status(200).json({ ok: true, source: 'ai-studio', provider: m, reply: st.respuestaFiscal, structured: st }); }
-        catch (e) { errors.push(m + ': ' + e.message); }
+        try {
+          const st = await callAIStudio(m, prompt);
+          res.setHeader('x-aliado-ai-status', 'ok'); res.setHeader('x-aliado-provider', `ai-studio:${m}`);
+          return res.status(200).json({ ok: true, source: 'ai-studio', provider: m, reply: st.respuestaFiscal, structured: st });
+        } catch (e) { errors.push(`${m}: ${e.message}`); }
       }
     }
+    const quota = errors.some(e => /429|quota|resource_exhausted/i.test(e));
+    const reason = quota ? 'quota_exhausted' : (errors.length ? 'gemini_error' : 'no_credentials');
+    res.setHeader('x-aliado-ai-status', 'fallback'); res.setHeader('x-aliado-fallback-reason', reason);
     const fb = fiscalEngine(message);
-    return res.status(200).json({ ok: true, is_fallback: true, fallback_reason: errors.length ? 'gemini_error' : 'no_credentials', debug: { providers: errors }, reply: fb.respuestaFiscal, structured: fb });
+    return res.status(200).json({ ok: true, is_fallback: true, fallback_reason: reason, debug: { providers: errors }, reply: fb.respuestaFiscal, structured: fb });
   } catch {
+    res.setHeader('x-aliado-ai-status', 'fallback'); res.setHeader('x-aliado-fallback-reason', 'handler_error');
     const fb = fiscalEngine('');
     return res.status(200).json({ ok: true, is_fallback: true, fallback_reason: 'handler_error', reply: fb.respuestaFiscal, structured: fb });
   }
