@@ -1,5 +1,5 @@
 // ════════════════════════════════════════════════════════════
-// js/ocr.js — OCR Multimodal v9.2 CERTIFICADO (piloto 5 contadores)
+// js/ocr.js?v=921 — OCR Multimodal v9.2 CERTIFICADO (piloto 5 contadores)
 // FIX: fallback con diagnóstico visible · cero-estado explicado ·
 //      bindeo robusto cámara/galería · log de payload para forense
 // ════════════════════════════════════════════════════════════

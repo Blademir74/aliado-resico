@@ -1,4 +1,4 @@
-// js/auth.js — v8 CERTIFICADO (PASO 1: Consola Limpia)
+// js/auth.js?v=921 — v8 CERTIFICADO (PASO 1: Consola Limpia)
 // Validación SECUENCIAL: sesión primero, métricas solo con sesión (cero 401 rojos).
 (function installBunkerGuard() {
   if (document.getElementById('auth-bunker-guard')) return;

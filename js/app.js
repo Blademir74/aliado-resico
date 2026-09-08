@@ -46,7 +46,7 @@ const App = (() => {
     if (target === 'carpeta') renderCarpetaFiscal();
   }
 
-  // ── Tema claro/oscuro (usa CLASE light-mode de styles.css) ──
+  // ── Tema claro/oscuro (usa CLASE light-mode de styles.css?v=921) ──
   function applyTheme(mode) {
     document.body.classList.toggle('light-mode', mode === 'light');
     document.body.dataset.theme = mode;

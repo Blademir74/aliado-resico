@@ -1,10 +1,10 @@
-﻿<!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="es-MX" data-theme="dark">
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
-  <title>Aliado RESICO Â· Blindaje Fiscal IA 2026</title>
-  <meta name="description" content="Plataforma fiscal IA para contribuyentes RESICO 2026. Monitor de ingresos, documentos, facturaciÃ³n CFDI, carpeta fiscal y salud fiscal." />
+  <title>Aliado RESICO · Blindaje Fiscal IA 2026</title>
+  <meta name="description" content="Plataforma fiscal IA para contribuyentes RESICO 2026. Monitor de ingresos, documentos, facturación CFDI, carpeta fiscal y salud fiscal." />
   <meta name="theme-color" content="#0a1628" />
   <link rel="icon" type="image/png" href="./logo.png" />
   <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -230,14 +230,14 @@
   }
   </style>
   <!-- ============================================================ -->
-<!-- AUTH OVERLAY â€” WebThreads Background + Glassmorphism Premium -->
+<!-- AUTH OVERLAY — WebThreads Background + Glassmorphism Premium -->
 <!-- ============================================================ -->
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
 
 <style>
   /* ============================================================ */
-  /* WebThreads Canvas â€” Capa base z-index:0                      */
+  /* WebThreads Canvas — Capa base z-index:0                      */
   /* ============================================================ */
   #webthreads-canvas {
   position: fixed;
@@ -245,10 +245,10 @@
   left: 0;
   width: 100vw;
   height: 100vh;
-  z-index: -1;           /* antes: 0 â€” ahora detrÃ¡s de TODO */
+  z-index: -1;           /* antes: 0 — ahora detrás de TODO */
   display: block;
   background: #0a0118;
-  pointer-events: none;  /* antes: auto â€” ya no intercepta clics */
+  pointer-events: none;  /* antes: auto — ya no intercepta clics */
 }
 
   .auth-overlay {
@@ -260,15 +260,15 @@
   background: transparent;
   z-index: 10;
   isolation: isolate;    /* fuerza su propio stacking context */
-  pointer-events: auto;  /* explÃ­cito: el overlay SÃ recibe clics */
+  pointer-events: auto;  /* explícito: el overlay SÍ recibe clics */
   padding: 20px;
-  overflow: visible;     /* antes: hidden â€” ya no recorta el form en mÃ³vil */
+  overflow: visible;     /* antes: hidden — ya no recorta el form en móvil */
   width: 100vw;
   max-width: 100vw;
 }
 
   /* ============================================================ */
-  /* Glassmorphism â€” Tarjeta de confianza fiscal                  */
+  /* Glassmorphism — Tarjeta de confianza fiscal                  */
   /* ============================================================ */
   .auth-card {
     width: 100%;
@@ -321,7 +321,7 @@
     font-family: 'Inter', sans-serif;
   }
 
-  /* Campos dinÃ¡micos de registro */
+  /* Campos dinámicos de registro */
   .auth-field {
     margin-bottom: 16px;
     animation: authFieldFadeIn 0.35s ease;
@@ -368,7 +368,7 @@
   .auth-field-hint.invalid { color: #ef4444; }
   .auth-field-hint.neutral { color: #64748b; }
 
-  /* Contador de caracteres de contraseÃ±a */
+  /* Contador de caracteres de contraseña */
   #auth-password-strength {
     height: 4px;
     border-radius: 4px;
@@ -390,7 +390,7 @@
   }
 
   /* ============================================================ */
-  /* Mobile-First â€” iPhone 375px-390px                             */
+  /* Mobile-First — iPhone 375px-390px                             */
   /* ============================================================ */
   @media (max-width: 390px) {
     .auth-overlay {
@@ -424,17 +424,17 @@
         Aliado <span style="color:#5227FF;">RESICO</span>
       </h1>
       <p style="color:#94a3b8;font-size:13.5px;font-family:'Inter',sans-serif;margin-top:4px;">
-        Blindaje Fiscal IA Â· RESICO 2026
+        Blindaje Fiscal IA · RESICO 2026
       </p>
     </div>
 
     <div class="auth-impact-phrase">
-      ðŸ›¡ï¸ Tu blindaje fiscal contra la multa de $10,260 MXN por BuzÃ³n Inactivo empieza aquÃ­.
+      🛡️ Tu blindaje fiscal contra la multa de $10,260 MXN por Buzón Inactivo empieza aquí.
     </div>
 
     <div style="display:flex;gap:8px;margin-bottom:20px;">
       <button class="nav-btn" id="tab-login" style="flex:1;background:rgba(82,39,255,0.25);border:1px solid #5227FF;color:#e2e8f0;font-family:'Inter',sans-serif;font-weight:600;">
-        Iniciar SesiÃ³n
+        Iniciar Sesión
       </button>
       <button class="nav-btn" id="tab-register" style="flex:1;border:1px solid #475569;font-family:'Inter',sans-serif;font-weight:600;">
         Crear Cuenta
@@ -442,32 +442,32 @@
     </div>
 
     <div id="auth-loader" style="display:none;color:#94a3b8;text-align:center;padding:12px;font-family:'Inter',sans-serif;">
-      Verificando sesiÃ³n...
+      Verificando sesión...
     </div>
 
-    <!-- â”€â”€ Formulario dinÃ¡mico: campos base + campos de registro â”€â”€ -->
+    <!-- ── Formulario dinámico: campos base + campos de registro ── -->
     <form id="auth-form" autocomplete="off">
 
-      <!-- Campos exclusivos de REGISTRO (inyectados dinÃ¡micamente por JS) -->
+      <!-- Campos exclusivos de REGISTRO (inyectados dinámicamente por JS) -->
       <div id="auth-register-fields" style="display:none;"></div>
 
       <div class="auth-field">
-        <label for="auth-email">Correo electrÃ³nico</label>
+        <label for="auth-email">Correo electrónico</label>
         <input type="email" id="auth-email" placeholder="contador@despacho.com.mx" autocomplete="email">
       </div>
 
       <div class="auth-field">
-        <label for="auth-password">ContraseÃ±a</label>
+        <label for="auth-password">Contraseña</label>
         <input type="password" id="auth-password" placeholder="" autocomplete="current-password">
         <div id="auth-password-strength"><div id="auth-password-strength-fill"></div></div>
         <div id="auth-password-hint" class="auth-field-hint neutral"></div>
         <a href="#" id="auth-forgot-password" style="display:block;text-align:right;font-size:12px;margin-top:6px;color:#94a3b8;text-decoration:none;font-family:'Inter',sans-serif;">
-          Â¿Olvidaste tu contraseÃ±a?
+          ¿Olvidaste tu contraseña?
         </a>
       </div>
 
       <button type="submit" id="auth-submit" class="btn-auth" style="width:100%;font-family:'Inter',sans-serif;font-weight:600;">
-        Iniciar SesiÃ³n
+        Iniciar Sesión
       </button>
     </form>
 
@@ -499,8 +499,8 @@
         <button class="nav-btn" data-tab="wizard">Wizard</button>
         <button class="nav-btn" data-tab="classifier">Asistente IA</button>
         <button class="nav-btn" data-tab="documents">Documentos</button>
-        <button class="nav-btn" data-tab="rfc-consult">ðŸ” Consultas RFC</button>
-        <button class="nav-btn" data-tab="invoicing">FacturaciÃ³n</button>
+        <button class="nav-btn" data-tab="rfc-consult">🔍 Consultas RFC</button>
+        <button class="nav-btn" data-tab="invoicing">Facturación</button>
         <button class="nav-btn" data-tab="carpeta">Mi Carpeta Fiscal</button>
       </nav>
 
@@ -509,15 +509,15 @@
           <span style="width:8px;height:8px;background:#10b981;border-radius:50%;display:inline-block;"></span>
           <span id="user-email-display" style="font-size:14px;color:#e2e8f0;"></span>
         </div>
-        <button id="theme-toggle" style="background:transparent;border:none;font-size:20px;cursor:pointer;">ðŸŒ™</button>
-        <button id="logout-btn" hidden style="padding:6px 14px;background:rgba(239,68,68,0.15);border:1px solid #ef4444;border-radius:40px;color:#ef4444;cursor:pointer;font-size:0.82rem;font-weight:600;transition:all 0.2s;" onmouseover="this.style.background='rgba(239,68,68,0.25)'" onmouseout="this.style.background='rgba(239,68,68,0.15)'">ðŸšª Salir</button>
+        <button id="theme-toggle" style="background:transparent;border:none;font-size:20px;cursor:pointer;">🌙</button>
+        <button id="logout-btn" hidden style="padding:6px 14px;background:rgba(239,68,68,0.15);border:1px solid #ef4444;border-radius:40px;color:#ef4444;cursor:pointer;font-size:0.82rem;font-weight:600;transition:all 0.2s;" onmouseover="this.style.background='rgba(239,68,68,0.25)'" onmouseout="this.style.background='rgba(239,68,68,0.15)'">🚪 Salir</button>
       </div>
     </header>
 
     <main style="max-width:1400px;margin:0 auto;">
       <section id="dashboard-tab" class="tab-view" role="tabpanel">
         <div class="banner-edu">
-          <strong>EducaciÃ³n Fiscal 2026:</strong> ISR RESICO se calcula sobre ingresos brutos efectivamente cobrados. El IVA solo es acreditable con CFDI vÃ¡lido y gasto indispensable.
+          <strong>Educación Fiscal 2026:</strong> ISR RESICO se calcula sobre ingresos brutos efectivamente cobrados. El IVA solo es acreditable con CFDI válido y gasto indispensable.
         </div>
 
         <div class="kpi-grid">
@@ -527,11 +527,11 @@
           </article>
           <article class="glass kpi-card">
             <div id="kpi-confidence" style="font-size:28px;font-weight:700;">0%</div>
-            <div style="color:#94a3b8;">PrecisiÃ³n IA</div>
+            <div style="color:#94a3b8;">Precisión IA</div>
           </article>
           <article class="glass kpi-card">
             <div id="kpi-auto-rate" style="font-size:28px;font-weight:700;">92%</div>
-            <div style="color:#94a3b8;">ResoluciÃ³n automÃ¡tica</div>
+            <div style="color:#94a3b8;">Resolución automática</div>
           </article>
           <article class="glass kpi-card">
             <div id="kpi-response-time" style="font-size:28px;font-weight:700;">2.3s</div>
@@ -543,7 +543,7 @@
           <div style="display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;">
             <div>
               <h2 style="margin:0;">Monitor de Ingresos RESICO 2026</h2>
-              <p style="margin:4px 0 0;color:#94a3b8;">Art. 113-E LISR Â· LÃ­mite anual: $3,500,000 MXN</p>
+              <p style="margin:4px 0 0;color:#94a3b8;">Art. 113-E LISR · Límite anual: $3,500,000 MXN</p>
             </div>
             <span id="income-alert-badge" class="badge-safe">SEGURO</span>
           </div>
@@ -553,10 +553,10 @@
           </div>
 
           <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:16px;">
-            <div><span style="color:#94a3b8;font-size:13px;">Ingresado este aÃ±o</span><br /><strong id="income-current">0 MXN</strong></div>
-            <div><span style="color:#94a3b8;font-size:13px;">LÃ­mite anual</span><br /><strong id="income-limit">3,500,000 MXN</strong></div>
+            <div><span style="color:#94a3b8;font-size:13px;">Ingresado este año</span><br /><strong id="income-current">0 MXN</strong></div>
+            <div><span style="color:#94a3b8;font-size:13px;">Límite anual</span><br /><strong id="income-limit">3,500,000 MXN</strong></div>
             <div><span style="color:#94a3b8;font-size:13px;">Margen restante</span><br /><strong id="income-remaining">3,500,000 MXN</strong></div>
-            <div><span style="color:#94a3b8;font-size:13px;">ProyecciÃ³n</span><br /><strong id="projection-val">--</strong></div>
+            <div><span style="color:#94a3b8;font-size:13px;">Proyección</span><br /><strong id="projection-val">--</strong></div>
           </div>
 
           <div id="income-alert-message" style="margin-top:12px;font-size:14px;"></div>
@@ -566,20 +566,20 @@
           <h3 style="margin-top:0;">Salud Fiscal</h3>
           <div class="health-grid">
             <div class="health-item">
-              <div style="font-size:28px;">ðŸ“­</div>
-              <div><strong>BuzÃ³n Tributario</strong></div>
+              <div style="font-size:28px;">📭</div>
+              <div><strong>Buzón Tributario</strong></div>
               <div id="buzon-status" style="font-size:14px;color:#f59e0b;">Verificando...</div>
               <div style="font-size:12px;color:#94a3b8;">Multa hasta $10,260 MXN</div>
             </div>
             <div class="health-item">
-              <div style="font-size:28px;">ðŸ”</div>
+              <div style="font-size:28px;">🔐</div>
               <div><strong>e.firma SAT</strong></div>
               <div id="efirma-status" style="font-size:14px;color:#f59e0b;">Verificando...</div>
-              <div id="efirma-days" style="font-size:12px;color:#94a3b8;">-- dÃ­as restantes</div>
+              <div id="efirma-days" style="font-size:12px;color:#94a3b8;">-- días restantes</div>
             </div>
             <div class="health-item">
-              <div style="font-size:28px;">âœ…</div>
-              <div><strong>OpiniÃ³n de Cumplimiento</strong></div>
+              <div style="font-size:28px;">✅</div>
+              <div><strong>Opinión de Cumplimiento</strong></div>
               <div id="opinion-status" style="font-size:14px;color:#94a3b8;">No consultada</div>
             </div>
           </div>
@@ -594,38 +594,38 @@
 
       <section id="wizard-tab" class="tab-view" role="tabpanel" hidden>
   <div class="glass card" style="max-width:860px;margin:0 auto;">
-    <h2 style="margin-top:0;">DiagnÃ³stico Fiscal RESICO 2026</h2>
-    <p style="color:#94a3b8;">Responde 5 pasos para conocer tu situaciÃ³n fiscal, tu obligaciÃ³n anual y tu nivel de riesgo operativo.</p>
+    <h2 style="margin-top:0;">Diagnóstico Fiscal RESICO 2026</h2>
+    <p style="color:#94a3b8;">Responde 5 pasos para conocer tu situación fiscal, tu obligación anual y tu nivel de riesgo operativo.</p>
 
     <div id="wizard-msg" style="display:none;margin-bottom:14px;padding:12px;border-radius:12px;background:rgba(239,68,68,0.12);color:#fecaca;"></div>
 
     <div id="wizard-container">
       <div class="wizard-step active" data-step="1">
-        <h3>Paso 1 Â· Ingresos estimados</h3>
-        <p style="color:#94a3b8;">Â¿CuÃ¡nto estimas facturar este aÃ±o en MXN?</p>
+        <h3>Paso 1 · Ingresos estimados</h3>
+        <p style="color:#94a3b8;">¿Cuánto estimas facturar este año en MXN?</p>
         <input type="number" id="wiz-income" placeholder="Ej. 2500000" min="0" step="0.01" />
         <button class="btn-primary" onclick="wizardNext()" style="margin-top:16px;">Siguiente</button>
       </div>
 
       <div class="wizard-step" data-step="2">
-        <h3>Paso 2 Â· Ingresos mixtos y socios</h3>
-        <p style="color:#94a3b8;">Â¿Tuviste ingresos mixtos ademÃ¡s de RESICO?</p>
+        <h3>Paso 2 · Ingresos mixtos y socios</h3>
+        <p style="color:#94a3b8;">¿Tuviste ingresos mixtos además de RESICO?</p>
         <select id="wiz-mixtos">
           <option value="no">No</option>
-          <option value="si">SÃ­</option>
+          <option value="si">Sí</option>
         </select>
 
-        <p style="color:#94a3b8;margin-top:12px;">Â¿Eres socio de una Persona Moral?</p>
+        <p style="color:#94a3b8;margin-top:12px;">¿Eres socio de una Persona Moral?</p>
         <select id="wiz-socio">
           <option value="no">No</option>
-          <option value="si">SÃ­</option>
+          <option value="si">Sí</option>
         </select>
 
         <button class="btn-primary" onclick="wizardNext()" style="margin-top:16px;">Siguiente</button>
       </div>
 
       <div class="wizard-step" data-step="3">
-        <h3>Paso 3 Â· Salarios e intereses</h3>
+        <h3>Paso 3 · Salarios e intereses</h3>
         <p style="color:#94a3b8;">Captura tus salarios anuales. Si no aplica, deja 0.</p>
         <input type="number" id="wiz-salarios" placeholder="Ej. 450000" min="0" step="0.01" value="0" />
 
@@ -636,41 +636,41 @@
       </div>
 
       <div class="wizard-step" data-step="4">
-        <h3>Paso 4 Â· CFDI y BuzÃ³n Tributario</h3>
-        <p style="color:#94a3b8;">Â¿Has emitido CFDI por todas tus operaciones del mes anterior?</p>
+        <h3>Paso 4 · CFDI y Buzón Tributario</h3>
+        <p style="color:#94a3b8;">¿Has emitido CFDI por todas tus operaciones del mes anterior?</p>
         <select id="wiz-cfdi">
-          <option value="si">SÃ­, he facturado todo</option>
+          <option value="si">Sí, he facturado todo</option>
           <option value="no">No, tengo operaciones sin facturar</option>
         </select>
 
-        <p style="color:#94a3b8;margin-top:12px;">Â¿Tu BuzÃ³n Tributario estÃ¡ activo?</p>
+        <p style="color:#94a3b8;margin-top:12px;">¿Tu Buzón Tributario está activo?</p>
         <select id="wiz-buzon">
-          <option value="si">SÃ­, estÃ¡ activo</option>
-          <option value="no">No, estÃ¡ inactivo</option>
+          <option value="si">Sí, está activo</option>
+          <option value="no">No, está inactivo</option>
         </select>
 
         <button class="btn-primary" onclick="wizardNext()" style="margin-top:16px;">Siguiente</button>
       </div>
 
       <div class="wizard-step" data-step="5">
-        <h3>DiagnÃ³stico completado</h3>
+        <h3>Diagnóstico completado</h3>
 
         <div id="wizard-result" style="background:rgba(255,255,255,0.03);border-radius:12px;padding:16px;display:block;">
           <p><strong>Ingresos estimados:</strong> <span id="res-income">--</span></p>
           <p><strong>Salarios:</strong> <span id="res-salarios">--</span></p>
           <p><strong>Intereses:</strong> <span id="res-intereses">--</span></p>
-          <p><strong>DeclaraciÃ³n Anual:</strong> <span id="res-anual">--</span></p>
+          <p><strong>Declaración Anual:</strong> <span id="res-anual">--</span></p>
           <p><strong>Riesgo CFDI:</strong> <span id="res-multa">--</span></p>
-          <p><strong>BuzÃ³n Tributario:</strong> <span id="res-buzon">--</span></p>
-          <p><strong>SemÃ¡foro RESICO:</strong> <span id="res-risk">--</span></p>
-          <p><strong>Nota pedagÃ³gica:</strong> <span id="res-pedagogia">--</span></p>
+          <p><strong>Buzón Tributario:</strong> <span id="res-buzon">--</span></p>
+          <p><strong>Semáforo RESICO:</strong> <span id="res-risk">--</span></p>
+          <p><strong>Nota pedagógica:</strong> <span id="res-pedagogia">--</span></p>
           <p><strong>Observaciones:</strong> <span id="res-notas">--</span></p>
-          <p><strong>RecomendaciÃ³n:</strong> <span id="res-recomendacion">--</span></p>
+          <p><strong>Recomendación:</strong> <span id="res-recomendacion">--</span></p>
         </div>
 
         <div style="display:flex;gap:12px;flex-wrap:wrap;margin-top:16px;">
-          <button class="btn-primary" onclick="wizardNext()">Calcular diagnÃ³stico</button>
-          <button onclick="saveDiagnostic()" style="background:transparent;border:1px solid #10b981;padding:10px 20px;border-radius:40px;color:#10b981;cursor:pointer;">Guardar diagnÃ³stico</button>
+          <button class="btn-primary" onclick="wizardNext()">Calcular diagnóstico</button>
+          <button onclick="saveDiagnostic()" style="background:transparent;border:1px solid #10b981;padding:10px 20px;border-radius:40px;color:#10b981;cursor:pointer;">Guardar diagnóstico</button>
           <button onclick="resetWizard()" style="background:transparent;border:1px solid #64748b;padding:10px 20px;border-radius:40px;color:#94a3b8;cursor:pointer;">Reiniciar</button>
         </div>
       </div>
@@ -685,60 +685,60 @@
             <div style="margin-bottom:12px;font-weight:700;">Asistente Fiscal RESICO</div>
             <div id="chat-messages" style="flex:1;overflow-y:auto;margin-bottom:12px;padding:8px;background:rgba(0,0,0,0.2);border-radius:12px;max-height:400px;">
               <div style="background:rgba(16,185,129,0.15);padding:12px;border-radius:12px;color:#e2e8f0;margin-bottom:8px;">
-                Bienvenido a Aliado RESICO. Puedo ayudarte con lÃ­mite anual, anual condicional, IVA, ISR, saldo a favor y salud fiscal.
+                Bienvenido a Aliado RESICO. Puedo ayudarte con límite anual, anual condicional, IVA, ISR, saldo a favor y salud fiscal.
               </div>
             </div>
 
             <form id="classifier-form" autocomplete="off" style="display:flex;gap:8px;">
-              <input type="text" id="classifier-input" placeholder="Ej. Debo presentar declaraciÃ³n anual si solo tuve RESICO?" />
+              <input type="text" id="classifier-input" placeholder="Ej. Debo presentar declaración anual si solo tuve RESICO?" />
               <button id="classifier-submit" type="submit" class="btn-send">Enviar</button>
             </form>
           </article>
 
           <div>
             <article class="glass card" style="margin-bottom:16px;">
-              <h3 style="margin-top:0;">AnÃ¡lisis</h3>
-              <div id="classification-empty" style="color:#94a3b8;">EnvÃ­a una consulta para ver el anÃ¡lisis fiscal.</div>
+              <h3 style="margin-top:0;">Análisis</h3>
+              <div id="classification-empty" style="color:#94a3b8;">Envía una consulta para ver el análisis fiscal.</div>
               <div id="classification-content" hidden>
                 <div id="result-intent" style="font-weight:700;color:#10b981;"></div>
                 <div style="margin-top:8px;"><span style="color:#94a3b8;">Confianza:</span> <span id="result-confidence-val">0%</span></div>
-                <div style="margin-top:8px;"><span style="color:#94a3b8;">Keywords:</span> <span id="result-keywords">â€”</span></div>
-                <div style="margin-top:8px;"><span style="color:#94a3b8;">Fuente:</span> <span id="result-source">â€”</span></div>
+                <div style="margin-top:8px;"><span style="color:#94a3b8;">Keywords:</span> <span id="result-keywords">—</span></div>
+                <div style="margin-top:8px;"><span style="color:#94a3b8;">Fuente:</span> <span id="result-source">—</span></div>
               </div>
             </article>
 
             <article class="glass card">
               <h3 style="margin-top:0;">Consultas frecuentes</h3>
-              <button class="nav-btn quick-ask" data-prompt="Debo presentar declaraciÃ³n anual si solo tuve RESICO?" style="display:block;width:100%;text-align:left;margin-bottom:8px;">DeclaraciÃ³n anual</button>
-              <button class="nav-btn quick-ask" data-prompt="CobrÃ© 50000 este mes" style="display:block;width:100%;text-align:left;margin-bottom:8px;">Registrar ingreso</button>
-              <button class="nav-btn quick-ask" data-prompt="Mi buzÃ³n tributario estÃ¡ inactivo" style="display:block;width:100%;text-align:left;">BuzÃ³n Tributario</button>
+              <button class="nav-btn quick-ask" data-prompt="Debo presentar declaración anual si solo tuve RESICO?" style="display:block;width:100%;text-align:left;margin-bottom:8px;">Declaración anual</button>
+              <button class="nav-btn quick-ask" data-prompt="Cobré 50000 este mes" style="display:block;width:100%;text-align:left;margin-bottom:8px;">Registrar ingreso</button>
+              <button class="nav-btn quick-ask" data-prompt="Mi buzón tributario está inactivo" style="display:block;width:100%;text-align:left;">Buzón Tributario</button>
             </article>
           </div>
         </div>
       </section>
 
-<!-- â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
-     ONBOARDING TRIAGE PF/PM (3 pasos Â· LISR Art. 113-E Â· CFF Art. 17-K)
-     â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• -->
+<!-- ════════════════════════════════════════════════════════════
+     ONBOARDING TRIAGE PF/PM (3 pasos · LISR Art. 113-E · CFF Art. 17-K)
+     ════════════════════════════════════════════════════════════ -->
 <section id="onboarding-tab" class="tab-view" role="tabpanel" hidden>
   <div class="card">
-    <h2>ðŸ§­ Triage de Onboarding Fiscal 2026</h2>
+    <h2>🧭 Triage de Onboarding Fiscal 2026</h2>
     <p class="text-muted" id="ob-step-indicator">Paso 1 de 3</p>
     <div id="ob-msg" style="display:none;margin:10px 0;padding:10px 14px;border-radius:8px;font-size:13px;"></div>
 
     <!-- PASO 1: Tipo de persona + RFC con homoclave obligatoria -->
     <div class="wizard-step active" data-obstep="1">
-      <h3>Paso 1 Â· Tipo de Persona y RFC</h3>
-      <p class="text-muted" style="font-size:13px;">Selecciona tu rÃ©gimen fiscal. El RFC debe incluir homoclave obligatoria (Art. 29-A CFF).</p>
+      <h3>Paso 1 · Tipo de Persona y RFC</h3>
+      <p class="text-muted" style="font-size:13px;">Selecciona tu régimen fiscal. El RFC debe incluir homoclave obligatoria (Art. 29-A CFF).</p>
       <label style="display:block;margin:10px 0;padding:12px;border:1px solid #334155;border-radius:8px;cursor:pointer;">
         <input type="radio" name="ob-tipo" value="PF">
-        <strong>Persona FÃ­sica â€” RESICO (rÃ©gimen 626)</strong><br>
-        <small style="color:#94a3b8;">LÃ­mite: $3.5M anuales Â· ISR 1% a 2.5% sobre ingresos brutos</small>
+        <strong>Persona Física — RESICO (régimen 626)</strong><br>
+        <small style="color:#94a3b8;">Límite: $3.5M anuales · ISR 1% a 2.5% sobre ingresos brutos</small>
       </label>
       <label style="display:block;margin:10px 0;padding:12px;border:1px solid #334155;border-radius:8px;cursor:pointer;">
         <input type="radio" name="ob-tipo" value="PM">
-        <strong>Persona Moral â€” RESICO PM</strong><br>
-        <small style="color:#94a3b8;">LÃ­mite: $35M anuales Â· ISR 30% sobre utilidad fiscal (flujo de efectivo)</small>
+        <strong>Persona Moral — RESICO PM</strong><br>
+        <small style="color:#94a3b8;">Límite: $35M anuales · ISR 30% sobre utilidad fiscal (flujo de efectivo)</small>
       </label>
       <label style="display:block;margin-top:14px;">
         <strong>RFC (con homoclave):</strong>
@@ -747,16 +747,16 @@
       </label>
     </div>
 
-    <!-- PASO 2: Triggers de exclusiÃ³n (Art. 113-E LISR) -->
+    <!-- PASO 2: Triggers de exclusión (Art. 113-E LISR) -->
     <div class="wizard-step" data-obstep="2" hidden>
-      <h3>Paso 2 Â· Elegibilidad y Triggers de ExclusiÃ³n</h3>
-      <p class="text-muted" style="font-size:13px;">Marca las condiciones que apliquen. Si activas una exclusiÃ³n, el sistema bloquearÃ¡ el alta en RESICO.</p>
+      <h3>Paso 2 · Elegibilidad y Triggers de Exclusión</h3>
+      <p class="text-muted" style="font-size:13px;">Marca las condiciones que apliquen. Si activas una exclusión, el sistema bloqueará el alta en RESICO.</p>
       
       <div id="ob-pf-questions">
         <label style="display:block;margin:8px 0;padding:10px;border:1px solid #334155;border-radius:8px;">
           <input type="checkbox" id="ob-socios-pm">
           <strong>(PF) Soy socio/a de una Persona Moral</strong><br>
-          <small style="color:#f59e0b;">âš ï¸ ExclusiÃ³n Art. 113-E LISR: No puedes tributar en RESICO si eres socio de PM.</small>
+          <small style="color:#f59e0b;">⚠️ Exclusión Art. 113-E LISR: No puedes tributar en RESICO si eres socio de PM.</small>
         </label>
         <label style="display:block;margin:8px 0;padding:10px;border:1px solid #334155;border-radius:8px;">
           <input type="checkbox" id="ob-asimilados">
@@ -767,8 +767,8 @@
       <div id="ob-pm-questions" hidden>
         <label style="display:block;margin:8px 0;padding:10px;border:1px solid #334155;border-radius:8px;">
           <input type="checkbox" id="ob-socios-nopf">
-          <strong>(PM) Tengo socios que NO son personas fÃ­sicas</strong><br>
-          <small style="color:#f59e0b;">âš ï¸ ExclusiÃ³n: Todos los socios deben ser PF. Un solo socio PM te excluye.</small>
+          <strong>(PM) Tengo socios que NO son personas físicas</strong><br>
+          <small style="color:#f59e0b;">⚠️ Exclusión: Todos los socios deben ser PF. Un solo socio PM te excluye.</small>
         </label>
         <label style="display:block;margin:8px 0;padding:10px;border:1px solid #334155;border-radius:8px;">
           <input type="checkbox" id="ob-partes-rel">
@@ -776,55 +776,55 @@
         </label>
         <label style="display:block;margin:8px 0;padding:10px;border:1px solid #334155;border-radius:8px;">
           <input type="checkbox" id="ob-fideicomiso">
-          <strong>(PM) Opero a travÃ©s de fideicomiso o asociaciÃ³n en participaciÃ³n</strong>
+          <strong>(PM) Opero a través de fideicomiso o asociación en participación</strong>
         </label>
       </div>
     </div>
 
     <!-- PASO 3: Salud Digital (Art. 17-K, 17-D CFF) -->
     <div class="wizard-step" data-obstep="3" hidden>
-      <h3>Paso 3 Â· Salud Digital</h3>
+      <h3>Paso 3 · Salud Digital</h3>
       <label style="display:block;margin:10px 0;">
-        <strong>e.firma (Art. 17-D CFF Â· vigencia 4 aÃ±os):</strong>
+        <strong>e.firma (Art. 17-D CFF · vigencia 4 años):</strong>
         <select id="ob-efirma" style="width:100%;margin-top:6px;padding:10px;border-radius:8px;border:1px solid #334155;background:#0f172a;color:#e2e8f0;">
-          <option value="">â€” Selecciona â€”</option>
+          <option value="">— Selecciona —</option>
           <option value="vigente">Vigente</option>
-          <option value="por_vencer">Por vencer (< 30 dÃ­as)</option>
+          <option value="por_vencer">Por vencer (< 30 días)</option>
           <option value="vencida">Vencida</option>
         </select>
       </label>
       <label style="display:block;margin:10px 0;">
-        <strong>BuzÃ³n Tributario (Art. 17-K CFF):</strong>
+        <strong>Buzón Tributario (Art. 17-K CFF):</strong>
         <select id="ob-buzon" style="width:100%;margin-top:6px;padding:10px;border-radius:8px;border:1px solid #334155;background:#0f172a;color:#e2e8f0;">
-          <option value="">â€” Selecciona â€”</option>
+          <option value="">— Selecciona —</option>
           <option value="activo">Activo</option>
           <option value="inactivo">Inactivo</option>
         </select>
-        <small style="color:#ef4444;">âš ï¸ Multa de $3,420 a $10,260 MXN si estÃ¡ inactivo (Art. 86-C CFF).</small>
+        <small style="color:#ef4444;">⚠️ Multa de $3,420 a $10,260 MXN si está inactivo (Art. 86-C CFF).</small>
       </label>
     </div>
 
     <!-- Resultado final -->
     <div id="ob-result" style="display:none;margin-top:14px;"></div>
 
-    <!-- NavegaciÃ³n -->
+    <!-- Navegación -->
     <div style="display:flex;gap:8px;margin-top:16px;">
-      <button id="ob-back" class="btn-secondary">â† AtrÃ¡s</button>
-      <button id="ob-next" class="btn-primary">Siguiente â†’</button>
+      <button id="ob-back" class="btn-secondary">← Atrás</button>
+      <button id="ob-next" class="btn-primary">Siguiente →</button>
     </div>
   </div>
 </section>
 
-<!-- â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
-     MOTOR DE ALARMAS PREVENTIVAS (e.firma Â· REP Â· CFDI Global)
-     â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• -->
+<!-- ════════════════════════════════════════════════════════════
+     MOTOR DE ALARMAS PREVENTIVAS (e.firma · REP · CFDI Global)
+     ════════════════════════════════════════════════════════════ -->
 <article class="glass card" style="margin-bottom:16px;">
   <div id="preventive-alarms" hidden style="margin:10px 0;"></div>
   <h3 style="margin-top:0;">Salud Fiscal</h3>
   <div class="health-grid">
     <div class="health-item">
-      <div style="font-size:28px;">ðŸ“­</div>
-      <div><strong>BuzÃ³n Tributario</strong></div>
+      <div style="font-size:28px;">📭</div>
+      <div><strong>Buzón Tributario</strong></div>
       <div id="buzon-status" style="font-size:14px;color:#f59e0b;">Verificando...</div>
       <div style="font-size:12px;color:#94a3b8;">Multa hasta $10,260 MXN</div>
     </div>
@@ -836,7 +836,7 @@
         <div class="card" id="ocr-capture-card">
           <h3>Procesar Documento Fiscal</h3>
           <p class="text-muted">
-            Escanea con tu cÃ¡mara o sube una factura, ticket o CFDI para extraer
+            Escanea con tu cámara o sube una factura, ticket o CFDI para extraer
             RFC, subtotal, IVA, total, fecha y folio.
           </p>
           <p class="text-muted" style="font-size:13px;">
@@ -845,17 +845,17 @@
 
           <div style="margin-top:14px;display:flex;gap:8px;flex-wrap:wrap;">
             <button onclick="exportToExcel()" class="btn-secondary">
-              ðŸ“Š Descargar Excel Mensual (Papel de trabajo)
+              📊 Descargar Excel Mensual (Papel de trabajo)
             </button>
           </div>
 
-          <!-- Input dual: cÃ¡mara en mÃ³vil, selector de archivo en desktop -->
+          <!-- Input dual: cámara en móvil, selector de archivo en desktop -->
           <div class="ocr-input-row" style="display:flex;gap:10px;flex-wrap:wrap;margin:12px 0;">
             <label for="ocr-file-input" class="btn-scan-primary"
                   style="display:flex;align-items:center;gap:8px;padding:12px 20px;
                           background:#10b981;color:#fff;border-radius:8px;cursor:pointer;
                           font-weight:600;flex:1;justify-content:center;min-width:160px;">
-              ðŸ“· Escanear con cÃ¡mara
+              📷 Escanear con cámara
             </label>
             <input
               type="file"
@@ -870,7 +870,7 @@
                           background:transparent;border:1px solid #10b981;color:#10b981;
                           border-radius:8px;cursor:pointer;font-weight:600;flex:1;
                           justify-content:center;min-width:160px;">
-              ðŸ“ Subir desde galerÃ­a/PC
+              📁 Subir desde galería/PC
             </label>
             <input
               type="file"
@@ -898,7 +898,7 @@
                         border-top-color:transparent;border-radius:50%;
                         animation:ocr-spin 0.8s linear infinite;"></div>
             <span style="color:#10b981;font-weight:600;">
-              ðŸ§  Procesando... Extrayendo RFC, montos e IVA
+              🧠 Procesando... Extrayendo RFC, montos e IVA
             </span>
           </div>
 
@@ -910,11 +910,11 @@
         </div>
       </section>
 
-    <!-- â”€â”€ CONSULTAS RFC (FIX FASE 2.5.4) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ -->
+    <!-- ── CONSULTAS RFC (FIX FASE 2.5.4) ──────────────────── -->
     <section id="rfc-consult-tab" class="tab-view" hidden>
       <div class="section-header">
         <div>
-          <h2 class="section-title">ðŸ” Consultas RFC</h2>
+          <h2 class="section-title">🔍 Consultas RFC</h2>
           <p class="section-sub">Valida estructura, homoclave y lista EFOS antes de facturar</p>
         </div>
       </div>
@@ -925,13 +925,13 @@
         <div class="grid-2" style="grid-template-columns:1.2fr 0.8fr;">
           <article class="glass card">
             <h3 style="margin-top:0;">Timbrado CFDI 4.0</h3>
-            <p style="color:#94a3b8;">VersiÃ³n comercial inicial: CFDI de Ingreso y flujo preparado para REP.</p>
+            <p style="color:#94a3b8;">Versión comercial inicial: CFDI de Ingreso y flujo preparado para REP.</p>
 
             <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
               <input id="inv-rfc" type="text" placeholder="RFC receptor" maxlength="13" />
-              <input id="inv-name" type="text" placeholder="Nombre o razÃ³n social" />
-              <input id="inv-zip" type="text" placeholder="CÃ³digo postal receptor" maxlength="5" />
-              <input id="inv-regimen" type="text" placeholder="RÃ©gimen fiscal receptor" />
+              <input id="inv-name" type="text" placeholder="Nombre o razón social" />
+              <input id="inv-zip" type="text" placeholder="Código postal receptor" maxlength="5" />
+              <input id="inv-regimen" type="text" placeholder="Régimen fiscal receptor" />
               <input id="inv-uso-cfdi" type="text" placeholder="Uso CFDI, ej. G03" />
               <select id="inv-metodo-pago">
                 <option value="PUE">PUE</option>
@@ -939,7 +939,7 @@
               </select>
               <input id="inv-forma-pago" type="text" placeholder="Forma de pago, ej. 03" />
               <input id="inv-clave-prodserv" type="text" placeholder="Clave producto/servicio" />
-              <input id="inv-description" type="text" placeholder="Concepto / descripciÃ³n" />
+              <input id="inv-description" type="text" placeholder="Concepto / descripción" />
               <input id="inv-unit-price" type="number" step="0.01" placeholder="Precio unitario" />
               <input id="inv-quantity" type="number" step="0.01" value="1" placeholder="Cantidad" />
               <select id="inv-iva-type">
@@ -948,7 +948,7 @@
                 <option value="EXENTO">Exento</option>
               </select>
               <select id="inv-receptor-type">
-                <option value="PF">Persona FÃ­sica</option>
+                <option value="PF">Persona Física</option>
                 <option value="PM">Persona Moral</option>
               </select>
             </div>
@@ -972,23 +972,23 @@
   <article class="glass card" style="margin-bottom:16px;">
     <h2 style="margin-top:0;">Mi Carpeta Fiscal 2026</h2>
     <p style="color:#94a3b8;">
-      OrganizaciÃ³n mensual por Ingresos, Gastos acreditables de IVA, e.firma, Constancia y OpiniÃ³n de Cumplimiento.
+      Organización mensual por Ingresos, Gastos acreditables de IVA, e.firma, Constancia y Opinión de Cumplimiento.
     </p>
 
     <div id="carpeta-upload-grid" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:16px;margin-top:16px;">
       <div class="glass" style="padding:16px;border-radius:16px;border:1px dashed rgba(245,158,11,0.35);">
         <h3 style="margin-top:0;color:#f59e0b;">e.firma SAT</h3>
-        <p style="color:#94a3b8;font-size:14px;">Carga tus archivos .cer y .key. Al detectarlos, el dashboard simularÃ¡ vigencia de 4 aÃ±os.</p>
+        <p style="color:#94a3b8;font-size:14px;">Carga tus archivos .cer y .key. Al detectarlos, el dashboard simulará vigencia de 4 años.</p>
 
         <div id="drop-efirma-cer" class="carpeta-dropzone"
              style="padding:18px;border:1px dashed rgba(255,255,255,0.18);border-radius:14px;text-align:center;cursor:pointer;background:rgba(255,255,255,0.03);margin-bottom:12px;">
-          Arrastra aquÃ­ tu archivo .cer o haz clic para seleccionar
+          Arrastra aquí tu archivo .cer o haz clic para seleccionar
         </div>
         <input id="carpeta-efirma-cer" type="file" accept=".cer,application/pkix-cert" />
 
         <div id="drop-efirma-key" class="carpeta-dropzone"
              style="padding:18px;border:1px dashed rgba(255,255,255,0.18);border-radius:14px;text-align:center;cursor:pointer;background:rgba(255,255,255,0.03);margin:12px 0;">
-          Arrastra aquÃ­ tu archivo .key o haz clic para seleccionar
+          Arrastra aquí tu archivo .key o haz clic para seleccionar
         </div>
         <input id="carpeta-efirma-key" type="file" accept=".key,application/octet-stream" />
 
@@ -996,12 +996,12 @@
       </div>
 
       <div class="glass" style="padding:16px;border-radius:16px;border:1px dashed rgba(167,139,250,0.35);">
-        <h3 style="margin-top:0;color:#a78bfa;">Constancia de SituaciÃ³n Fiscal</h3>
+        <h3 style="margin-top:0;color:#a78bfa;">Constancia de Situación Fiscal</h3>
         <p style="color:#94a3b8;font-size:14px;">PDF o imagen de la constancia actualizada.</p>
 
         <div id="drop-constancia" class="carpeta-dropzone"
              style="padding:18px;border:1px dashed rgba(255,255,255,0.18);border-radius:14px;text-align:center;cursor:pointer;background:rgba(255,255,255,0.03);margin-bottom:12px;">
-          Arrastra aquÃ­ tu constancia o haz clic para seleccionar
+          Arrastra aquí tu constancia o haz clic para seleccionar
         </div>
 
         <input id="carpeta-constancia-file" type="file" accept=".pdf,image/*" />
@@ -1009,12 +1009,12 @@
       </div>
 
       <div class="glass" style="padding:16px;border-radius:16px;border:1px dashed rgba(244,114,182,0.35);">
-        <h3 style="margin-top:0;color:#f472b6;">OpiniÃ³n de Cumplimiento</h3>
-        <p style="color:#94a3b8;font-size:14px;">PDF o imagen de la opiniÃ³n vigente.</p>
+        <h3 style="margin-top:0;color:#f472b6;">Opinión de Cumplimiento</h3>
+        <p style="color:#94a3b8;font-size:14px;">PDF o imagen de la opinión vigente.</p>
 
         <div id="drop-opinion" class="carpeta-dropzone"
              style="padding:18px;border:1px dashed rgba(255,255,255,0.18);border-radius:14px;text-align:center;cursor:pointer;background:rgba(255,255,255,0.03);margin-bottom:12px;">
-          Arrastra aquÃ­ tu opiniÃ³n o haz clic para seleccionar
+          Arrastra aquí tu opinión o haz clic para seleccionar
         </div>
 
         <input id="carpeta-opinion-file" type="file" accept=".pdf,image/*" />
@@ -1039,18 +1039,18 @@
   </div>
 
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-<script src="js/config.js?v=920"></script>
-<script src="js/store.js?v=920"></script>
-<script src="js/webthreads.js"></script>
-<script src="js/auth.js?v=920"></script>
-<script src="js/auth-register.js?v=920"></script>
-<script src="js/classifier.js?v=920"></script>
-<script src="js/documents.js?v=920"></script>
-<script src="js/ocr.js?v=920"></script>
-<script src="js/invoicing.js"></script>
-<script src="js/FiscalWizard.js"></script>
-<script src="js/app.js?v=920"></script>
-<script src="js/rfc-consult.js"></script>
+<script src="js/config.js?v=921"></script>
+<script src="js/store.js?v=921"></script>
+<script src="js/webthreads.js?v=921"></script>
+<script src="js/auth.js?v=921"></script>
+<script src="js/auth-register.js?v=921"></script>
+<script src="js/classifier.js?v=921"></script>
+<script src="js/documents.js?v=921"></script>
+<script src="js/ocr.js?v=921"></script>
+<script src="js/invoicing.js?v=921"></script>
+<script src="js/FiscalWizard.js?v=921"></script>
+<script src="js/app.js?v=921"></script>
+<script src="js/rfc-consult.js?v=921"></script>
 <script src="https://cdn.sheetjs.com/xlsx-0.20.1/package/dist/xlsx.full.min.js"></script>
 </body>
 </html>
