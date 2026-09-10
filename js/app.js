@@ -1140,15 +1140,27 @@ const OnboardingTriage = (() => {
         eFirmaVigente: ctx.salud.efirma_vigente,
         lastAuditDate: new Date().toISOString()
       });
+
+      // PROTOCOLO PILOTO: Crear carpetas en Storage bajo /[user_id]/2026/08/
+      if (!window.APP_STATE?.isDemo && window.APP_STATE?.currentUser) {
+        window.Store?.initPilotFolders?.().then(res => {
+          console.info('[Onboarding] Carpetas piloto creadas:', res);
+        }).catch(err => {
+          console.warn('[Onboarding] Error inicializando carpetas piloto:', err);
+        });
+      }
       
-      // Mostrar resultado final
+      // Mostrar resultado final con enlace de prospección piloto
       block(`<div style="border:2px solid #10b981;background:rgba(16,185,129,.12);padding:16px;border-radius:12px;color:#d1fae5;">
         <h3 style="margin-top:0;">✅ Perfil Fiscal Registrado</h3>
         <p><strong>Tipo:</strong> ${ctx.tipo === 'PF' ? 'Persona Física (RESICO 626)' : 'Persona Moral (RESICO PM)'}</p>
         <p><strong>RFC:</strong> ${ctx.rfc}</p>
         <p><strong>Buzón:</strong> ${ctx.salud.buzon_activo ? '✅ Activo' : '⚠️ Inactivo (alerta permanente)'}</p>
         <p><strong>e.firma:</strong> ${ctx.salud.efirma_vigente ? '✅ Vigente' : '⚠️ Requiere atención'}</p>
-        <button onclick="window.App?.navigateTo?.('dashboard')" class="btn-primary" style="margin-top:12px;">Ir al Dashboard →</button>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:12px;">
+          <button onclick="window.App?.navigateTo?.('dashboard')" class="btn-primary">Ir al Dashboard →</button>
+          <button onclick="window.copyProspectingLink?.()" class="nav-btn" style="background:rgba(82,39,255,0.3);border:1px solid #5227FF;color:#fff;">🔗 Generar Enlace de Prospección / Salud Fiscal Gratuita</button>
+        </div>
       </div>`);
     }
   }
@@ -1366,3 +1378,21 @@ window.Dashboard = App.syncAndRender;
 }
 })();
 
+// Helper global para compartir enlace de prospección piloto (?ref=piloto)
+window.copyProspectingLink = function () {
+  const linkData = window.Store?.generatePilotLink?.() || {
+    url: `${window.location.origin || 'https://aliado-resico.vercel.app'}/?ref=piloto`,
+    waLink: `https://wa.me/?text=${encodeURIComponent('🛡️ Salud Fiscal RESICO Gratuita: https://aliado-resico.vercel.app/?ref=piloto')}`
+  };
+
+  if (navigator.clipboard?.writeText) {
+    navigator.clipboard.writeText(linkData.url).then(() => {
+      alert(`✅ Enlace copiado al portapapeles:\n${linkData.url}\n\nAbriendo WhatsApp...`);
+      window.open(linkData.waLink, '_blank');
+    }).catch(() => {
+      window.open(linkData.waLink, '_blank');
+    });
+  } else {
+    window.open(linkData.waLink, '_blank');
+  }
+};

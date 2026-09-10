@@ -65,26 +65,29 @@ function detectTipoPersona(rfc) {
 }
 
 // ── FASE 1: Detección de Gasolina en Efectivo (Art. 27 Fracc. III LISR) ──
+// FIX CRÍTICO-2: función de detección pura — sin efectos secundarios.
+// Anteriormente mutaba 'confidence' y 'doc' del scope externo del handler,
+// lo que lanzaba ReferenceError en Node.js strict mode (Vercel Edge).
+// El handler aplica los valores retornados al objeto doc final.
 function detectGasolinaEfectivo(parsed, fileName) {
-  const emisor = String(parsed?.nombre_emisor || '').toUpperCase();
-  const rfcEmisor = String(parsed?.rfc_emisor || '').toUpperCase();
-  const nombreArchivo = String(fileName || '').toUpperCase();
-  
   const isFuel = /GASOLIN|PEMEX|OXXO GAS|SHELL|BP\b|MOBIL|G500|COMBUSTIBLE|DIESEL|MAGNA|PREMIUM/i.test(
     `${parsed.nombre_emisor || ''} ${parsed.rfc_emisor || ''} ${parsed.concepto || ''} ${fileName}`
   );
   const paymentMethod = String(parsed.forma_pago || '').trim();
   const isCashPayment = paymentMethod === '01' || /EFECTIVO/i.test(paymentMethod);
+  const isFuelCash = isFuel && isCashPayment;
 
-  if (isFuel && isCashPayment) {
-    confidence = Math.min(confidence, 0.70); // Fuerza Verificación Humana
-    doc.safety_flag_reason = 'gasolina_efectivo';
-    doc.pedagogical_note = '⚠️ ALERTA FISCAL CRÍTICA (Art. 27 Fracc. III LISR): Gasolina pagada en EFECTIVO NO es deducible para ISR ni acreditable para IVA. El SAT invalida este gasto sin importar el monto. Debe pagarse con tarjeta, transferencia o monedero electrónico.';
-    doc.safety_flag = true;
-    doc.needs_review = true;
-  }
-    return { isFuel, isCashPayment, isFuelCash: isFuel && isCashPayment };
-  }
+  return {
+    isFuel,
+    isCashPayment,
+    isFuelCash,
+    // Nota pedagógica lista para inyectar en doc.pedagogical_note desde el handler
+    pedagogicalNote: isFuelCash
+      ? '⚠️ ALERTA FISCAL CRÍTICA (Art. 27 Fracc. III LISR): Gasolina pagada en EFECTIVO NO es deducible para ISR ni acreditable para IVA. El SAT invalida este gasto sin importar el monto. Debe pagarse con tarjeta, transferencia o monedero electrónico.'
+      : null
+  };
+}
+
 
 // ── Rate limit y JWT (idéntico a v7.0) ──────────────────────────────────
 const _rl = new Map();
@@ -281,13 +284,14 @@ export default async function handler(req, res) {
   if (tot > 0 && (!sumOk || iv > tot)) confidence = Math.min(confidence, 0.7);
 
   // ── FASE 1: Gasolina en Efectivo (Art. 27 Fracc. III LISR) ────────────
+  // FIX CRÍTICO-2: los valores se aplican aquí desde el retorno puro de detectGasolinaEfectivo()
   const fuelCheck = detectGasolinaEfectivo(parsed, fileName);
   let safety_flag_reason = null;
   let pedagogical_note_extra = null;
   if (fuelCheck.isFuelCash) {
     confidence = Math.min(confidence, 0.70);
     safety_flag_reason = 'gasolina_efectivo';
-    pedagogical_note_extra = '⚠️ ALERTA FISCAL CRÍTICA (Art. 27 Fracc. III LISR): Gasolina pagada en EFECTIVO NO es deducible para ISR ni acreditable para IVA. El SAT invalida este gasto sin importar el monto. Debe pagarse con tarjeta, transferencia o monedero electrónico.';
+    pedagogical_note_extra = fuelCheck.pedagogicalNote; // viene del retorno de la función corregida
   }
 
   // ── FASE 2: Retenciones PM → PF RESICO (Art. 113-J LISR) ──────────────
@@ -299,9 +303,11 @@ export default async function handler(req, res) {
   if (tipoEmisor === 'PF' && tipoReceptor === 'PM' && docType === 'CFDI' && sub > 0) {
     const tipoServicio = String(parsed.tipo_servicio || 'HONORARIOS').toUpperCase();
     retenciones = calcularRetencionesRESICO(tipoServicio, sub, iv);
+    // FIX WARN: campos correctos son isr_retencion e iva_retencion (no isr_retention)
     pedagogical_note_extra = (pedagogical_note_extra ? pedagogical_note_extra + ' ' : '') +
-      `💼 RETENCIONES APLICADAS (Art. 113-J LISR): La PM receptora debe retenerte ISR ${retenciones.isr_retention} MXN (1.25%) e IVA ${retenciones.iva_retention} MXN. Neto a recibir: ${retenciones.neto_a_pagar} MXN.`;
+      `💼 RETENCIONES APLICADAS (Art. 113-J LISR): La PM receptora debe retenerte ISR $${retenciones.isr_retencion} MXN (1.25%) e IVA $${retenciones.iva_retencion} MXN. Neto a recibir: $${retenciones.neto_a_pagar} MXN.`;
   }
+
 
   const safetyFlag = confidence < 0.85 || safety_flag_reason === 'gasolina_efectivo';
 

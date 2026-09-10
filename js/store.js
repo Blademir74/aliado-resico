@@ -386,24 +386,24 @@ const Store = (() => {
   }
  async function upsertMetrics() {
   if (!db || !usr?.id) return;
-  
+
+  // FIX CRÍTICO-1: income_ytd es GENERATED ALWAYS AS (cumulative_income) STORED en PostgreSQL.
+  // Incluirla en el payload genera error 428C9 y el UPSERT falla silenciosamente → amnesia de ingresos.
+  // Se escribe ÚNICAMENTE en cumulative_income; Supabase calcula income_ytd automáticamente.
   const payload = {
     user_id: usr.id,
-    income_ytd: Number(state.incomeYTD || 0),
+    cumulative_income: Number(state.incomeYTD || 0),  // columna maestra — NO income_ytd
     total_processed: Number(state.metrics?.totalProcessed || state.conversations.length || 0),
     avg_confidence: Number(state.metrics?.avgConfidence || 0),
-    // Nuevas columnas agregadas
-    cumulative_income: Number(state.incomeYTD || 0),
     annual_limit: DEFAULT_LIMIT,
     risk_level: state.fiscalMetrics.riskLevel || 'SEGURO'
   };
-  
-  try { 
-    const { error } = await db.from('fiscal_metrics').upsert(payload, { onConflict: 'user_id' }); 
-    if (error) logSupabaseError('upsertMetrics', error, payload); 
-  }
-  catch (e) { 
-    console.warn('[Store] upsertMetrics exception:', e?.message || e, payload); 
+
+  try {
+    const { error } = await db.from('fiscal_metrics').upsert(payload, { onConflict: 'user_id' });
+    if (error) logSupabaseError('upsertMetrics', error, payload);
+  } catch (e) {
+    console.warn('[Store] upsertMetrics exception:', e?.message || e, payload);
   }
 }
 
@@ -826,7 +826,9 @@ function runPreventiveAlarms() {
   // 1. ALERTA e.firma (4 años vigencia, Art. 17-D CFF)
   const expiry = state.saludFiscal?.eFirmaExpiry;
   if (expiry && expiry !== 'pendiente') {
-    const days = computeDaysRemaining(expiry);
+    // FIX CRÍTICO-3: computeDaysRemaining no existe → ReferenceError.
+    // Usar diffDaysFromToday() (declarada en línea ~199) que es idéntica.
+    const days = diffDaysFromToday(expiry);
     if (days !== null) {
       if (days <= 0) {
         alarms.push({
@@ -893,7 +895,79 @@ function runPreventiveAlarms() {
 // getPerfilFiscal, setPerfilFiscal, computeGastoTreatment, 
 // getPolizas, rebuildPolizas, runPreventiveAlarms
 
+// ════════════════════════════════════════════════════════════
+// PROTOCOLO PILOTO — 5 Clientes · Carpetas Storage + Link WhatsApp
+// ════════════════════════════════════════════════════════════
 
+/**
+ * initPilotFolders()
+ * Crea automáticamente los marcadores de carpeta en Supabase Storage
+ * bajo la ruta /[user_id]/2026/[mes]/  para Ingresos, Gastos y Pólizas.
+ * Se llama al completar el onboarding en modo producción.
+ * Usa un archivo .keep de 0 bytes como marcador (práctica estándar S3/Supabase).
+ */
+async function initPilotFolders() {
+  if (!db || !usr?.id) return { ok: false, reason: 'no_session' };
+  const supabaseUrl = window.SUPABASE_CONFIG?.url || window.AppConfig?.getSupabaseUrl?.() || '';
+  const anonKey    = window.SUPABASE_CONFIG?.anonKey || window.AppConfig?.getSupabaseKey?.() || '';
+  if (!supabaseUrl || !anonKey) return { ok: false, reason: 'no_config' };
+
+  const YEAR  = 2026;
+  const MONTH = '08';
+  const BASE  = `${usr.id}/${YEAR}/${MONTH}`;
+  const CATS  = ['Ingresos', 'Gastos', 'Polizas']; // Ingresos, Gastos, Pólizas (sin tilde para Storage)
+
+  const results = [];
+  for (const cat of CATS) {
+    const path = `${BASE}/${cat}/.keep`;
+    try {
+      const { error } = await db.storage
+        .from('carpeta-fiscal')
+        .upload(path, new Blob([''], { type: 'text/plain' }), { upsert: true });
+      results.push({ cat, path, ok: !error, error: error?.message || null });
+      if (error) console.warn(`[Store] initPilotFolders ${cat}:`, error.message);
+    } catch (e) {
+      results.push({ cat, path, ok: false, error: e.message });
+      console.warn(`[Store] initPilotFolders exception ${cat}:`, e.message);
+    }
+  }
+
+  const allOk = results.every(r => r.ok);
+  console.info('[Store] Carpetas piloto inicializadas:', results);
+  emit('pilotFoldersCreated', { results, allOk, base: BASE });
+  return { ok: allOk, results, base: BASE };
+}
+
+/**
+ * generatePilotLink(options)
+ * Genera la URL de prospección para los 5 clientes piloto.
+ * Incluye ?ref=piloto y opcionalmente el RFC del prospecto.
+ * Lista para compartir por WhatsApp/Telegram.
+ *
+ * @param {{ rfc?: string, agentName?: string, customMsg?: boolean }} options
+ * @returns {{ url: string, waText: string, waLink: string }}
+ */
+function generatePilotLink({ rfc = '', agentName = 'Tu Aliado RESICO', customMsg = true } = {}) {
+  const base  = window.location.origin || 'https://aliado-resico.vercel.app';
+  const params = new URLSearchParams({ ref: 'piloto', utm_source: 'whatsapp', utm_medium: 'referral' });
+  if (rfc) params.set('rfc', rfc.toUpperCase().trim());
+
+  const url = `${base}/?${params.toString()}`;
+
+  const msg = customMsg
+    ? `🛡️ *Salud Fiscal RESICO Gratuita* — Cortesía de ${agentName}\n\n` +
+      `👉 Ingresa en: ${url}\n\n` +
+      `✅ En 2 minutos sabrás:\n` +
+      `• Si tu e.firma está vigente o próxima a vencer\n` +
+      `• Si tu Buzón Tributario está activo\n` +
+      `• Tu nivel de riesgo vs el límite de $3,500,000 MXN\n\n` +
+      `⚠️ Sin costo · Sin registro obligatorio · 100% confidencial`
+    : url;
+
+  const waLink = `https://wa.me/?text=${encodeURIComponent(msg)}`;
+
+  return { url, waText: msg, waLink };
+}
 
   return {
     on, initSupabase, getState, getMetrics, getConversations, getSettings,
@@ -903,8 +977,9 @@ function runPreventiveAlarms() {
     saveInvoiceDocument, updateCarpetaFiscal, updateDiagnostic, reset,
     getPerfilFiscal, setPerfilFiscal, computeGastoTreatment,
     getPolizas, rebuildPolizas, runPreventiveAlarms,
-    
+    // ── Protocolo Piloto ──────────────────────────────────
+    initPilotFolders, generatePilotLink,
   };
 })();
 
-window.Store = Store;
+window.Store = Store;
